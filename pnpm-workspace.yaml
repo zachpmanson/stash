@@ -1,0 +1,2 @@
+patchedDependencies:
+  react-native-share-menu: patches/react-native-share-menu.patch

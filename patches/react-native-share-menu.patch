@@ -1,0 +1,26 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index 9557fdbf2fbf97b7f7aeaf7ce86d301a8ced213d..f9796baf3bb99b97ce58e689783ea7582ee00dc8 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -1,16 +1,16 @@
+ apply plugin: 'com.android.library'
+ 
+ android {
+-    compileSdkVersion 29
+-    buildToolsVersion "29.0.2"
++    compileSdkVersion 35
++    buildToolsVersion "35.0.0"
+ 
+     defaultConfig {
+-        minSdkVersion 16
+-        targetSdkVersion 29
++        minSdkVersion 24
++        targetSdkVersion 35
+         versionCode 1
+         versionName "1.0"
+         ndk {
+-            abiFilters "armeabi-v7a", "x86"
++            abiFilters "armeabi-v7a", "x86", "arm64-v8a", "x86_64"
+         }
+     }
+     lintOptions {

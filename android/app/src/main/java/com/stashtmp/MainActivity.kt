@@ -1,5 +1,6 @@
 package com.stashtmp
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 
@@ -11,6 +12,11 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+  override fun onNewIntent(intent: Intent?) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
