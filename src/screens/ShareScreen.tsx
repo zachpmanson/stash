@@ -11,22 +11,31 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { useShareIntentContext } from "expo-share-intent";
 import FolderSelector from "../components/FolderSelector";
+import Debug from "../components/Debug";
 import { getFolders } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
 import { processAndSaveShare } from "../utils/shareHandler";
+import { useFolderStore } from "src/state/folderState";
 
 export default function ShareScreen() {
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(400)).current;
-  const { shareIntent, resetShareIntent } = useShareIntentContext();
+  const router = useRouter();
+  const { refresh, folders } = useFolderStore();
+  const { shareIntent, resetShareIntent, hasShareIntent } = useShareIntentContext();
 
-  const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
-  const [loadingFolders, setLoadingFolders] = useState(true);
+
+  useEffect(() => {
+    if (!hasShareIntent) {
+      router.replace("/");
+    }
+  }, [hasShareIntent, router]);
 
   useEffect(() => {
     Animated.spring(slideAnim, {
@@ -36,15 +45,6 @@ export default function ShareScreen() {
       speed: 20,
     }).start();
   }, [slideAnim]);
-
-  useEffect(() => {
-    (async () => {
-      const fs = await getFolders();
-      setFolders(fs);
-      if (fs.length > 0) setSelectedIds(new Set([fs[0].id]));
-      setLoadingFolders(false);
-    })();
-  }, []);
 
   const handleDismiss = useCallback(() => {
     Animated.timing(slideAnim, {
@@ -74,8 +74,7 @@ export default function ShareScreen() {
   }, []);
 
   const handleFolderCreated = useCallback((folder: Folder) => {
-    setFolders((prev) => [folder, ...prev]);
-    setSelectedIds((prev) => new Set([...prev, folder.id]));
+    refresh().then();
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -86,6 +85,7 @@ export default function ShareScreen() {
     setSaving(true);
     try {
       await processAndSaveShare(shareIntent, [...selectedIds]);
+      refresh();
       resetShareIntent();
       BackHandler.exitApp();
     } catch (e) {
@@ -100,7 +100,7 @@ export default function ShareScreen() {
   const previewUri = isImage ? shareIntent.files![0].path : null;
   const displayText = isLink ? shareIntent.webUrl : shareIntent.text;
   const fileName = shareIntent.files?.[0]?.fileName;
-
+  console.debug(selectedIds.entries());
   return (
     <View style={styles.container}>
       <Pressable style={styles.backdrop} onPress={handleDismiss} />
@@ -120,30 +120,34 @@ export default function ShareScreen() {
           ) : isLink ? (
             <View style={styles.linkPreview}>
               <Text style={styles.linkEmoji}>🔗</Text>
-              <Text style={styles.linkUrl} numberOfLines={2}>{shareIntent.webUrl}</Text>
+              <Text style={styles.linkUrl} numberOfLines={2}>
+                {shareIntent.webUrl}
+              </Text>
             </View>
           ) : isText ? (
             <View style={styles.textPreviewBox}>
-              <Text style={styles.textPreviewContent} numberOfLines={4}>{shareIntent.text}</Text>
+              <Text style={styles.textPreviewContent} numberOfLines={4}>
+                {shareIntent.text}
+              </Text>
             </View>
           ) : (
             <View style={styles.linkPreview}>
               <Text style={styles.linkEmoji}>📎</Text>
-              <Text style={styles.linkUrl} numberOfLines={1}>{fileName ?? "File"}</Text>
+              <Text style={styles.linkUrl} numberOfLines={1}>
+                {fileName ?? "File"}
+              </Text>
             </View>
           )}
         </View>
+        <Debug>{JSON.stringify(selectedIds.values(), null, 2)} </Debug>
+        <Debug>{selectedIds.size} </Debug>
 
-        {loadingFolders ? (
-          <ActivityIndicator color={Colors.accent} style={{ marginVertical: Spacing.xl }} />
-        ) : (
-          <FolderSelector
-            folders={folders}
-            selectedIds={selectedIds}
-            onToggle={toggleFolder}
-            onFolderCreated={handleFolderCreated}
-          />
-        )}
+        <FolderSelector
+          folders={folders}
+          selectedIds={selectedIds}
+          onToggle={toggleFolder}
+          onFolderCreated={handleFolderCreated}
+        />
 
         <Pressable
           style={({ pressed }) => [styles.saveBtn, saving && styles.saveBtnDisabled, pressed && styles.saveBtnPressed]}
@@ -153,9 +157,7 @@ export default function ShareScreen() {
           {saving ? (
             <ActivityIndicator color={Colors.white} />
           ) : (
-            <Text style={styles.saveBtnText}>
-              Save{selectedIds.size > 1 ? ` to ${selectedIds.size} folders` : ""}
-            </Text>
+            <Text style={styles.saveBtnText}>Save{selectedIds.size > 1 ? ` to ${selectedIds.size} folders` : ""}</Text>
           )}
         </Pressable>
       </Animated.View>

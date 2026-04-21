@@ -1,13 +1,17 @@
-export type ItemType = 'image' | 'url' | 'text' | 'file';
+export type ItemType = "image" | "url" | "text" | "file";
 
-export interface Folder {
+export type Folder = {
   id: string;
   name: string;
   created_at: number;
   last_used_at: number;
   archived_at: number | null;
   item_count?: number;
-}
+};
+
+export type SelectableFolder = Folder & {
+  isSelected?: boolean;
+};
 
 export interface StashItem {
   id: string;
@@ -22,7 +26,6 @@ export interface StashItem {
   archived_at: number | null;
   folder_ids?: string[];
 }
-
 
 export interface LinkPreview {
   title: string | null;

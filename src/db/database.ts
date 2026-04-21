@@ -1,13 +1,24 @@
-import * as SQLite from 'expo-sqlite';
+import * as SQLite from "expo-sqlite";
 
 let db: SQLite.SQLiteDatabase | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-export async function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync('stash.db');
-    await initSchema(db);
+export function getDb(): Promise<SQLite.SQLiteDatabase> {
+  if (db) return Promise.resolve(db);
+  if (!dbPromise) {
+    dbPromise = SQLite.openDatabaseAsync("stash.db")
+      .then(async (database) => {
+        await initSchema(database);
+        db = database;
+        return db;
+      })
+      .catch((e) => {
+        dbPromise = null;
+        console.error(e);
+        throw e;
+      });
   }
-  return db;
+  return dbPromise;
 }
 
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
@@ -18,6 +29,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS folders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      icon TEXT,
       created_at INTEGER NOT NULL,
       last_used_at INTEGER NOT NULL,
       archived_at INTEGER DEFAULT NULL
@@ -51,13 +63,15 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
   // Seed default Inbox folder if empty
   const row = await db.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) as count FROM folders WHERE archived_at IS NULL'
+    "SELECT COUNT(*) as count FROM folders WHERE archived_at IS NULL",
   );
   if (!row || row.count === 0) {
     const now = Date.now();
-    await db.runAsync(
-      'INSERT OR IGNORE INTO folders (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)',
-      ['inbox', 'Inbox', now, now]
-    );
+    await db.runAsync("INSERT OR IGNORE INTO folders (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)", [
+      "inbox",
+      "Inbox",
+      now,
+      now,
+    ]);
   }
 }

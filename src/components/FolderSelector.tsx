@@ -3,6 +3,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { createFolder } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
+import FolderGrid from "./FolderGrid";
+import Debug from "./Debug";
 
 interface Props {
   folders: Folder[];
@@ -11,7 +13,7 @@ interface Props {
   onFolderCreated: (folder: Folder) => void;
 }
 
-export default function FolderSelector({ folders, selectedIds, onToggle, onFolderCreated }: Props) {
+export default function FolderSelector({ folders, onToggle, onFolderCreated }: Props) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -31,25 +33,17 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Save to</Text>
+
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-        {folders.map((folder) => {
-          const checked = selectedIds.has(folder.id);
-          return (
-            <Pressable
-              key={folder.id}
-              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              onPress={() => onToggle(folder.id)}
-            >
-              <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-                {checked && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={styles.folderName} numberOfLines={1}>
-                {folder.name}
-              </Text>
-              {folder.item_count !== undefined && <Text style={styles.folderCount}>{folder.item_count}</Text>}
-            </Pressable>
-          );
-        })}
+        <FolderGrid
+          onFolderPress={(folder) => {
+            onToggle(folder.id);
+          }}
+          onFolderLongPress={() => {}}
+          selectMethod="tap"
+        />
+
+        <Text style={{ color: "white" }}>{JSON.stringify(folders, null, 2)}</Text>
       </ScrollView>
 
       <View style={styles.newFolderRow}>
@@ -85,46 +79,28 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    // flex: 1,
   },
   label: {
     ...Typography.label,
     marginBottom: Spacing.sm,
-    paddingHorizontal: Spacing.md,
+    // paddingHorizontal: Spacing.md,
   },
   list: {
-    maxHeight: 240,
-    paddingHorizontal: Spacing.sm,
+    maxHeight: 340,
+    // paddingHorizontal: Spacing.sm,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 12,
-    paddingHorizontal: Spacing.sm,
+    // paddingHorizontal: Spacing.sm,
     borderRadius: Radius.md,
   },
   rowPressed: {
     backgroundColor: Colors.surface2,
   },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: Spacing.sm,
-  },
-  checkboxChecked: {
-    backgroundColor: Colors.accent,
-    borderColor: Colors.accent,
-  },
-  checkmark: {
-    color: Colors.white,
-    fontSize: 14,
-    fontWeight: "700",
-  },
+
   folderName: {
     ...Typography.body,
     flex: 1,
@@ -136,7 +112,7 @@ const styles = StyleSheet.create({
   newFolderRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: Spacing.md,
+    // paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
     gap: Spacing.sm,
     borderTopWidth: 1,

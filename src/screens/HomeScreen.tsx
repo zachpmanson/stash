@@ -1,69 +1,42 @@
 import IconButton from "@/components/IconButton";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
-import {
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import FolderCard from "../components/FolderCard";
 import { archiveFolder, createFolder, getFolders } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
-
-const NUM_COLUMNS = 2;
+import { useFolderStore } from "src/state/folderState";
+import FolderGrid from "src/components/FolderGrid";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [newFolderVisible, setNewFolderVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const inputRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
-
-
-  const loadFolders = useCallback(async () => {
-    const fs = await getFolders();
-    setFolders(fs);
-  }, []);
-
-  useFocusEffect(useCallback(() => {
-    loadFolders();
-  }, [loadFolders]));
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadFolders();
-    setRefreshing(false);
-  }, [loadFolders]);
+  const { refresh } = useFolderStore();
 
   const handleLongPress = useCallback(
     (folder: Folder) => {
       Alert.alert(folder.name, undefined, [
         {
           text: "Rename",
-          onPress: () => router.push({ pathname: '/edit-folder/[id]', params: { id: folder.id, folderName: folder.name } }),
+          onPress: () =>
+            router.push({ pathname: "/edit-folder/[id]", params: { id: folder.id, folderName: folder.name } }),
         },
         {
           text: "Archive",
           style: "destructive",
           onPress: async () => {
             await archiveFolder(folder.id);
-            loadFolders();
+            refresh();
           },
         },
         { text: "Cancel", style: "cancel" },
       ]);
     },
-    [router, loadFolders],
+    [router, refresh],
   );
 
   const handleNewFolder = useCallback(() => {
@@ -75,21 +48,10 @@ export default function HomeScreen() {
     const name = newFolderName.trim();
     if (name) {
       await createFolder(String(Date.now()), name);
-      loadFolders();
+      refresh();
     }
     setNewFolderVisible(false);
-  }, [newFolderName, loadFolders]);
-
-  const renderFolder = useCallback(
-    ({ item }: { item: Folder }) => (
-      <FolderCard
-        folder={item}
-        onPress={() => router.push({ pathname: '/folder/[id]', params: { id: item.id, folderName: item.name } })}
-        onLongPress={() => handleLongPress(item)}
-      />
-    ),
-    [router, handleLongPress],
-  );
+  }, [newFolderName, refresh]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -129,30 +91,21 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Stash</Text>
         <View style={styles.headerActions}>
-          <IconButton onPress={() => router.push('/archive')}>🗃️</IconButton>
+          <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
           <IconButton style={[styles.addBtn]} onPress={handleNewFolder}>
             <Text style={styles.addBtnText}>+</Text>
           </IconButton>
         </View>
       </View>
-
-      <FlatList
-        data={folders}
-        keyExtractor={(item) => item.id}
-        renderItem={renderFolder}
-        numColumns={NUM_COLUMNS}
-        contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + Spacing.xl }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📦</Text>
-            <Text style={styles.emptyTitle}>No folders yet</Text>
-            <Text style={styles.emptyBody}>
-              Share anything from another app to save it here, or tap + to create a folder.
-            </Text>
-          </View>
-        }
-      />
+      <View style={[styles.gridContainer]}>
+        <FolderGrid
+          onFolderLongPress={handleLongPress}
+          onFolderPress={(item) =>
+            router.push({ pathname: "/folder/[id]", params: { id: item.id, folderName: item.name } })
+          }
+          // onLongPress={() => handleLongPress(item)}
+        />
+      </View>
     </View>
   );
 }
@@ -161,6 +114,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.bg,
+  },
+  gridContainer: {
+    paddingHorizontal: Spacing.xs,
   },
   header: {
     flexDirection: "row",
@@ -189,31 +145,7 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     lineHeight: 28,
   },
-  grid: {
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.xs,
-  },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-    paddingHorizontal: Spacing.xl,
-  },
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: Spacing.md,
-  },
-  emptyTitle: {
-    ...Typography.subheading,
-    marginBottom: Spacing.sm,
-  },
-  emptyBody: {
-    ...Typography.body,
-    color: Colors.textSecondary,
-    textAlign: "center",
-    lineHeight: 22,
-  },
+
   overlay: {
     flex: 1,
     backgroundColor: Colors.overlay,

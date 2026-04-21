@@ -1,12 +1,12 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Colors, Radius, Spacing, Typography } from "../theme";
-import { Folder } from "../types";
+import { Folder, SelectableFolder } from "../types";
 
 interface Props {
-  folder: Folder;
-  onPress: () => void;
-  onLongPress?: () => void;
+  folder: SelectableFolder;
+  onPress: (folder: Folder) => void;
+  onLongPress?: (folder: Folder) => void;
 }
 
 const FOLDER_ICONS: Record<string, string> = {
@@ -50,9 +50,9 @@ function getIcon(name: string, id: string): string {
 export default function FolderCard({ folder, onPress, onLongPress }: Props) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-      onPress={onPress}
-      onLongPress={onLongPress}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed, folder.isSelected && styles.selected]}
+      onPress={() => onPress?.(folder)}
+      onLongPress={() => onLongPress?.(folder)}
       android_ripple={{ color: Colors.accentDim }}
     >
       <View style={styles.iconWrap}>
@@ -81,6 +81,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.75,
+  },
+  selected: {
+    backgroundColor: Colors.accent,
   },
   iconWrap: {
     width: 48,
