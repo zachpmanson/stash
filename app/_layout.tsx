@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StatusBar } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -22,19 +22,22 @@ const NAV_THEME = {
 function RootLayout() {
   const router = useRouter();
   const { hasShareIntent } = useShareIntentContext();
-  const [dbReady, setDbReady] = useState(false);
+  const dbReady = useRef(false);
 
   useEffect(() => {
-    getDb().then(() => setDbReady(true));
+    getDb().then(() => {
+      dbReady.current = true;
+      if (hasShareIntent) {
+        router.replace('/share');
+      }
+    });
   }, []);
 
   useEffect(() => {
-    if (dbReady && hasShareIntent) {
+    if (dbReady.current && hasShareIntent) {
       router.replace('/share');
     }
-  }, [dbReady, hasShareIntent]);
-
-  if (!dbReady) return null;
+  }, [hasShareIntent]);
 
   return (
     <ThemeProvider value={NAV_THEME}>
