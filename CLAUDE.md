@@ -44,7 +44,7 @@ When a user shares content from another app:
 
 ### State Management
 
-No global state library. Each screen fetches its own data (usually on mount and on `useFocusEffect` when navigating back). Screens lift state locally; no cross-screen shared state beyond the DB.
+It uses zustand for state management.
 
 ### Path Alias
 
