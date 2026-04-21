@@ -28,11 +28,12 @@ export default function ShareScreen() {
   const { refresh, folders } = useFolderStore();
   const { shareIntent, resetShareIntent, hasShareIntent } = useShareIntentContext();
 
+  const dismissing = useRef(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!hasShareIntent) {
+    if (!hasShareIntent && !dismissing.current) {
       router.replace("/");
     }
   }, [hasShareIntent, router]);
@@ -47,6 +48,7 @@ export default function ShareScreen() {
   }, [slideAnim]);
 
   const handleDismiss = useCallback(() => {
+    dismissing.current = true;
     Animated.timing(slideAnim, {
       toValue: 400,
       duration: 200,
@@ -66,6 +68,7 @@ export default function ShareScreen() {
   }, [handleDismiss]);
 
   const toggleFolder = useCallback((id: string) => {
+    console.debug(`Debugging ${id}`);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -100,7 +103,7 @@ export default function ShareScreen() {
   const previewUri = isImage ? shareIntent.files![0].path : null;
   const displayText = isLink ? shareIntent.webUrl : shareIntent.text;
   const fileName = shareIntent.files?.[0]?.fileName;
-  console.debug(selectedIds.entries());
+  console.debug("selectedIds", selectedIds.values());
   return (
     <View style={styles.container}>
       <Pressable style={styles.backdrop} onPress={handleDismiss} />
@@ -139,8 +142,8 @@ export default function ShareScreen() {
             </View>
           )}
         </View>
-        <Debug>{JSON.stringify(selectedIds.values(), null, 2)} </Debug>
-        <Debug>{selectedIds.size} </Debug>
+        {/* <Debug>{JSON.stringify(selectedIds.values(), null, 2)} </Debug> */}
+        {/* <Debug>{selectedIds.size} </Debug> */}
 
         <FolderSelector
           folders={folders}

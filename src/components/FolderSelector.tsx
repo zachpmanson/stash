@@ -13,7 +13,7 @@ interface Props {
   onFolderCreated: (folder: Folder) => void;
 }
 
-export default function FolderSelector({ folders, onToggle, onFolderCreated }: Props) {
+export default function FolderSelector({ folders, selectedIds, onToggle, onFolderCreated }: Props) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -40,7 +40,7 @@ export default function FolderSelector({ folders, onToggle, onFolderCreated }: P
             onToggle(folder.id);
           }}
           onFolderLongPress={() => {}}
-          selectMethod="tap"
+          selectedIds={selectedIds}
         />
 
         <Text style={{ color: "white" }}>{JSON.stringify(folders, null, 2)}</Text>

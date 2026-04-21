@@ -1,7 +1,7 @@
 import { Alert, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import FolderCard from "../components/FolderCard";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Folder, SelectableFolder } from "../types";
+import { Folder } from "../types";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Colors, Spacing, Typography } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,45 +12,32 @@ const NUM_COLUMNS = 2;
 export default function FolderGrid({
   onFolderPress,
   onFolderLongPress,
-  selectMethod,
+  selectedIds,
 }: {
   onFolderPress: (folder: Folder) => void;
   onFolderLongPress: (folder: Folder) => void;
-  selectMethod?: "tap" | "long";
+  selectedIds?: Set<string>;
 }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const { folders, refresh } = useFolderStore();
 
-  const [folderSelectState, setFolderSelectState] = useState<SelectableFolder[]>([]);
-  useEffect(() => {
-    setFolderSelectState(folders);
-  }, [folders]);
-
   const [refreshing, setRefreshing] = useState(false);
 
-  function toggleSelect(id: string) {
-    setFolderSelectState((old) => {
-      return old.map((o) => (o.id === id ? { ...o, isSelected: !o.isSelected } : o));
-    });
-  }
-
   const renderFolder = useCallback(
-    ({ item }: { item: SelectableFolder }) => (
+    ({ item }: { item: Folder }) => (
       <FolderCard
-        folder={item}
+        folder={{ ...item, isSelected: selectedIds?.has(item.id) ?? false }}
         onPress={(folder) => {
-          if (selectMethod === "tap") toggleSelect(folder.id);
           onFolderPress(folder);
         }}
         onLongPress={(folder) => {
-          if (selectMethod === "long") toggleSelect(folder.id);
           onFolderLongPress(folder);
         }}
       />
     ),
-    [router, onFolderLongPress],
+    [onFolderPress, onFolderLongPress, selectedIds],
   );
 
   const onRefresh = useCallback(async () => {
@@ -67,7 +54,7 @@ export default function FolderGrid({
 
   return (
     <FlatList
-      data={folderSelectState}
+      data={folders}
       keyExtractor={(item) => item.id}
       renderItem={renderFolder}
       numColumns={NUM_COLUMNS}
