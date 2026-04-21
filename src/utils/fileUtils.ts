@@ -1,24 +1,12 @@
 import { Directory, File, Paths } from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
 
 const stashDir = new Directory(Paths.document, "stash");
 
 export async function copyFileToStash(uri: string, filename: string): Promise<string> {
-  await stashDir.create({ intermediates: true });
-
-  const asset = await MediaLibrary.getAssetInfoAsync(uri);
-
-  if (!asset.localUri) {
-    throw new Error("Cannot resolve MediaStore asset to local file");
-  }
-
+  stashDir.create({ intermediates: true, idempotent: true });
+  const source = new File(uri);
   const dest = new File(stashDir, filename);
-
-  const res = await fetch(asset.localUri);
-  const buffer = await res.arrayBuffer();
-
-  await dest.write(buffer);
-
+  source.copy(dest);
   return dest.uri;
 }
 export async function deleteStashFile(fileUri: string): Promise<void> {

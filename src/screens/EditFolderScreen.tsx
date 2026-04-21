@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Spacing, Typography, Radius } from '../theme';
 import { updateFolderName } from '../db/folders';
-import { RootStackParamList } from '../navigation/types';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'EditFolder'>;
-
-export default function EditFolderScreen({ route, navigation }: Props) {
-  const { folderId, folderName } = route.params;
+export default function EditFolderScreen() {
+  const { id: folderId, folderName } = useLocalSearchParams<{ id: string; folderName: string }>();
+  const router = useRouter();
   const [name, setName] = useState(folderName);
   const insets = useSafeAreaInsets();
 
@@ -20,7 +18,7 @@ export default function EditFolderScreen({ route, navigation }: Props) {
       return;
     }
     await updateFolderName(folderId, trimmed);
-    navigation.goBack();
+    router.back();
   };
 
   return (

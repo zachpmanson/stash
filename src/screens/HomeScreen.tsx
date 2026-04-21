@@ -1,6 +1,6 @@
 import IconButton from "@/components/IconButton";
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -10,38 +10,34 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import FolderCard from "../components/FolderCard";
 import { archiveFolder, createFolder, getFolders } from "../db/folders";
-import { RootStackParamList } from "../navigation/types";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Home">;
-
 const NUM_COLUMNS = 2;
 
-export default function HomeScreen({ navigation }: Props) {
+export default function HomeScreen() {
+  const router = useRouter();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [newFolderVisible, setNewFolderVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const inputRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+
 
   const loadFolders = useCallback(async () => {
     const fs = await getFolders();
     setFolders(fs);
   }, []);
 
-  useEffect(() => {
-    const unsub = navigation.addListener("focus", loadFolders);
-    return unsub;
-  }, [navigation, loadFolders]);
+  useFocusEffect(useCallback(() => {
+    loadFolders();
+  }, [loadFolders]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -54,7 +50,7 @@ export default function HomeScreen({ navigation }: Props) {
       Alert.alert(folder.name, undefined, [
         {
           text: "Rename",
-          onPress: () => navigation.navigate("EditFolder", { folderId: folder.id, folderName: folder.name }),
+          onPress: () => router.push({ pathname: '/edit-folder/[id]', params: { id: folder.id, folderName: folder.name } }),
         },
         {
           text: "Archive",
@@ -67,7 +63,7 @@ export default function HomeScreen({ navigation }: Props) {
         { text: "Cancel", style: "cancel" },
       ]);
     },
-    [navigation, loadFolders],
+    [router, loadFolders],
   );
 
   const handleNewFolder = useCallback(() => {
@@ -84,17 +80,15 @@ export default function HomeScreen({ navigation }: Props) {
     setNewFolderVisible(false);
   }, [newFolderName, loadFolders]);
 
-  const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 2 * NUM_COLUMNS) / NUM_COLUMNS;
-
   const renderFolder = useCallback(
     ({ item }: { item: Folder }) => (
       <FolderCard
         folder={item}
-        onPress={() => navigation.navigate("Folder", { folderId: item.id, folderName: item.name })}
+        onPress={() => router.push({ pathname: '/folder/[id]', params: { id: item.id, folderName: item.name } })}
         onLongPress={() => handleLongPress(item)}
       />
     ),
-    [navigation, handleLongPress],
+    [router, handleLongPress],
   );
 
   return (
@@ -135,7 +129,7 @@ export default function HomeScreen({ navigation }: Props) {
       <View style={styles.header}>
         <Text style={styles.title}>Stash</Text>
         <View style={styles.headerActions}>
-          <IconButton onPress={() => navigation.navigate("Archive")}>🗃️</IconButton>
+          <IconButton onPress={() => router.push('/archive')}>🗃️</IconButton>
           <IconButton style={[styles.addBtn]} onPress={handleNewFolder}>
             <Text style={styles.addBtnText}>+</Text>
           </IconButton>

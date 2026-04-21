@@ -3,17 +3,14 @@ import {
   View, Text, StyleSheet, FlatList, Pressable, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, Typography, Radius } from '../theme';
 import { Folder } from '../types';
 import { getFolders } from '../db/folders';
 import { getItemById, addItemToFolder, removeItemFromFolder } from '../db/items';
-import { RootStackParamList } from '../navigation/types';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'MoveItem'>;
-
-export default function MoveItemScreen({ route, navigation }: Props) {
-  const { itemId } = route.params;
+export default function MoveItemScreen() {
+  const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [currentFolderIds, setCurrentFolderIds] = useState<Set<string>>(new Set());
   const insets = useSafeAreaInsets();

@@ -5,16 +5,14 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Spacing, Typography, Radius } from '../theme';
 import { StashItem } from '../types';
 import { getItemById, archiveItem } from '../db/items';
-import { RootStackParamList } from '../navigation/types';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'ItemDetail'>;
-
-export default function ItemDetailScreen({ route, navigation }: Props) {
-  const { itemId } = route.params;
+export default function ItemDetailScreen() {
+  const { id: itemId } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
   const insets = useSafeAreaInsets();
 
@@ -51,18 +49,17 @@ export default function ItemDetailScreen({ route, navigation }: Props) {
         style: 'destructive',
         onPress: async () => {
           await archiveItem(item.id);
-          navigation.goBack();
+          router.back();
         },
       },
     ]);
-  }, [item, navigation]);
+  }, [item, router]);
 
   if (!item) return null;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}>
-        {/* Media preview */}
         {item.type === 'image' && (
           <Image
             source={{ uri: item.uri }}
@@ -80,7 +77,6 @@ export default function ItemDetailScreen({ route, navigation }: Props) {
         )}
 
         <View style={styles.body}>
-          {/* Title / URL */}
           {item.title ? (
             <Text style={styles.title}>{item.title}</Text>
           ) : null}
@@ -103,7 +99,6 @@ export default function ItemDetailScreen({ route, navigation }: Props) {
             Saved {new Date(item.created_at).toLocaleString()}
           </Text>
 
-          {/* Actions */}
           <View style={styles.actions}>
             {item.type === 'url' && (
               <>

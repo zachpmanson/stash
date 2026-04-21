@@ -4,7 +4,6 @@ import {
   Alert,
   Animated,
   BackHandler,
-  Modal,
   Pressable,
   Image as RNImage,
   StyleSheet,
@@ -12,21 +11,17 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useShareIntentContext } from "expo-share-intent";
 import FolderSelector from "../components/FolderSelector";
 import { getFolders } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
-import { Folder, ShareData } from "../types";
-import { detectItemType, processAndSaveShare } from "../utils/shareHandler";
+import { Folder } from "../types";
+import { processAndSaveShare } from "../utils/shareHandler";
 
-interface Props {
-  shareData: ShareData;
-  onSaved: () => void;
-  onDismiss: () => void;
-}
-
-export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
+export default function ShareScreen() {
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(400)).current;
+  const { shareIntent, resetShareIntent } = useShareIntentContext();
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -51,21 +46,24 @@ export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
     })();
   }, []);
 
+  const handleDismiss = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: 400,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      resetShareIntent();
+      BackHandler.exitApp();
+    });
+  }, [slideAnim, resetShareIntent]);
+
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       handleDismiss();
       return true;
     });
     return () => sub.remove();
-  }, []);
-
-  const handleDismiss = useCallback(() => {
-    Animated.timing(slideAnim, {
-      toValue: 400,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(onDismiss);
-  }, [slideAnim, onDismiss]);
+  }, [handleDismiss]);
 
   const toggleFolder = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -87,21 +85,24 @@ export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
     }
     setSaving(true);
     try {
-      await processAndSaveShare(shareData, [...selectedIds]);
-      onSaved();
+      await processAndSaveShare(shareIntent, [...selectedIds]);
+      resetShareIntent();
+      BackHandler.exitApp();
     } catch (e) {
       setSaving(false);
       Alert.alert("Error", `Failed to save item. ${e}`);
     }
-  }, [shareData, selectedIds, onSaved]);
+  }, [shareIntent, selectedIds, resetShareIntent]);
 
-  const itemType = detectItemType(shareData.mimeType, shareData.data);
-  const isImage = itemType === "image";
-  const isLink = itemType === "url";
-  const isText = itemType === "text";
+  const isImage = shareIntent.type === "media" && !!shareIntent.files?.[0]?.mimeType?.startsWith("image/");
+  const isLink = shareIntent.type === "weburl";
+  const isText = shareIntent.type === "text";
+  const previewUri = isImage ? shareIntent.files![0].path : null;
+  const displayText = isLink ? shareIntent.webUrl : shareIntent.text;
+  const fileName = shareIntent.files?.[0]?.fileName;
 
   return (
-    <Modal transparent animationType="none" onRequestClose={handleDismiss}>
+    <View style={styles.container}>
       <Pressable style={styles.backdrop} onPress={handleDismiss} />
 
       <Animated.View
@@ -113,34 +114,26 @@ export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
       >
         <View style={styles.handle} />
 
-        {/* Preview */}
         <View style={styles.previewSection}>
-          {isImage ? (
-            <RNImage source={{ uri: shareData.data }} style={styles.imagePreview} resizeMode="cover" />
+          {isImage && previewUri ? (
+            <RNImage source={{ uri: previewUri }} style={styles.imagePreview} resizeMode="cover" />
           ) : isLink ? (
             <View style={styles.linkPreview}>
               <Text style={styles.linkEmoji}>🔗</Text>
-              <Text style={styles.linkUrl} numberOfLines={2}>
-                {shareData.data}
-              </Text>
+              <Text style={styles.linkUrl} numberOfLines={2}>{shareIntent.webUrl}</Text>
             </View>
           ) : isText ? (
             <View style={styles.textPreviewBox}>
-              <Text style={styles.textPreviewContent} numberOfLines={4}>
-                {shareData.data}
-              </Text>
+              <Text style={styles.textPreviewContent} numberOfLines={4}>{shareIntent.text}</Text>
             </View>
           ) : (
             <View style={styles.linkPreview}>
               <Text style={styles.linkEmoji}>📎</Text>
-              <Text style={styles.linkUrl} numberOfLines={1}>
-                {shareData.data.split("/").pop() ?? "File"}
-              </Text>
+              <Text style={styles.linkUrl} numberOfLines={1}>{fileName ?? "File"}</Text>
             </View>
           )}
         </View>
 
-        {/* Folder picker */}
         {loadingFolders ? (
           <ActivityIndicator color={Colors.accent} style={{ marginVertical: Spacing.xl }} />
         ) : (
@@ -152,7 +145,6 @@ export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
           />
         )}
 
-        {/* Save button */}
         <Pressable
           style={({ pressed }) => [styles.saveBtn, saving && styles.saveBtnDisabled, pressed && styles.saveBtnPressed]}
           onPress={handleSave}
@@ -161,17 +153,23 @@ export default function ShareScreen({ shareData, onSaved, onDismiss }: Props) {
           {saving ? (
             <ActivityIndicator color={Colors.white} />
           ) : (
-            <Text style={styles.saveBtnText}>Save{selectedIds.size > 1 ? ` to ${selectedIds.size} folders` : ""}</Text>
+            <Text style={styles.saveBtnText}>
+              Save{selectedIds.size > 1 ? ` to ${selectedIds.size} folders` : ""}
+            </Text>
           )}
         </Pressable>
       </Animated.View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+  },
   backdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: Colors.overlay,
   },
   sheet: {

@@ -1,22 +1,20 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, Alert, RefreshControl,
   useWindowDimensions, FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Colors, Spacing, Typography, Radius } from '../theme';
+import { useLocalSearchParams, useRouter, useFocusEffect, Stack } from 'expo-router';
+import { Colors, Spacing, Typography } from '../theme';
 import { StashItem } from '../types';
 import { getItemsInFolder, archiveItem } from '../db/items';
 import ItemCard from '../components/ItemCard';
-import { RootStackParamList } from '../navigation/types';
-
-type Props = NativeStackScreenProps<RootStackParamList, 'Folder'>;
 
 const NUM_COLUMNS = 2;
 
-export default function FolderScreen({ route, navigation }: Props) {
-  const { folderId, folderName } = route.params;
+export default function FolderScreen() {
+  const { id: folderId, folderName } = useLocalSearchParams<{ id: string; folderName: string }>();
+  const router = useRouter();
   const [items, setItems] = useState<StashItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
@@ -27,11 +25,9 @@ export default function FolderScreen({ route, navigation }: Props) {
     setItems(data);
   }, [folderId]);
 
-  useEffect(() => {
-    navigation.setOptions({ title: folderName });
-    const unsub = navigation.addListener('focus', loadItems);
-    return unsub;
-  }, [navigation, folderName, loadItems]);
+  useFocusEffect(useCallback(() => {
+    loadItems();
+  }, [loadItems]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -51,11 +47,11 @@ export default function FolderScreen({ route, navigation }: Props) {
       },
       {
         text: 'Move to folder…',
-        onPress: () => navigation.navigate('MoveItem', { itemId: item.id }),
+        onPress: () => router.push({ pathname: '/move-item/[id]', params: { id: item.id } }),
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
-  }, [navigation, loadItems]);
+  }, [router, loadItems]);
 
   const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 2 * NUM_COLUMNS) / NUM_COLUMNS;
 
@@ -63,13 +59,14 @@ export default function FolderScreen({ route, navigation }: Props) {
     <ItemCard
       item={item}
       width={cardWidth}
-      onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+      onPress={() => router.push({ pathname: '/item/[id]', params: { id: item.id } })}
       onLongPress={() => handleLongPress(item)}
     />
-  ), [cardWidth, navigation, handleLongPress]);
+  ), [cardWidth, router, handleLongPress]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ title: folderName }} />
       <FlatList
         data={items}
         keyExtractor={item => item.id}

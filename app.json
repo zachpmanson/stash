@@ -3,6 +3,7 @@
     "name": "stash",
     "slug": "stash",
     "version": "1.0.0",
+    "scheme": "stash",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -12,37 +13,42 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a1a2e"
       },
-      "intentFilters": [
-        {
-          "action": "SEND",
-          "category": ["DEFAULT"],
-          "data": [{ "mimeType": "text/plain" }]
-        },
-        {
-          "action": "SEND",
-          "category": ["DEFAULT"],
-          "data": [{ "mimeType": "image/*" }]
-        },
-        {
-          "action": "SEND",
-          "category": ["DEFAULT"],
-          "data": [{ "mimeType": "video/*" }]
-        },
-        {
-          "action": "SEND",
-          "category": ["DEFAULT"],
-          "data": [{ "mimeType": "*/*" }]
-        },
-        {
-          "action": "SEND_MULTIPLE",
-          "category": ["DEFAULT"],
-          "data": [{ "mimeType": "image/*" }]
-        }
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
       ]
     },
     "plugins": [
+      "expo-router",
+      [
+        "expo-share-intent",
+        {
+          "androidMainActivity": ".MainActivity",
+          "androidIntentFilters": ["text/*", "image/*", "video/*", "*/*"]
+        }
+      ],
       "expo-sqlite",
-      "expo-file-system"
-    ]
+      "expo-file-system",
+      [
+        "expo-sharing",
+        {
+          "ios": {
+            "enabled": true,
+            "activationRule": {
+              "supportsImageWithMaxCount": 5
+            }
+          },
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": ["image/*"],
+            "multipleShareMimeTypes": ["image/*"]
+          }
+        }
+      ]
+    ],
+    "ios": {
+      "bundleIdentifier": "com.stashtmp"
+    }
   }
 }

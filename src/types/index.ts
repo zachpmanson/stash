@@ -23,11 +23,6 @@ export interface StashItem {
   folder_ids?: string[];
 }
 
-export interface ShareData {
-  mimeType: string;
-  data: string;
-  extraData?: Record<string, unknown>;
-}
 
 export interface LinkPreview {
   title: string | null;
