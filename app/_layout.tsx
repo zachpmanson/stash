@@ -23,11 +23,16 @@ function RootLayout() {
   const router = useRouter();
   const { hasShareIntent } = useShareIntentContext();
   const dbReady = useRef(false);
+  const hasShareIntentRef = useRef(hasShareIntent);
+
+  useEffect(() => {
+    hasShareIntentRef.current = hasShareIntent;
+  }, [hasShareIntent]);
 
   useEffect(() => {
     getDb().then(() => {
       dbReady.current = true;
-      if (hasShareIntent) {
+      if (hasShareIntentRef.current) {
         router.replace('/share');
       }
     });
