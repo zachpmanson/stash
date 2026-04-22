@@ -30,16 +30,30 @@ export async function getArchivedFolders(): Promise<Folder[]> {
   );
 }
 
-export async function createFolder(id: string, name: string): Promise<Folder> {
+const ICON_MAP: Record<string, string> = {
+  a: "🅰️", b: "📚", c: "💾", d: "📄", e: "✉️", f: "📁", g: "🎮",
+  h: "🏠", i: "💡", j: "📓", k: "🔑", l: "🔗", m: "🎵", n: "📰",
+  o: "🌐", p: "📌", q: "❓", r: "🔴", s: "⭐", t: "🏷️", u: "🔵",
+  v: "🎬", w: "🌊", x: "❌", y: "💛", z: "⚡",
+};
+
+function defaultIcon(name: string): string {
+  const first = name.trim()[0]?.toLowerCase() ?? "";
+  return ICON_MAP[first] ?? "📁";
+}
+
+export async function createFolder(id: string, name: string, icon?: string): Promise<Folder> {
   const db = await getDb();
   const now = Date.now();
-  await db.runAsync("INSERT INTO folders (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)", [
+  const resolvedIcon = icon ?? defaultIcon(name);
+  await db.runAsync("INSERT INTO folders (id, name, icon, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)", [
     id,
     name.trim(),
+    resolvedIcon,
     now,
     now,
   ]);
-  return { id, name: name.trim(), created_at: now, last_used_at: now, archived_at: null };
+  return { id, name: name.trim(), icon: resolvedIcon, created_at: now, last_used_at: now, archived_at: null };
 }
 
 export async function updateFolderName(id: string, name: string): Promise<void> {
@@ -48,9 +62,9 @@ export async function updateFolderName(id: string, name: string): Promise<void> 
 }
 
 export async function updateFolderIcon(id: string, icon: string): Promise<void> {
-  if (icon.length !== 1) throw new Error("Icon must be single emoji");
+  if ([...new Intl.Segmenter().segment(icon)].length !== 1) throw new Error("Icon must be single emoji");
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon.trim(), id]);
+  await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon, id]);
 }
 
 export async function touchFolder(id: string): Promise<void> {

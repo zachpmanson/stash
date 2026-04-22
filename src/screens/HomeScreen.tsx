@@ -23,7 +23,7 @@ export default function HomeScreen() {
         {
           text: "Rename",
           onPress: () =>
-            router.push({ pathname: "/edit-folder/[id]", params: { id: folder.id, folderName: folder.name } }),
+            router.push({ pathname: "/edit-folder/[id]", params: { id: folder.id, folderName: folder.name, folderIcon: folder.icon } }),
         },
         {
           text: "Archive",

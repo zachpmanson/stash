@@ -29,7 +29,7 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS folders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      icon TEXT,
+      icon TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       last_used_at INTEGER NOT NULL,
       archived_at INTEGER DEFAULT NULL
@@ -67,9 +67,10 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   );
   if (!row || row.count === 0) {
     const now = Date.now();
-    await db.runAsync("INSERT OR IGNORE INTO folders (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)", [
+    await db.runAsync("INSERT OR IGNORE INTO folders (id, name, icon, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)", [
       "inbox",
       "Inbox",
+      "📥",
       now,
       now,
     ]);

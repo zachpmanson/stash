@@ -3,6 +3,7 @@ export type ItemType = "image" | "url" | "text" | "file";
 export type Folder = {
   id: string;
   name: string;
+  icon: string;
   created_at: number;
   last_used_at: number;
   archived_at: number | null;

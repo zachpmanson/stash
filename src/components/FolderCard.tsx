@@ -56,7 +56,7 @@ export default function FolderCard({ folder, onPress, onLongPress }: Props) {
       android_ripple={{ color: Colors.accentDim }}
     >
       <View style={styles.iconWrap}>
-        <Text style={styles.icon}>{getIcon(folder.name, folder.id)}</Text>
+        <Text style={styles.icon}>{folder.icon || getIcon(folder.name, folder.id)}</Text>
       </View>
       <Text style={styles.name} numberOfLines={2}>
         {folder.name}
