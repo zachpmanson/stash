@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { createFolder } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
@@ -34,7 +34,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
     <View style={styles.container}>
       <Text style={styles.label}>Save to</Text>
 
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+      <View style={styles.list}>
         <FolderGrid
           onFolderPress={(folder) => {
             onToggle(folder.id);
@@ -42,9 +42,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
           onFolderLongPress={() => {}}
           selectedIds={selectedIds}
         />
-
-        <Text style={{ color: "white" }}>{JSON.stringify(folders, null, 2)}</Text>
-      </ScrollView>
+      </View>
 
       <View style={styles.newFolderRow}>
         <TextInput

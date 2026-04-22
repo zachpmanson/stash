@@ -1,71 +1,46 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Image } from "expo-image";
+import { ResolvedSharePayload, useIncomingShare } from "expo-sharing";
 import {
-  ActivityIndicator,
   Alert,
-  Animated,
+  AppState,
   BackHandler,
   Pressable,
-  Image as RNImage,
-  StyleSheet,
-  Text,
+  ScrollView,
   View,
+  StyleSheet,
+  ActivityIndicator,
+  Text,
 } from "react-native";
+import { processAndSaveShare } from "src/utils/shareHandler";
+import { Colors, Radius, Spacing, Typography } from "src/theme";
+import Debug from "src/components/Debug";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import FolderSelector from "src/components/FolderSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { useShareIntentContext } from "expo-share-intent";
-import FolderSelector from "../components/FolderSelector";
-import Debug from "../components/Debug";
-import { getFolders } from "../db/folders";
-import { Colors, Radius, Spacing, Typography } from "../theme";
-import { Folder } from "../types";
-import { processAndSaveShare } from "../utils/shareHandler";
 import { useFolderStore } from "src/state/folderState";
-
-export default function ShareScreen() {
-  const insets = useSafeAreaInsets();
-  const slideAnim = useRef(new Animated.Value(400)).current;
+import { Folder } from "src/types";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { setExcludeFromRecents } from "src/utils/nativeShareIntent";
+function fiveSecondsAgo() {
+  return Date.now() - 5000;
+}
+export default function ShareReceived() {
   const router = useRouter();
-  const { refresh, folders } = useFolderStore();
-  const { shareIntent, resetShareIntent, hasShareIntent } = useShareIntentContext();
+  const { t } = useLocalSearchParams<{ t: string }>();
 
-  const dismissing = useRef(false);
+  const { resolvedSharedPayloads, isResolving, clearSharedPayloads, refreshSharePayloads } = useIncomingShare();
+
+  const insets = useSafeAreaInsets();
+  const { refresh, folders } = useFolderStore();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!hasShareIntent && !dismissing.current) {
-      router.replace("/");
-    }
-  }, [hasShareIntent, router]);
-
-  useEffect(() => {
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 0,
-      speed: 20,
-    }).start();
-  }, [slideAnim]);
-
   const handleDismiss = useCallback(() => {
-    dismissing.current = true;
-    Animated.timing(slideAnim, {
-      toValue: 400,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => {
-      resetShareIntent();
-      BackHandler.exitApp();
-    });
-  }, [slideAnim, resetShareIntent]);
-
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      handleDismiss();
-      return true;
-    });
-    return () => sub.remove();
-  }, [handleDismiss]);
+    console.debug("dismiss run, clearing payload");
+    clearSharedPayloads();
+    refreshSharePayloads();
+    BackHandler.exitApp();
+  }, [clearSharedPayloads, refreshSharePayloads]);
 
   const toggleFolder = useCallback((id: string) => {
     console.debug(`Debugging ${id}`);
@@ -77,7 +52,9 @@ export default function ShareScreen() {
   }, []);
 
   const handleFolderCreated = useCallback((folder: Folder) => {
-    refresh().then();
+    refresh().then(() => {
+      toggleFolder(folder.id);
+    });
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -85,65 +62,67 @@ export default function ShareScreen() {
       Alert.alert("Select a folder", "Please select at least one folder.");
       return;
     }
+    if (resolvedSharedPayloads.length === 0) return;
     setSaving(true);
     try {
-      await processAndSaveShare(shareIntent, [...selectedIds]);
+      for (const payload of resolvedSharedPayloads) {
+        await processAndSaveShare(payload, [...selectedIds]);
+      }
       refresh();
-      resetShareIntent();
+      clearSharedPayloads();
+      router.replace("/");
       BackHandler.exitApp();
     } catch (e) {
       setSaving(false);
       Alert.alert("Error", `Failed to save item. ${e}`);
     }
-  }, [shareIntent, selectedIds, resetShareIntent]);
+  }, [selectedIds, resolvedSharedPayloads, clearSharedPayloads, refresh]);
 
-  const isImage = shareIntent.type === "media" && !!shareIntent.files?.[0]?.mimeType?.startsWith("image/");
-  const isLink = shareIntent.type === "weburl";
-  const isText = shareIntent.type === "text";
-  const previewUri = isImage ? shareIntent.files![0].path : null;
-  const displayText = isLink ? shareIntent.webUrl : shareIntent.text;
-  const fileName = shareIntent.files?.[0]?.fileName;
-  console.debug("selectedIds", selectedIds.values());
+  if (isResolving) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <Pressable style={styles.backdrop} onPress={handleDismiss} />
-
-      <Animated.View
-        style={[
-          styles.sheet,
-          { paddingBottom: insets.bottom + Spacing.lg },
-          { transform: [{ translateY: slideAnim }] },
-        ]}
-      >
-        <View style={styles.handle} />
-
-        <View style={styles.previewSection}>
-          {isImage && previewUri ? (
-            <RNImage source={{ uri: previewUri }} style={styles.imagePreview} resizeMode="cover" />
-          ) : isLink ? (
-            <View style={styles.linkPreview}>
-              <Text style={styles.linkEmoji}>🔗</Text>
-              <Text style={styles.linkUrl} numberOfLines={2}>
-                {shareIntent.webUrl}
-              </Text>
-            </View>
-          ) : isText ? (
-            <View style={styles.textPreviewBox}>
-              <Text style={styles.textPreviewContent} numberOfLines={4}>
-                {shareIntent.text}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.linkPreview}>
-              <Text style={styles.linkEmoji}>📎</Text>
-              <Text style={styles.linkUrl} numberOfLines={1}>
-                {fileName ?? "File"}
-              </Text>
-            </View>
-          )}
-        </View>
-        {/* <Debug>{JSON.stringify(selectedIds.values(), null, 2)} </Debug> */}
-        {/* <Debug>{selectedIds.size} </Debug> */}
+      <Pressable
+        style={styles.backdrop}
+        onPress={() => {
+          handleDismiss();
+        }}
+      />
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
+        {resolvedSharedPayloads.length > 1 ? (
+          <ScrollView horizontal style={styles.previewSection} contentContainerStyle={styles.previewContent}>
+            {resolvedSharedPayloads.map((payload, index) => (
+              <Fragment key={index}>
+                {payload.shareType === "image" ? (
+                  <Image
+                    source={{ uri: payload.contentUri ?? undefined }}
+                    style={[styles.imagePreview, styles.smallImage]}
+                  />
+                ) : payload.shareType === "text" ? (
+                  <Text>{payload.value}</Text>
+                ) : null}
+              </Fragment>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.previewSection}>
+            {resolvedSharedPayloads.map((payload, index) => (
+              <Fragment key={index}>
+                {payload.shareType === "image" ? (
+                  <Image source={{ uri: payload.contentUri ?? undefined }} style={[styles.imagePreview]} />
+                ) : payload.shareType === "text" ? (
+                  <Text>{payload.value}</Text>
+                ) : null}
+              </Fragment>
+            ))}
+          </View>
+        )}
 
         <FolderSelector
           folders={folders}
@@ -163,18 +142,31 @@ export default function ShareScreen() {
             <Text style={styles.saveBtnText}>Save{selectedIds.size > 1 ? ` to ${selectedIds.size} folders` : ""}</Text>
           )}
         </Pressable>
-      </Animated.View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // container: {
+  //   flex: 1,
+  //   alignItems: "center",
+  //   justifyContent: "center",
+  //   backgroundColor: "white",
+  // },
+  image: {
+    width: 300,
+    height: 300,
+    marginBottom: 20,
+    borderRadius: 10,
+  },
+
   container: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "flex-end",
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: Colors.overlay,
   },
   sheet: {
@@ -197,11 +189,19 @@ const styles = StyleSheet.create({
   previewSection: {
     marginBottom: Spacing.md,
   },
+  previewContent: {
+    gap: Spacing.sm,
+  },
   imagePreview: {
     width: "100%",
     height: 140,
     borderRadius: Radius.md,
     backgroundColor: Colors.surface2,
+    objectFit: "fill",
+  },
+  smallImage: {
+    width: 140,
+    height: 140,
   },
   linkPreview: {
     flexDirection: "row",

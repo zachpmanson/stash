@@ -21,13 +21,7 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-share-intent",
-        {
-          "androidMainActivity": ".MainActivity",
-          "androidIntentFilters": ["text/*", "image/*", "video/*", "*/*"]
-        }
-      ],
+
       "expo-sqlite",
       "expo-file-system",
       [

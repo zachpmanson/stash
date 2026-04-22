@@ -1,11 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { StatusBar } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ThemeProvider, DarkTheme } from '@react-navigation/native';
-import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
-import { Colors } from '../src/theme';
-import { getDb } from '../src/db/database';
+import React, { useEffect } from "react";
+import { StatusBar } from "react-native";
+import { Stack, useRouter } from "expo-router";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ThemeProvider, DarkTheme } from "@react-navigation/native";
+import { useIncomingShare } from "expo-sharing";
+import { Colors } from "../src/theme";
 
 const NAV_THEME = {
   ...DarkTheme,
@@ -21,28 +20,13 @@ const NAV_THEME = {
 
 function RootLayout() {
   const router = useRouter();
-  const { hasShareIntent } = useShareIntentContext();
-  const dbReady = useRef(false);
-  const hasShareIntentRef = useRef(hasShareIntent);
+  const { resolvedSharedPayloads, isResolving } = useIncomingShare();
 
   useEffect(() => {
-    hasShareIntentRef.current = hasShareIntent;
-  }, [hasShareIntent]);
-
-  useEffect(() => {
-    getDb().then(() => {
-      dbReady.current = true;
-      if (hasShareIntentRef.current) {
-        router.replace('/share');
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (dbReady.current && hasShareIntent) {
-      router.replace('/share');
+    if (isResolving || resolvedSharedPayloads.length > 0) {
+      router.replace("/share");
     }
-  }, [hasShareIntent]);
+  }, [isResolving, resolvedSharedPayloads]);
 
   return (
     <ThemeProvider value={NAV_THEME}>
@@ -50,7 +34,7 @@ function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: Colors.surface },
           headerTintColor: Colors.text,
-          headerTitleStyle: { fontWeight: '600' },
+          headerTitleStyle: { fontWeight: "600" },
           contentStyle: { backgroundColor: Colors.bg },
         }}
       >
@@ -58,9 +42,9 @@ function RootLayout() {
         <Stack.Screen name="archive" options={{ headerShown: false }} />
         <Stack.Screen name="share" options={{ headerShown: false }} />
         <Stack.Screen name="folder/[id]" />
-        <Stack.Screen name="item/[id]" options={{ title: '' }} />
-        <Stack.Screen name="move-item/[id]" options={{ title: 'Add to folders', presentation: 'modal' }} />
-        <Stack.Screen name="edit-folder/[id]" options={{ title: 'Rename', presentation: 'modal' }} />
+        <Stack.Screen name="item/[id]" options={{ title: "" }} />
+        <Stack.Screen name="move-item/[id]" options={{ title: "Add to folders", presentation: "modal" }} />
+        <Stack.Screen name="edit-folder/[id]" options={{ title: "Rename", presentation: "modal" }} />
       </Stack>
     </ThemeProvider>
   );
@@ -68,11 +52,11 @@ function RootLayout() {
 
 export default function App() {
   return (
-    <ShareIntentProvider>
-      <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
-        <RootLayout />
-      </SafeAreaProvider>
-    </ShareIntentProvider>
+    // <ShareIntentProvider>
+    <SafeAreaProvider>
+      <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
+      <RootLayout />
+    </SafeAreaProvider>
+    // </ShareIntentProvider>
   );
 }

@@ -1,37 +1,33 @@
-import { ShareIntent } from "expo-share-intent";
+import { ResolvedSharePayload } from "expo-sharing";
 import { Directory, File, Paths } from "expo-file-system";
 import { saveItem } from "../db/items";
 import { ItemType, StashItem } from "../types";
 import { copyFileToStash, getExtension, isImageMime, isVideoMime } from "./fileUtils";
 import { fetchLinkPreview } from "./linkPreview";
 
-export function detectItemType(intent: ShareIntent): ItemType {
-  if (intent.type === "weburl") return "url";
-  if (intent.type === "text") return "text";
-  const mimeType = intent.files?.[0]?.mimeType ?? "";
+export function detectItemType(payload: ResolvedSharePayload): ItemType {
+  if (payload.shareType === "url") return "url";
+  if (payload.shareType === "text") return "text";
+  const mimeType = payload.contentMimeType ?? payload.mimeType ?? "";
   if (isImageMime(mimeType)) return "image";
   if (isVideoMime(mimeType)) return "file";
   return "file";
 }
 
-export async function processAndSaveShare(intent: ShareIntent, folderIds: string[]): Promise<StashItem> {
-  const type = detectItemType(intent);
+export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[]): Promise<StashItem> {
+  const type = detectItemType(payload);
   const id = String(Date.now());
   const now = Date.now();
 
   let uri: string;
   let mimeType: string;
 
-  if (intent.type === "weburl") {
-    uri = intent.webUrl!;
-    mimeType = "text/plain";
-  } else if (intent.type === "text") {
-    uri = intent.text!;
+  if (payload.shareType === "url" || payload.shareType === "text") {
+    uri = payload.value;
     mimeType = "text/plain";
   } else {
-    const file = intent.files![0];
-    uri = file.path;
-    mimeType = file.mimeType;
+    uri = payload.contentUri!;
+    mimeType = payload.contentMimeType ?? payload.mimeType ?? "application/octet-stream";
   }
 
   let title: string | null = null;
