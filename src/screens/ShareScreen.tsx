@@ -19,11 +19,9 @@ import FolderSelector from "src/components/FolderSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFolderStore } from "src/state/folderState";
 import { Folder } from "src/types";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { setExcludeFromRecents } from "src/utils/nativeShareIntent";
-function fiveSecondsAgo() {
-  return Date.now() - 5000;
-}
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { clearNativeShareIntent } from "src/utils/nativeShareIntent";
+
 export default function ShareReceived() {
   const router = useRouter();
   const { t } = useLocalSearchParams<{ t: string }>();
@@ -35,10 +33,22 @@ export default function ShareReceived() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        clearSharedPayloads();
+        clearNativeShareIntent();
+        router.replace("/");
+      }
+    });
+    return () => sub.remove();
+  }, [clearSharedPayloads, router]);
+
   const handleDismiss = useCallback(() => {
     console.debug("dismiss run, clearing payload");
     clearSharedPayloads();
     refreshSharePayloads();
+    clearNativeShareIntent();
     BackHandler.exitApp();
   }, [clearSharedPayloads, refreshSharePayloads]);
 
@@ -70,6 +80,7 @@ export default function ShareReceived() {
       }
       refresh();
       clearSharedPayloads();
+      clearNativeShareIntent();
       router.replace("/");
       BackHandler.exitApp();
     } catch (e) {

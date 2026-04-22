@@ -39,7 +39,8 @@
             "multipleShareMimeTypes": ["image/*"]
           }
         }
-      ]
+      ],
+      "./plugins/share-intent-module"
     ],
     "ios": {
       "bundleIdentifier": "com.zachmanson.stash"
