@@ -2,8 +2,6 @@ import { Image } from "expo-image";
 import { ResolvedSharePayload, useIncomingShare } from "expo-sharing";
 import {
   Alert,
-  AppState,
-  BackHandler,
   Pressable,
   ScrollView,
   View,
@@ -14,7 +12,7 @@ import {
 import { processAndSaveShare } from "src/utils/shareHandler";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
 import Debug from "src/components/Debug";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import FolderSelector from "src/components/FolderSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFolderStore } from "src/state/folderState";
@@ -26,31 +24,18 @@ export default function ShareReceived() {
   const router = useRouter();
   const { t } = useLocalSearchParams<{ t: string }>();
 
-  const { resolvedSharedPayloads, isResolving, clearSharedPayloads, refreshSharePayloads } = useIncomingShare();
+  const { resolvedSharedPayloads, isResolving, clearSharedPayloads } = useIncomingShare();
 
   const insets = useSafeAreaInsets();
   const { refresh, folders } = useFolderStore();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "background" || state === "inactive") {
-        clearSharedPayloads();
-        clearNativeShareIntent();
-        router.replace("/");
-      }
-    });
-    return () => sub.remove();
-  }, [clearSharedPayloads, router]);
-
   const handleDismiss = useCallback(() => {
-    console.debug("dismiss run, clearing payload");
     clearSharedPayloads();
-    refreshSharePayloads();
     clearNativeShareIntent();
-    BackHandler.exitApp();
-  }, [clearSharedPayloads, refreshSharePayloads]);
+    router.back();
+  }, [clearSharedPayloads, router]);
 
   const toggleFolder = useCallback((id: string) => {
     console.debug(`Debugging ${id}`);
@@ -81,8 +66,7 @@ export default function ShareReceived() {
       refresh();
       clearSharedPayloads();
       clearNativeShareIntent();
-      router.replace("/");
-      BackHandler.exitApp();
+      router.back();
     } catch (e) {
       setSaving(false);
       Alert.alert("Error", `Failed to save item. ${e}`);

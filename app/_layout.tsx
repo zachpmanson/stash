@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { StatusBar } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -20,13 +20,18 @@ const NAV_THEME = {
 
 function RootLayout() {
   const router = useRouter();
-  const { resolvedSharedPayloads, isResolving } = useIncomingShare();
+  const { resolvedSharedPayloads } = useIncomingShare();
+  const handledSigRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isResolving || resolvedSharedPayloads.length > 0) {
-      router.replace("/share");
-    }
-  }, [isResolving, resolvedSharedPayloads]);
+    if (resolvedSharedPayloads.length === 0) return;
+    const sig = JSON.stringify(
+      resolvedSharedPayloads.map((p: any) => p.contentUri ?? p.value ?? p.text ?? "")
+    );
+    if (handledSigRef.current === sig) return;
+    handledSigRef.current = sig;
+    router.push("/share");
+  }, [resolvedSharedPayloads]);
 
   return (
     <ThemeProvider value={NAV_THEME}>
@@ -40,7 +45,10 @@ function RootLayout() {
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="archive" options={{ headerShown: false }} />
-        <Stack.Screen name="share" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="share"
+          options={{ headerShown: false, presentation: "transparentModal", animation: "fade" }}
+        />
         <Stack.Screen name="folder/[id]" />
         <Stack.Screen name="item/[id]" options={{ title: "" }} />
         <Stack.Screen name="move-item/[id]" options={{ title: "Add to folders", presentation: "modal" }} />

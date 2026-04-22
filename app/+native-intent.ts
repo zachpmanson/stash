@@ -9,9 +9,11 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     getSharedPayloads: getSharedPayloads(),
   });
   try {
-    // Check if the URL is from the share extension/intent
+    // Share intents: route to home and let _layout push /share as a modal
+    // once useIncomingShare surfaces the payload. Routing to /share directly
+    // would make it the only entry in the stack (no / to back to).
     if (new URL(path).hostname === "expo-sharing") {
-      return `/share`;
+      return "/";
     }
     return path;
   } catch {
