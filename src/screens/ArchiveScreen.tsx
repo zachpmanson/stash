@@ -5,10 +5,10 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Alert,
   RefreshControl,
   useWindowDimensions,
 } from "react-native";
+import { showModal } from "src/state/modalState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import { Folder, StashItem } from "../types";
@@ -42,66 +42,80 @@ export default function ArchiveScreen() {
 
   const handleFolderOptions = useCallback(
     (folder: Folder) => {
-      Alert.alert(folder.name, undefined, [
-        {
-          text: "Unarchive",
-          onPress: async () => {
-            await unarchiveFolder(folder.id);
-            load();
+      showModal({
+        title: folder.name,
+        buttons: [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Unarchive",
+            onPress: async () => {
+              await unarchiveFolder(folder.id);
+              load();
+            },
           },
-        },
-        {
-          text: "Delete permanently",
-          style: "destructive",
-          onPress: () => {
-            Alert.alert("Delete folder?", "This cannot be undone.", [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Delete",
-                style: "destructive",
-                onPress: async () => {
-                  await deleteFolder(folder.id);
-                  load();
-                },
-              },
-            ]);
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              showModal({
+                title: "Delete folder?",
+                message: "This cannot be undone.",
+                buttons: [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      await deleteFolder(folder.id);
+                      load();
+                    },
+                  },
+                ],
+              });
+            },
           },
-        },
-        { text: "Cancel", style: "cancel" },
-      ]);
+        ],
+      });
     },
     [load],
   );
 
   const handleItemOptions = useCallback(
     (item: StashItem) => {
-      Alert.alert("Item options", undefined, [
-        {
-          text: "Unarchive",
-          onPress: async () => {
-            await unarchiveItem(item.id);
-            load();
+      showModal({
+        title: "Item options",
+        buttons: [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Unarchive",
+            onPress: async () => {
+              await unarchiveItem(item.id);
+              load();
+            },
           },
-        },
-        {
-          text: "Delete permanently",
-          style: "destructive",
-          onPress: () => {
-            Alert.alert("Delete item?", "This cannot be undone.", [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Delete",
-                style: "destructive",
-                onPress: async () => {
-                  await deleteItem(item.id);
-                  load();
-                },
-              },
-            ]);
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => {
+              showModal({
+                title: "Delete item?",
+                message: "This cannot be undone.",
+                buttons: [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                      await deleteItem(item.id);
+                      load();
+                    },
+                  },
+                ],
+              });
+            },
           },
-        },
-        { text: "Cancel", style: "cancel" },
-      ]);
+        ],
+      });
     },
     [load],
   );

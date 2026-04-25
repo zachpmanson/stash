@@ -6,12 +6,16 @@ import { ThemeProvider, DarkTheme } from "@react-navigation/native";
 import { useIncomingShare } from "expo-sharing";
 import { Colors } from "../src/theme";
 import { SnackbarHost } from "../src/components/SnackbarHost";
+import { ModalHost } from "../src/components/ModalHost";
+import { isShareLaunch } from "../src/utils/nativeShareIntent";
+
+const SHARE_LAUNCH = isShareLaunch();
 
 const NAV_THEME = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    background: Colors.bg,
+    background: SHARE_LAUNCH ? "transparent" : Colors.bg,
     card: Colors.surface,
     text: Colors.text,
     border: Colors.border,
@@ -39,7 +43,7 @@ function RootLayout() {
           headerStyle: { backgroundColor: Colors.surface },
           headerTintColor: Colors.text,
           headerTitleStyle: { fontWeight: "600" },
-          contentStyle: { backgroundColor: Colors.bg },
+          contentStyle: { backgroundColor: SHARE_LAUNCH ? "transparent" : Colors.bg },
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -61,9 +65,14 @@ export default function App() {
   return (
     // <ShareIntentProvider>
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={SHARE_LAUNCH ? "transparent" : Colors.bg}
+        translucent={SHARE_LAUNCH}
+      />
       <RootLayout />
       <SnackbarHost />
+      <ModalHost />
     </SafeAreaProvider>
     // </ShareIntentProvider>
   );

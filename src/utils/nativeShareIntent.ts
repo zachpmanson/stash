@@ -8,8 +8,16 @@ export function clearNativeShareIntent() {
   }
 }
 
-export function setExcludeFromRecents(exclude: boolean) {
+export function finishShareTask() {
   if (Platform.OS === "android") {
-    ShareIntentModule?.setExcludeFromRecents(exclude);
+    ShareIntentModule?.finishTask();
   }
+}
+
+const SHARE_ACTIONS = new Set(["android.intent.action.SEND", "android.intent.action.SEND_MULTIPLE"]);
+
+export function isShareLaunch(): boolean {
+  if (Platform.OS !== "android") return false;
+  const action = ShareIntentModule?.getConstants?.()?.launchAction ?? ShareIntentModule?.launchAction;
+  return typeof action === "string" && SHARE_ACTIONS.has(action);
 }

@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Linking, Alert, Share, Image,
+  Linking, Share, Image,
 } from 'react-native';
+import { showModal } from 'src/state/modalState';
+import { showSnackbar } from 'src/state/snackbarState';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +27,7 @@ export default function ItemDetailScreen() {
     if (!item) return;
     if (item.type === 'url') {
       Linking.openURL(item.uri).catch(() =>
-        Alert.alert('Cannot open URL', item.uri)
+        showModal({ title: 'Cannot open URL', message: item.uri })
       );
     }
   }, [item]);
@@ -33,7 +35,7 @@ export default function ItemDetailScreen() {
   const handleCopy = useCallback(async () => {
     if (!item) return;
     await Clipboard.setStringAsync(item.uri);
-    Alert.alert('Copied', 'Link copied to clipboard');
+    showSnackbar('Link copied to clipboard', 'success');
   }, [item]);
 
   const handleShare = useCallback(async () => {
@@ -43,17 +45,21 @@ export default function ItemDetailScreen() {
 
   const handleArchive = useCallback(() => {
     if (!item) return;
-    Alert.alert('Archive item?', 'You can unarchive it later.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Archive',
-        style: 'destructive',
-        onPress: async () => {
-          await archiveItem(item.id);
-          router.back();
+    showModal({
+      title: 'Archive item?',
+      message: 'You can unarchive it later.',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive',
+          style: 'destructive',
+          onPress: async () => {
+            await archiveItem(item.id);
+            router.back();
+          },
         },
-      },
-    ]);
+      ],
+    });
   }, [item, router]);
 
   if (!item) return null;

@@ -15,7 +15,7 @@ export default function FolderGrid({
   selectedIds,
 }: {
   onFolderPress: (folder: Folder) => void;
-  onFolderLongPress: (folder: Folder) => void;
+  onFolderLongPress?: (folder: Folder) => void;
   selectedIds?: Set<string>;
 }) {
   const router = useRouter();
@@ -33,7 +33,7 @@ export default function FolderGrid({
           onFolderPress(folder);
         }}
         onLongPress={(folder) => {
-          onFolderLongPress(folder);
+          onFolderLongPress?.(folder);
         }}
       />
     ),

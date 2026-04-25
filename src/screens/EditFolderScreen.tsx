@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, Pressable, Alert, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TextInput, Pressable, ScrollView } from "react-native";
+import { showModal } from "src/state/modalState";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import { updateFolderName, updateFolderIcon } from "../db/folders";
@@ -62,7 +63,7 @@ export default function EditFolderScreen() {
   const handleSave = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      Alert.alert("Enter a name");
+      showModal({ title: "Enter a name" });
       return;
     }
     await updateFolderName(folderId, trimmed);

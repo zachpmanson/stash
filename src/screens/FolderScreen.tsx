@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Alert, RefreshControl, useWindowDimensions, FlatList } from "react-native";
+import { View, Text, StyleSheet, RefreshControl, useWindowDimensions, FlatList } from "react-native";
+import { showModal } from "src/state/modalState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Colors, Spacing, Typography } from "../theme";
@@ -44,21 +45,24 @@ export default function FolderScreen() {
 
   const handleLongPress = useCallback(
     (item: StashItem) => {
-      Alert.alert("Item options", undefined, [
-        {
-          text: "Archive",
-          style: "destructive",
-          onPress: async () => {
-            await archiveItem(item.id);
-            loadItems();
+      showModal({
+        title: "Item options",
+        buttons: [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Move to folder…",
+            onPress: () => router.push({ pathname: "/move-item/[id]", params: { id: item.id } }),
           },
-        },
-        {
-          text: "Move to folder…",
-          onPress: () => router.push({ pathname: "/move-item/[id]", params: { id: item.id } }),
-        },
-        { text: "Cancel", style: "cancel" },
-      ]);
+          {
+            text: "Archive",
+            style: "destructive",
+            onPress: async () => {
+              await archiveItem(item.id);
+              loadItems();
+            },
+          },
+        ],
+      });
     },
     [router, loadItems],
   );
@@ -71,17 +75,21 @@ export default function FolderScreen() {
   }, [router, folderId, folderName, folderIcon]);
 
   const handleArchive = useCallback(() => {
-    Alert.alert("Archive folder?", `"${folderName}" will be moved to the archive.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Archive",
-        style: "destructive",
-        onPress: async () => {
-          await archiveFolder(folderId);
-          router.back();
+    showModal({
+      title: "Archive folder?",
+      message: `"${folderName}" will be moved to the archive.`,
+      buttons: [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive",
+          style: "destructive",
+          onPress: async () => {
+            await archiveFolder(folderId);
+            router.back();
+          },
         },
-      },
-    ]);
+      ],
+    });
   }, [folderId, folderName, router]);
 
   const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 2 * NUM_COLUMNS) / NUM_COLUMNS;

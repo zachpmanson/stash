@@ -1,43 +1,26 @@
 import IconButton from "@/components/IconButton";
 import { useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { showModal } from "src/state/modalState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { archiveFolder, createFolder, getFolders } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
 import { useFolderStore } from "src/state/folderState";
 import FolderGrid from "src/components/FolderGrid";
+import { isShareLaunch } from "src/utils/nativeShareIntent";
 
 export default function HomeScreen() {
+  if (isShareLaunch()) {
+    return <View style={{ flex: 1, backgroundColor: "transparent" }} />;
+  }
   const router = useRouter();
   const [newFolderVisible, setNewFolderVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const inputRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
   const { refresh } = useFolderStore();
-
-  const handleLongPress = useCallback(
-    (folder: Folder) => {
-      Alert.alert(folder.name, undefined, [
-        {
-          text: "Rename",
-          onPress: () =>
-            router.push({ pathname: "/edit-folder/[id]", params: { id: folder.id, folderName: folder.name, folderIcon: folder.icon } }),
-        },
-        {
-          text: "Archive",
-          style: "destructive",
-          onPress: async () => {
-            await archiveFolder(folder.id);
-            refresh();
-          },
-        },
-        { text: "Cancel", style: "cancel" },
-      ]);
-    },
-    [router, refresh],
-  );
 
   const handleNewFolder = useCallback(() => {
     setNewFolderName("");
@@ -61,32 +44,37 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setNewFolderVisible(false)}
       >
-        <Pressable style={styles.overlay} onPress={() => setNewFolderVisible(false)}>
-          <Pressable style={styles.dialog} onPress={() => {}}>
-            <Text style={styles.dialogTitle}>New Folder</Text>
-            <Text style={styles.dialogBody}>Enter a name for your new folder</Text>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              value={newFolderName}
-              onChangeText={setNewFolderName}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={handleNewFolderSubmit}
-              placeholderTextColor={Colors.textMuted}
-              placeholder="Folder name"
-              selectionColor={Colors.accent}
-            />
-            <View style={styles.dialogActions}>
-              <Pressable onPress={() => setNewFolderVisible(false)} style={styles.dialogBtn}>
-                <Text style={styles.dialogBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable onPress={handleNewFolderSubmit} style={[styles.dialogBtn, styles.dialogBtnPrimary]}>
-                <Text style={[styles.dialogBtnText, styles.dialogBtnTextPrimary]}>Create</Text>
-              </Pressable>
-            </View>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <Pressable style={styles.overlay} onPress={() => setNewFolderVisible(false)}>
+            <Pressable style={styles.dialog} onPress={() => {}}>
+              <Text style={styles.dialogTitle}>New Folder</Text>
+              <Text style={styles.dialogBody}>Enter a name for your new folder</Text>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                value={newFolderName}
+                onChangeText={setNewFolderName}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={handleNewFolderSubmit}
+                placeholderTextColor={Colors.textMuted}
+                placeholder="Folder name"
+                selectionColor={Colors.accent}
+              />
+              <View style={styles.dialogActions}>
+                <Pressable onPress={() => setNewFolderVisible(false)} style={styles.dialogBtn}>
+                  <Text style={styles.dialogBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable onPress={handleNewFolderSubmit} style={[styles.dialogBtn, styles.dialogBtnPrimary]}>
+                  <Text style={[styles.dialogBtnText, styles.dialogBtnTextPrimary]}>Create</Text>
+                </Pressable>
+              </View>
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
       <View style={styles.header}>
         <Text style={styles.title}>Stash</Text>
@@ -99,11 +87,12 @@ export default function HomeScreen() {
       </View>
       <View style={[styles.gridContainer]}>
         <FolderGrid
-          onFolderLongPress={handleLongPress}
           onFolderPress={(item) =>
-            router.push({ pathname: "/folder/[id]", params: { id: item.id, folderName: item.name, folderIcon: item.icon } })
+            router.push({
+              pathname: "/folder/[id]",
+              params: { id: item.id, folderName: item.name, folderIcon: item.icon },
+            })
           }
-          // onLongPress={() => handleLongPress(item)}
         />
       </View>
     </View>
@@ -111,6 +100,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: {
     flex: 1,
     backgroundColor: Colors.bg,

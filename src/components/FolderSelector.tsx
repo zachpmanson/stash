@@ -4,7 +4,7 @@ import { createFolder } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
 import FolderGrid from "./FolderGrid";
-import Debug from "./Debug";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface Props {
   folders: Folder[];
@@ -16,6 +16,7 @@ interface Props {
 export default function FolderSelector({ folders, selectedIds, onToggle, onFolderCreated }: Props) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const handleCreate = useCallback(async () => {
     const name = newName.trim();
@@ -31,7 +32,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
   }, [newName, onFolderCreated]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container]}>
       <Text style={styles.label}>Save to</Text>
 
       <View style={styles.list}>
@@ -39,7 +40,6 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
           onFolderPress={(folder) => {
             onToggle(folder.id);
           }}
-          onFolderLongPress={() => {}}
           selectedIds={selectedIds}
         />
       </View>
@@ -77,7 +77,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
 
 const styles = StyleSheet.create({
   container: {
-    // flex: 1,
+    flex: 1,
   },
   label: {
     ...Typography.label,
@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
     // paddingHorizontal: Spacing.md,
   },
   list: {
-    maxHeight: 340,
+    flex: 1,
     // paddingHorizontal: Spacing.sm,
   },
   row: {

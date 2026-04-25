@@ -1,7 +1,9 @@
 import { Image } from "expo-image";
 import { ResolvedSharePayload, useIncomingShare } from "expo-sharing";
 import {
-  Alert,
+  BackHandler,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   View,
@@ -9,6 +11,7 @@ import {
   ActivityIndicator,
   Text,
 } from "react-native";
+import { showModal } from "src/state/modalState";
 import { processAndSaveShare } from "src/utils/shareHandler";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
 import Debug from "src/components/Debug";
@@ -17,7 +20,7 @@ import FolderSelector from "src/components/FolderSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFolderStore } from "src/state/folderState";
 import { Folder } from "src/types";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { clearNativeShareIntent, finishShareTask } from "src/utils/nativeShareIntent";
 
 export default function ShareReceived() {
@@ -41,6 +44,16 @@ export default function ShareReceived() {
     }
   }, [clearSharedPayloads, router, t]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        handleDismiss();
+        return true;
+      });
+      return () => sub.remove();
+    }, [handleDismiss]),
+  );
+
   const toggleFolder = useCallback((id: string) => {
     console.debug(`Debugging ${id}`);
     setSelectedIds((prev) => {
@@ -58,7 +71,7 @@ export default function ShareReceived() {
 
   const handleSave = useCallback(async () => {
     if (selectedIds.size === 0) {
-      Alert.alert("Select a folder", "Please select at least one folder.");
+      showModal({ title: "Select a folder", message: "Please select at least one folder." });
       return;
     }
     if (resolvedSharedPayloads.length === 0) return;
@@ -77,7 +90,7 @@ export default function ShareReceived() {
       }
     } catch (e) {
       setSaving(false);
-      Alert.alert("Error", `Failed to save item. ${e}`);
+      showModal({ title: "Error", message: `Failed to save item. ${e}` });
     }
   }, [selectedIds, resolvedSharedPayloads, clearSharedPayloads, refresh, router, t]);
 
@@ -90,13 +103,10 @@ export default function ShareReceived() {
   }
 
   return (
-    <View style={styles.container}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={() => {
-          handleDismiss();
-        }}
-      />
+    <KeyboardAvoidingView
+      style={[styles.container, { paddingTop: insets.top }]}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
         {resolvedSharedPayloads.length > 1 ? (
           <ScrollView horizontal style={styles.previewSection} contentContainerStyle={styles.previewContent}>
@@ -146,48 +156,27 @@ export default function ShareReceived() {
           )}
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  // container: {
-  //   flex: 1,
-  //   alignItems: "center",
-  //   justifyContent: "center",
-  //   backgroundColor: "white",
-  // },
   image: {
     width: 300,
     height: 300,
     marginBottom: 20,
     borderRadius: 10,
   },
-
   container: {
     ...StyleSheet.absoluteFill,
-    justifyContent: "flex-end",
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: Colors.overlay,
+    justifyContent: "space-evenly",
+    backgroundColor: Colors.surface,
   },
   sheet: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm,
-    maxHeight: "85%",
-    minHeight: 500,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.textMuted,
-    alignSelf: "center",
-    marginBottom: Spacing.md,
+    // minHeight: 500,
+    height: "100%",
   },
   previewSection: {
     marginBottom: Spacing.md,

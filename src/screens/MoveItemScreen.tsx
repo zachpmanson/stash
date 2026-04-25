@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, Pressable, Alert,
+  View, Text, StyleSheet, FlatList, Pressable,
 } from 'react-native';
+import { showModal } from 'src/state/modalState';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, Typography, Radius } from '../theme';
@@ -27,7 +28,7 @@ export default function MoveItemScreen() {
   const toggleFolder = useCallback(async (folderId: string) => {
     const isIn = currentFolderIds.has(folderId);
     if (isIn && currentFolderIds.size === 1) {
-      Alert.alert('Cannot remove', 'Item must be in at least one folder.');
+      showModal({ title: 'Cannot remove', message: 'Item must be in at least one folder.' });
       return;
     }
     if (isIn) {
