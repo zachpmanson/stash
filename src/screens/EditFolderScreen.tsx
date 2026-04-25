@@ -77,9 +77,6 @@ export default function EditFolderScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Text style={styles.title}>Edit folder</Text>
-      </View>
       <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
         <Text style={styles.label}>Name</Text>
         <TextInput

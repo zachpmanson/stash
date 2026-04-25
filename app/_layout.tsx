@@ -55,7 +55,7 @@ function RootLayout() {
         <Stack.Screen name="folder/[id]" />
         <Stack.Screen name="item/[id]" options={{ title: "" }} />
         <Stack.Screen name="move-item/[id]" options={{ title: "Add to folders", presentation: "modal" }} />
-        <Stack.Screen name="edit-folder/[id]" options={{ title: "Rename", presentation: "modal" }} />
+        <Stack.Screen name="edit-folder/[id]" options={{ title: "Edit Folder", presentation: "modal" }} />
       </Stack>
     </ThemeProvider>
   );
