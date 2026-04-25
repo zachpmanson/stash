@@ -105,7 +105,7 @@ export default function ShareReceived() {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { paddingTop: insets.top }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : "padding"}
     >
       <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
         {resolvedSharedPayloads.length > 1 ? (
