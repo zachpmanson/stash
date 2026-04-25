@@ -44,10 +44,7 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setNewFolderVisible(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "padding"}>
           <Pressable style={styles.overlay} onPress={() => setNewFolderVisible(false)}>
             <Pressable style={styles.dialog} onPress={() => {}}>
               <Text style={styles.dialogTitle}>New Folder</Text>
