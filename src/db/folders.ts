@@ -1,5 +1,6 @@
 import { getDb } from "./database";
 import { Folder } from "../types";
+import { countGraphemes } from "unicode-segmenter/grapheme";
 
 export async function getFolders(includeArchived = false): Promise<Folder[]> {
   const db = await getDb();
@@ -31,10 +32,32 @@ export async function getArchivedFolders(): Promise<Folder[]> {
 }
 
 const ICON_MAP: Record<string, string> = {
-  a: "🅰️", b: "📚", c: "💾", d: "📄", e: "✉️", f: "📁", g: "🎮",
-  h: "🏠", i: "💡", j: "📓", k: "🔑", l: "🔗", m: "🎵", n: "📰",
-  o: "🌐", p: "📌", q: "❓", r: "🔴", s: "⭐", t: "🏷️", u: "🔵",
-  v: "🎬", w: "🌊", x: "❌", y: "💛", z: "⚡",
+  a: "🅰️",
+  b: "📚",
+  c: "💾",
+  d: "📄",
+  e: "✉️",
+  f: "📁",
+  g: "🎮",
+  h: "🏠",
+  i: "💡",
+  j: "📓",
+  k: "🔑",
+  l: "🔗",
+  m: "🎵",
+  n: "📰",
+  o: "🌐",
+  p: "📌",
+  q: "❓",
+  r: "🔴",
+  s: "⭐",
+  t: "🏷️",
+  u: "🔵",
+  v: "🎬",
+  w: "🌊",
+  x: "❌",
+  y: "💛",
+  z: "⚡",
 };
 
 function defaultIcon(name: string): string {
@@ -62,7 +85,8 @@ export async function updateFolderName(id: string, name: string): Promise<void> 
 }
 
 export async function updateFolderIcon(id: string, icon: string): Promise<void> {
-  if ([...new Intl.Segmenter().segment(icon)].length !== 1) throw new Error("Icon must be single emoji");
+  console.log({ len: countGraphemes(icon), icon });
+  if (countGraphemes(icon) !== 1) throw new Error("Icon must be single emoji");
   const db = await getDb();
   await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon, id]);
 }

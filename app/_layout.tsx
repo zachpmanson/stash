@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider, DarkTheme } from "@react-navigation/native";
 import { useIncomingShare } from "expo-sharing";
 import { Colors } from "../src/theme";
+import { SnackbarHost } from "../src/components/SnackbarHost";
 
 const NAV_THEME = {
   ...DarkTheme,
@@ -25,9 +26,7 @@ function RootLayout() {
 
   useEffect(() => {
     if (resolvedSharedPayloads.length === 0) return;
-    const sig = JSON.stringify(
-      resolvedSharedPayloads.map((p: any) => p.contentUri ?? p.value ?? p.text ?? "")
-    );
+    const sig = JSON.stringify(resolvedSharedPayloads.map((p: any) => p.contentUri ?? p.value ?? p.text ?? ""));
     if (handledSigRef.current === sig) return;
     handledSigRef.current = sig;
     router.push("/share");
@@ -44,7 +43,7 @@ function RootLayout() {
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="archive" options={{ headerShown: false }} />
+        <Stack.Screen name="archive" options={{ title: "Archive" }} />
         <Stack.Screen
           name="share"
           options={{ headerShown: false, presentation: "transparentModal", animation: "fade" }}
@@ -64,6 +63,7 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
       <RootLayout />
+      <SnackbarHost />
     </SafeAreaProvider>
     // </ShareIntentProvider>
   );

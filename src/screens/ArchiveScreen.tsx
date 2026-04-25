@@ -1,14 +1,21 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable,
-  Alert, RefreshControl, useWindowDimensions,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Spacing, Typography, Radius } from '../theme';
-import { Folder, StashItem } from '../types';
-import { getArchivedFolders, unarchiveFolder, deleteFolder } from '../db/folders';
-import { getArchivedItems, unarchiveItem, deleteItem } from '../db/items';
-import ItemCard from '../components/ItemCard';
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
+  RefreshControl,
+  useWindowDimensions,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Colors, Spacing, Typography, Radius } from "../theme";
+import { Folder, StashItem } from "../types";
+import { getArchivedFolders, unarchiveFolder, deleteFolder } from "../db/folders";
+import { getArchivedItems, unarchiveItem, deleteItem } from "../db/items";
+import ItemCard from "../components/ItemCard";
+import Screen from "../components/Screen";
 
 export default function ArchiveScreen() {
   const [archivedFolders, setArchivedFolders] = useState<Folder[]>([]);
@@ -23,7 +30,9 @@ export default function ArchiveScreen() {
     setArchivedItems(items);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -31,84 +40,94 @@ export default function ArchiveScreen() {
     setRefreshing(false);
   }, [load]);
 
-  const handleFolderOptions = useCallback((folder: Folder) => {
-    Alert.alert(folder.name, undefined, [
-      {
-        text: 'Unarchive',
-        onPress: async () => { await unarchiveFolder(folder.id); load(); },
-      },
-      {
-        text: 'Delete permanently',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Delete folder?', 'This cannot be undone.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: async () => { await deleteFolder(folder.id); load(); },
-            },
-          ]);
+  const handleFolderOptions = useCallback(
+    (folder: Folder) => {
+      Alert.alert(folder.name, undefined, [
+        {
+          text: "Unarchive",
+          onPress: async () => {
+            await unarchiveFolder(folder.id);
+            load();
+          },
         },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [load]);
+        {
+          text: "Delete permanently",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert("Delete folder?", "This cannot be undone.", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                  await deleteFolder(folder.id);
+                  load();
+                },
+              },
+            ]);
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    },
+    [load],
+  );
 
-  const handleItemOptions = useCallback((item: StashItem) => {
-    Alert.alert('Item options', undefined, [
-      {
-        text: 'Unarchive',
-        onPress: async () => { await unarchiveItem(item.id); load(); },
-      },
-      {
-        text: 'Delete permanently',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Delete item?', 'This cannot be undone.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: async () => { await deleteItem(item.id); load(); },
-            },
-          ]);
+  const handleItemOptions = useCallback(
+    (item: StashItem) => {
+      Alert.alert("Item options", undefined, [
+        {
+          text: "Unarchive",
+          onPress: async () => {
+            await unarchiveItem(item.id);
+            load();
+          },
         },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [load]);
+        {
+          text: "Delete permanently",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert("Delete item?", "This cannot be undone.", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                  await deleteItem(item.id);
+                  load();
+                },
+              },
+            ]);
+          },
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    },
+    [load],
+  );
 
   const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 4) / 2;
 
   const isEmpty = archivedFolders.length === 0 && archivedItems.length === 0;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Archive</Text>
-      </View>
-
+    <Screen>
       {isEmpty ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🗃️</Text>
           <Text style={styles.emptyTitle}>Archive is empty</Text>
-          <Text style={styles.emptyBody}>
-            Long-press any folder or item to archive it.
-          </Text>
+          <Text style={styles.emptyBody}>Long-press any folder or item to archive it.</Text>
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
         >
           {archivedFolders.length > 0 && (
             <>
               <Text style={styles.sectionHeader}>Folders</Text>
               <View style={styles.folderList}>
-                {archivedFolders.map(folder => (
+                {archivedFolders.map((folder) => (
                   <Pressable
                     key={folder.id}
                     style={styles.folderRow}
@@ -130,7 +149,7 @@ export default function ArchiveScreen() {
             <>
               <Text style={styles.sectionHeader}>Items</Text>
               <View style={styles.itemGrid}>
-                {archivedItems.map(item => (
+                {archivedItems.map((item) => (
                   <ItemCard
                     key={item.id}
                     item={item}
@@ -144,7 +163,7 @@ export default function ArchiveScreen() {
           )}
         </ScrollView>
       )}
-    </View>
+    </Screen>
   );
 }
 
@@ -163,8 +182,8 @@ const styles = StyleSheet.create({
   },
   folderList: { paddingHorizontal: Spacing.md },
   folderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
     padding: Spacing.md,
@@ -174,18 +193,18 @@ const styles = StyleSheet.create({
   },
   folderIcon: { fontSize: 24, marginRight: Spacing.md },
   folderInfo: { flex: 1 },
-  folderName: { ...Typography.body, fontWeight: '600' },
+  folderName: { ...Typography.body, fontWeight: "600" },
   folderCount: { ...Typography.caption },
   folderAction: { ...Typography.body, color: Colors.textSecondary },
   itemGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: Spacing.md,
   },
   empty: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: Spacing.xl,
   },
   emptyIcon: { fontSize: 56, marginBottom: Spacing.md },
@@ -193,7 +212,7 @@ const styles = StyleSheet.create({
   emptyBody: {
     ...Typography.body,
     color: Colors.textSecondary,
-    textAlign: 'center',
+    textAlign: "center",
     lineHeight: 22,
   },
 });

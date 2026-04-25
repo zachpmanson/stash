@@ -101,7 +101,7 @@ export default function HomeScreen() {
         <FolderGrid
           onFolderLongPress={handleLongPress}
           onFolderPress={(item) =>
-            router.push({ pathname: "/folder/[id]", params: { id: item.id, folderName: item.name } })
+            router.push({ pathname: "/folder/[id]", params: { id: item.id, folderName: item.name, folderIcon: item.icon } })
           }
           // onLongPress={() => handleLongPress(item)}
         />

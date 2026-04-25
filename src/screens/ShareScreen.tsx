@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFolderStore } from "src/state/folderState";
 import { Folder } from "src/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { clearNativeShareIntent } from "src/utils/nativeShareIntent";
+import { clearNativeShareIntent, finishShareTask } from "src/utils/nativeShareIntent";
 
 export default function ShareReceived() {
   const router = useRouter();
@@ -34,8 +34,12 @@ export default function ShareReceived() {
   const handleDismiss = useCallback(() => {
     clearSharedPayloads();
     clearNativeShareIntent();
-    router.back();
-  }, [clearSharedPayloads, router]);
+    if (t) {
+      finishShareTask();
+    } else {
+      router.back();
+    }
+  }, [clearSharedPayloads, router, t]);
 
   const toggleFolder = useCallback((id: string) => {
     console.debug(`Debugging ${id}`);
@@ -66,12 +70,16 @@ export default function ShareReceived() {
       refresh();
       clearSharedPayloads();
       clearNativeShareIntent();
-      router.back();
+      if (t) {
+        finishShareTask();
+      } else {
+        router.back();
+      }
     } catch (e) {
       setSaving(false);
       Alert.alert("Error", `Failed to save item. ${e}`);
     }
-  }, [selectedIds, resolvedSharedPayloads, clearSharedPayloads, refresh]);
+  }, [selectedIds, resolvedSharedPayloads, clearSharedPayloads, refresh, router, t]);
 
   if (isResolving) {
     return (

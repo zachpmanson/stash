@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Spacing, Typography, Radius } from '../theme';
 import { StashItem } from '../types';
 import { getItemById, archiveItem } from '../db/items';
+import Screen from '../components/Screen';
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -58,7 +59,7 @@ export default function ItemDetailScreen() {
   if (!item) return null;
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}>
         {item.type === 'image' && (
           <Image
@@ -111,7 +112,7 @@ export default function ItemDetailScreen() {
           </View>
         </View>
       </ScrollView>
-    </View>
+    </Screen>
   );
 }
 

@@ -1,29 +1,56 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, Alert, ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Colors, Spacing, Typography, Radius } from '../theme';
-import { updateFolderName, updateFolderIcon } from '../db/folders';
+import React, { useState } from "react";
+import { View, Text, StyleSheet, TextInput, Pressable, Alert, ScrollView } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Colors, Spacing, Typography, Radius } from "../theme";
+import { updateFolderName, updateFolderIcon } from "../db/folders";
+import { countGraphemes } from "unicode-segmenter/grapheme";
+import Screen from "../components/Screen";
 
 const PRESET_ICONS = [
-  "📥", "📁", "⭐", "🏠", "🎮", "🎵", "🔗", "📌", "🏷️", "💡",
-  "📚", "📄", "✉️", "📰", "🌐", "🔑", "🎬", "🌊", "💾", "📓",
-  "🔴", "🔵", "💛", "⚡", "❓", "🅰️", "❌",
+  "📥",
+  "📁",
+  "⭐",
+  "🏠",
+  "🎮",
+  "🎵",
+  "🔗",
+  "📌",
+  "🏷️",
+  "💡",
+  "📚",
+  "📄",
+  "✉️",
+  "📰",
+  "🌐",
+  "🔑",
+  "🎬",
+  "🌊",
+  "💾",
+  "📓",
+  "🔴",
+  "🔵",
+  "💛",
+  "⚡",
+  "❓",
+  "🅰️",
+  "❌",
 ];
 
 export default function EditFolderScreen() {
-  const { id: folderId, folderName, folderIcon } = useLocalSearchParams<{ id: string; folderName: string; folderIcon: string }>();
+  const {
+    id: folderId,
+    folderName,
+    folderIcon,
+  } = useLocalSearchParams<{ id: string; folderName: string; folderIcon: string }>();
   const router = useRouter();
   const [name, setName] = useState(folderName);
   const [icon, setIcon] = useState(folderIcon ?? "📁");
   const [customInput, setCustomInput] = useState("");
-  const insets = useSafeAreaInsets();
 
   const handleCustomChange = (text: string) => {
     setCustomInput(text);
-    const graphemes = [...new Intl.Segmenter().segment(text)];
-    if (graphemes.length === 1) {
-      setIcon(graphemes[0].segment);
+    if (countGraphemes(text) === 1) {
+      setIcon(text);
     }
   };
 
@@ -35,7 +62,7 @@ export default function EditFolderScreen() {
   const handleSave = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      Alert.alert('Enter a name');
+      Alert.alert("Enter a name");
       return;
     }
     await updateFolderName(folderId, trimmed);
@@ -48,7 +75,7 @@ export default function EditFolderScreen() {
   const isCustomIcon = icon && !PRESET_ICONS.includes(icon);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <Screen>
       <View style={styles.header}>
         <Text style={styles.title}>Edit folder</Text>
       </View>
@@ -90,14 +117,11 @@ export default function EditFolderScreen() {
             </Pressable>
           ))}
         </View>
-        <Pressable
-          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]}
-          onPress={handleSave}
-        >
+        <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]} onPress={handleSave}>
           <Text style={styles.saveBtnText}>Save</Text>
         </Pressable>
       </ScrollView>
-    </View>
+    </Screen>
   );
 }
 
@@ -128,8 +152,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   iconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.sm,
   },
   iconPreview: {
@@ -139,8 +163,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: Spacing.sm,
   },
   iconBtn: {
@@ -150,8 +174,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   iconBtnSelected: {
     borderColor: Colors.accent,
@@ -164,9 +188,9 @@ const styles = StyleSheet.create({
     height: 52,
     backgroundColor: Colors.accent,
     borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: Spacing.sm,
   },
-  saveBtnText: { ...Typography.body, fontWeight: '700', color: Colors.white, fontSize: 16 },
+  saveBtnText: { ...Typography.body, fontWeight: "700", color: Colors.white, fontSize: 16 },
 });

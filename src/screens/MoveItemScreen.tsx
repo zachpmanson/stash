@@ -8,6 +8,7 @@ import { Colors, Spacing, Typography, Radius } from '../theme';
 import { Folder } from '../types';
 import { getFolders } from '../db/folders';
 import { getItemById, addItemToFolder, removeItemFromFolder } from '../db/items';
+import Screen from '../components/Screen';
 
 export default function MoveItemScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -39,7 +40,7 @@ export default function MoveItemScreen() {
   }, [itemId, currentFolderIds]);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <Screen>
       <View style={styles.header}>
         <Text style={styles.title}>Add to folders</Text>
       </View>
@@ -62,7 +63,7 @@ export default function MoveItemScreen() {
         }}
         contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}
       />
-    </View>
+    </Screen>
   );
 }
 
