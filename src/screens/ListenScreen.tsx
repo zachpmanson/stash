@@ -9,6 +9,7 @@ import { getItemById } from "../db/items";
 import { fetchArticle } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
+import { wordsToSeconds } from "../utils/speech";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type LoadState =
@@ -74,8 +75,6 @@ export default function ListenScreen() {
   );
 }
 
-const WORDS_PER_SECOND = 2.5;
-
 function countWords(s: string): number {
   return s.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -87,21 +86,36 @@ function formatRemaining(seconds: number): string {
 }
 
 function Player({ title, sentences }: { title: string | null; sentences: string[] }) {
-  const meta = useMemo(() => ({ title: title ?? "Article", artist: "Stash" }), [title]);
-  const player = useSpeechPlayer(sentences, meta);
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
   const scrollHeightRef = useRef(0);
 
   const wordsPerSentence = useMemo(() => sentences.map(countWords), [sentences]);
   const totalWords = useMemo(() => wordsPerSentence.reduce((a, b) => a + b, 0), [wordsPerSentence]);
+  const secondsAt = useMemo(() => {
+    const arr: number[] = new Array(wordsPerSentence.length);
+    let cum = 0;
+    for (let i = 0; i < wordsPerSentence.length; i++) {
+      arr[i] = wordsToSeconds(cum);
+      cum += wordsPerSentence[i];
+    }
+    return arr;
+  }, [wordsPerSentence]);
+  const totalSeconds = wordsToSeconds(totalWords);
+
+  const meta = useMemo(
+    () => ({ title: title ?? "Article", artist: "Stash", totalSeconds, secondsAt }),
+    [title, totalSeconds, secondsAt]
+  );
+  const player = useSpeechPlayer(sentences, meta);
+
   const wordsRemaining = useMemo(() => {
     let n = 0;
     for (let i = player.index; i < wordsPerSentence.length; i++) n += wordsPerSentence[i];
     return n;
   }, [wordsPerSentence, player.index]);
   const percent = totalWords === 0 ? 0 : Math.round(((totalWords - wordsRemaining) / totalWords) * 100);
-  const secondsLeft = Math.round(wordsRemaining / WORDS_PER_SECOND);
+  const secondsLeft = Math.round(wordsToSeconds(wordsRemaining));
 
   useEffect(() => {
     const y = offsetsRef.current[player.index];

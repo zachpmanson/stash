@@ -5,8 +5,16 @@ import {
   setMediaPlaying,
   endMediaSession,
   updateMediaMeta,
+  seekMediaSession,
   subscribeRemoteEvents,
 } from '../utils/mediaSession';
+
+export type SpeechPlayerMeta = {
+  title: string;
+  artist?: string;
+  totalSeconds: number;
+  secondsAt: number[];
+};
 
 export type SpeechPlayer = {
   index: number;
@@ -23,7 +31,7 @@ export type SpeechPlayer = {
 
 export function useSpeechPlayer(
   sentences: string[],
-  meta?: { title: string; artist?: string },
+  meta?: SpeechPlayerMeta,
 ): SpeechPlayer {
   const [index, setIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -35,10 +43,18 @@ export function useSpeechPlayer(
   const sentencesRef = useRef(sentences);
   const isPlayingRef = useRef(false);
   const mediaStartedRef = useRef(false);
+  const metaRef = useRef(meta);
 
   useEffect(() => { indexRef.current = index; }, [index]);
   useEffect(() => { sentencesRef.current = sentences; }, [sentences]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { metaRef.current = meta; }, [meta]);
+
+  useEffect(() => {
+    if (!mediaStartedRef.current) return;
+    const at = metaRef.current?.secondsAt[index];
+    if (at != null) seekMediaSession(at);
+  }, [index]);
 
   useEffect(() => {
     if (!meta) return;

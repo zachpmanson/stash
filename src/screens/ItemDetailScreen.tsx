@@ -9,6 +9,8 @@ import { Colors, Spacing, Typography, Radius } from "../theme";
 import { StashItem } from "../types";
 import { getItemById, archiveItem } from "../db/items";
 import Screen from "../components/Screen";
+import TopbarButton from "src/components/TopbarButton";
+import { MaterialIcons } from "@expo/vector-icons";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -60,8 +62,18 @@ export default function ItemDetailScreen() {
   if (!item) return null;
 
   return (
-    <Screen title="Stashed Item">
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}>
+    <Screen
+      title="Stashed Item"
+      buttons={[
+        <TopbarButton onPress={handleArchive}>
+          <MaterialIcons name="archive" size={20} color={Colors.text} />
+        </TopbarButton>,
+        <TopbarButton onPress={handleShare}>
+          <MaterialIcons name="share" size={20} color={Colors.text} />
+        </TopbarButton>,
+      ]}
+    >
+      <ScrollView contentContainerStyle={{ paddingBottom: Spacing.xl }}>
         {item.type === "image" && <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />}
 
         {item.type === "url" && item.thumbnail_path && (

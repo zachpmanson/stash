@@ -108,19 +108,15 @@ export default function FolderScreen() {
 
   return (
     <Screen
-      options={{
-        title: folderName,
-        headerRight: () => (
-          <View style={styles.headerActions}>
-            <TopbarButton onPress={handleEdit}>
-              <MaterialIcons name="edit" size={20} color={Colors.text} />
-            </TopbarButton>
-            <TopbarButton onPress={handleArchive}>
-              <MaterialIcons name="archive" size={20} color={Colors.text} />
-            </TopbarButton>
-          </View>
-        ),
-      }}
+      title={folderName}
+      buttons={[
+        <TopbarButton onPress={handleEdit}>
+          <MaterialIcons name="edit" size={20} color={Colors.text} />
+        </TopbarButton>,
+        <TopbarButton onPress={handleArchive}>
+          <MaterialIcons name="archive" size={20} color={Colors.text} />
+        </TopbarButton>,
+      ]}
     >
       <FlatList
         data={items}
@@ -156,11 +152,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingTop: 80,
     paddingHorizontal: Spacing.xl,
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
   },
   emptyIcon: { fontSize: 56, marginBottom: Spacing.md },
   emptyTitle: { ...Typography.subheading, marginBottom: Spacing.sm },
