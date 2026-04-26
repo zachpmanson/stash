@@ -1,5 +1,17 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Linking, Share, Image, ActivityIndicator, Switch } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Linking,
+  Share,
+  Image,
+  ActivityIndicator,
+  Switch,
+  Modal,
+} from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
 import { useArticle } from "../hooks/useArticle";
 import { showModal } from "src/state/modalState";
@@ -19,6 +31,7 @@ export default function ItemDetailScreen() {
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const { state: articleState, sentences } = useArticle(item?.type === "url" ? item.uri : undefined);
 
   useEffect(() => {
@@ -80,6 +93,13 @@ export default function ItemDetailScreen() {
         <TopbarButton onPress={handleShare}>
           <MaterialIcons name="share" size={20} color={Colors.text} />
         </TopbarButton>,
+        ...(item.type === "url"
+          ? [
+              <TopbarButton onPress={() => setMenuOpen(true)}>
+                <MaterialIcons name="more-vert" size={20} color={Colors.text} />
+              </TopbarButton>,
+            ]
+          : []),
       ]}
     >
       <ScrollView contentContainerStyle={{ paddingBottom: Spacing.xl }}>
@@ -131,29 +151,32 @@ export default function ItemDetailScreen() {
                 </View>
               )}
               {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
-              {articleState.kind === "ready" && (
-                <>
-                  <View style={styles.splitToggle}>
-                    <Text style={styles.splitToggleLabel}>Split by sentence</Text>
-                    <Switch value={splitBySentence} onValueChange={setSplitBySentence} />
-                  </View>
-                  {splitBySentence && sentences
-                    ? sentences.map((s, i) => (
-                        <Text style={styles.articleText} key={i} selectable>
-                          {s}
-                        </Text>
-                      ))
-                    : articleState.text.split("\n").map((s, i) => (
-                        <Text style={styles.articleText} key={i} selectable>
-                          {s}
-                        </Text>
-                      ))}
-                </>
-              )}
+              {articleState.kind === "ready" &&
+                (splitBySentence && sentences
+                  ? sentences.map((s, i) => (
+                      <Text style={styles.articleText} key={i} selectable>
+                        {s}
+                      </Text>
+                    ))
+                  : articleState.text.split("\n").map((s, i) => (
+                      <Text style={styles.articleText} key={i} selectable>
+                        {s}
+                      </Text>
+                    )))}
             </View>
           )}
         </View>
       </ScrollView>
+      <Modal transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menu}>
+            <Pressable style={styles.menuItem} onPress={() => setSplitBySentence((v) => !v)}>
+              <Text style={styles.menuItemLabel}>Split by sentence</Text>
+              <Switch value={splitBySentence} onValueChange={setSplitBySentence} />
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 }
@@ -270,4 +293,28 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   splitToggleLabel: { ...Typography.caption },
+  menuBackdrop: {
+    flex: 1,
+    alignItems: "flex-end",
+    paddingTop: 56,
+    paddingHorizontal: Spacing.sm,
+    backgroundColor: "transparent",
+  },
+  menu: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    minWidth: 220,
+    paddingVertical: Spacing.xs,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    gap: Spacing.md,
+  },
+  menuItemLabel: { ...Typography.body, fontSize: 14 },
 });
