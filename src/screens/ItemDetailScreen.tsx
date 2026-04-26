@@ -277,6 +277,7 @@ const styles = StyleSheet.create({
   articleStatus: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.sm,
   },
   articleStatusText: { ...Typography.caption },
