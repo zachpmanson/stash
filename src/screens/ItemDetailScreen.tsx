@@ -30,7 +30,7 @@ export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
-  const [splitBySentence, setSplitBySentence] = useState(false);
+  const [splitBySentence, setSplitBySentence] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const { state: articleState, sentences } = useArticle(item?.type === "url" ? item.uri : undefined);
 
