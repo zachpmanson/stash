@@ -35,8 +35,8 @@
           },
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["image/*"],
-            "multipleShareMimeTypes": ["image/*"]
+            "singleShareMimeTypes": ["image/*", "text/*"],
+            "multipleShareMimeTypes": ["image/*", "text/*"]
           }
         }
       ],

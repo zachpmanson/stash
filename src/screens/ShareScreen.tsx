@@ -22,6 +22,7 @@ import { useFolderStore } from "src/state/folderState";
 import { Folder } from "src/types";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { clearNativeShareIntent, finishShareTask } from "src/utils/nativeShareIntent";
+import SharePreview from "src/components/SharePreview";
 
 export default function ShareReceived() {
   const router = useRouter();
@@ -108,34 +109,7 @@ export default function ShareReceived() {
       behavior={Platform.OS === "ios" ? "padding" : "padding"}
     >
       <View style={[styles.sheet, { paddingBottom: insets.bottom + Spacing.lg }]}>
-        {resolvedSharedPayloads.length > 1 ? (
-          <ScrollView horizontal style={styles.previewSection} contentContainerStyle={styles.previewContent}>
-            {resolvedSharedPayloads.map((payload, index) => (
-              <Fragment key={index}>
-                {payload.shareType === "image" ? (
-                  <Image
-                    source={{ uri: payload.contentUri ?? undefined }}
-                    style={[styles.imagePreview, styles.smallImage]}
-                  />
-                ) : payload.shareType === "text" ? (
-                  <Text>{payload.value}</Text>
-                ) : null}
-              </Fragment>
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.previewSection}>
-            {resolvedSharedPayloads.map((payload, index) => (
-              <Fragment key={index}>
-                {payload.shareType === "image" ? (
-                  <Image source={{ uri: payload.contentUri ?? undefined }} style={[styles.imagePreview]} />
-                ) : payload.shareType === "text" ? (
-                  <Text>{payload.value}</Text>
-                ) : null}
-              </Fragment>
-            ))}
-          </View>
-        )}
+        <SharePreview payloads={resolvedSharedPayloads} />
 
         <FolderSelector
           folders={folders}
