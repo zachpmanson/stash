@@ -13,7 +13,6 @@ export function useArticle(url: string | undefined): {
   sentences: string[] | undefined;
 } {
   const [state, setState] = useState<ArticleState>({ kind: "idle" });
-
   const sentences = useMemo(() => {
     if (state.kind === "ready" && state.text) return splitSentences(normalizeText(state.text));
   }, [state]);

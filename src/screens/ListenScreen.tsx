@@ -105,7 +105,7 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
 
   const meta = useMemo(
     () => ({ title: title ?? "Article", artist: "Stash", totalSeconds, secondsAt }),
-    [title, totalSeconds, secondsAt]
+    [title, totalSeconds, secondsAt],
   );
   const player = useSpeechPlayer(sentences, meta);
 
@@ -128,19 +128,12 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
 
   return (
     <View style={[styles.playerRoot]}>
-      <View style={{ padding: Spacing.sm, flex: 1 }}>
+      <View style={{ padding: Spacing.sm, paddingTop: Spacing.lg, flex: 1 }}>
         {title && (
           <Text style={styles.title} numberOfLines={2}>
             {title}
           </Text>
         )}
-        <View style={styles.progressRow}>
-          <Text style={styles.progressText}>{percent}%</Text>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${percent}%` }]} />
-          </View>
-          <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
-        </View>
 
         <ScrollView
           ref={scrollRef}
@@ -168,9 +161,18 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
       </View>
 
       <View style={styles.controls}>
-        <ControlButton icon="skip-previous" onPress={player.prev} disabled={player.index === 0} />
-        <ControlButton icon={player.isPlaying ? "pause" : "play-arrow"} onPress={player.toggle} big />
-        <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
+        <View style={styles.controlButtons}>
+          <ControlButton icon="skip-previous" onPress={player.prev} disabled={player.index === 0} />
+          <ControlButton icon={player.isPlaying ? "pause" : "play-arrow"} onPress={player.toggle} big />
+          <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
+        </View>
+        <View style={styles.progressRow}>
+          <Text style={styles.progressText}>{percent}%</Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${percent}%` }]} />
+          </View>
+          <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
+        </View>
       </View>
     </View>
   );
@@ -227,7 +229,7 @@ const styles = StyleSheet.create({
     flex: 1,
     // padding: Spacing.md
   },
-  title: { ...Typography.subheading, marginBottom: Spacing.xs },
+  title: { ...Typography.subheading, paddingBottom: Spacing.xs },
   position: { ...Typography.caption, marginBottom: Spacing.md },
   progressRow: {
     flexDirection: "row",
@@ -257,6 +259,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontWeight: "500",
     marginBottom: Spacing.md,
+    fontFamily: "serif",
   },
   sentenceDim: {
     color: Colors.textMuted,
@@ -264,13 +267,18 @@ const styles = StyleSheet.create({
   },
 
   controls: {
+    // paddingVertical: Spacing.lg,
+    backgroundColor: Colors.accentDim,
+    // borderRadius: 10,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.sm,
+    gap: 12,
+  },
+  controlButtons: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: Spacing.lg,
-    paddingVertical: Spacing.lg,
-    backgroundColor: Colors.accentDim,
-    // borderRadius: 10,
   },
   ctrl: {
     width: 56,
@@ -283,8 +291,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ctrlBig: {
-    width: 76,
-    height: 76,
+    width: 64,
+    height: 64,
     backgroundColor: Colors.accent,
     borderColor: Colors.accent,
   },

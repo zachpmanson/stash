@@ -1,10 +1,12 @@
 const ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
   [/“|”/g, '"'],
   [/‘|’/g, "'"],
-  [/—/g, '--'],
-  [/–/g, '-'],
-  [/…/g, '...'],
-  [/ /g, ' '],
+  [/—/g, "--"],
+  [/–/g, "-"],
+  [/…/g, "..."],
+  [/ /g, " "],
+  [/“/g, '"'],
+  [/”/g, '"'],
 ];
 
 export function normalizeText(s: string): string {
@@ -36,11 +38,15 @@ export function splitSentences(text: string): string[] {
   for (const para of text.split(/\n\n+/)) {
     const trimmed = para.trim();
     if (!trimmed) continue;
-    for (const line of trimmed.split('\n')) {
+    for (const line of trimmed.split("\n")) {
       const t = line.trim();
       if (!t) continue;
       result.push(...splitLine(t));
     }
   }
   return result;
+}
+
+export function insertParagraphBreaks(text: string) {
+  return text.replace(/\.([A-Z][a-z])/g, ".\n$1");
 }

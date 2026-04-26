@@ -25,12 +25,13 @@ import { getItemById, archiveItem } from "../db/items";
 import Screen from "../components/Screen";
 import TopbarButton from "src/components/TopbarButton";
 import { MaterialIcons } from "@expo/vector-icons";
+import { arrIf } from "src/utils/array";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
-  const [splitBySentence, setSplitBySentence] = useState(true);
+  const [splitBySentence, setSplitBySentence] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const { state: articleState, sentences } = useArticle(item?.type === "url" ? item.uri : undefined);
 
@@ -93,13 +94,12 @@ export default function ItemDetailScreen() {
         <TopbarButton onPress={handleShare}>
           <MaterialIcons name="share" size={20} color={Colors.text} />
         </TopbarButton>,
-        ...(item.type === "url"
-          ? [
-              <TopbarButton onPress={() => setMenuOpen(true)}>
-                <MaterialIcons name="more-vert" size={20} color={Colors.text} />
-              </TopbarButton>,
-            ]
-          : []),
+        ...arrIf(
+          item.type === "url",
+          <TopbarButton onPress={() => setMenuOpen(true)}>
+            <MaterialIcons name="more-vert" size={20} color={Colors.text} />
+          </TopbarButton>,
+        ),
       ]}
     >
       <ScrollView contentContainerStyle={{ paddingBottom: Spacing.xl }}>

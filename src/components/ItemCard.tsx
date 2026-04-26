@@ -49,11 +49,7 @@ function UrlPreview({ item, previewHeight }: { item: StashItem; previewHeight: n
   return (
     <View style={[styles.urlPreview, { height: previewHeight }]}>
       {item.thumbnail_path ? (
-        <Image
-          source={{ uri: item.thumbnail_path }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: item.thumbnail_path }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       ) : null}
       <View style={styles.urlOverlay}>
         {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}

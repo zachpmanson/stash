@@ -11,8 +11,7 @@ import ItemCard from "../components/ItemCard";
 import TopbarButton from "../components/TopbarButton";
 import Screen from "../components/Screen";
 import { MaterialIcons } from "@expo/vector-icons";
-
-const NUM_COLUMNS = 2;
+import ItemGrid from "src/components/ItemGrid";
 
 export default function FolderScreen() {
   const {
@@ -92,20 +91,6 @@ export default function FolderScreen() {
     });
   }, [folderId, folderName, router]);
 
-  const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 2 * NUM_COLUMNS) / NUM_COLUMNS;
-
-  const renderItem = useCallback(
-    ({ item }: { item: StashItem }) => (
-      <ItemCard
-        item={item}
-        width={cardWidth}
-        onPress={() => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
-        onLongPress={() => handleLongPress(item)}
-      />
-    ),
-    [cardWidth, router, handleLongPress],
-  );
-
   return (
     <Screen
       title={folderName}
@@ -118,20 +103,13 @@ export default function FolderScreen() {
         </TopbarButton>,
       ]}
     >
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        numColumns={NUM_COLUMNS}
-        contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + Spacing.xl }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>🗂️</Text>
-            <Text style={styles.emptyTitle}>Nothing here yet</Text>
-            <Text style={styles.emptyBody}>Share something to {folderName} from any app.</Text>
-          </View>
-        }
+      <ItemGrid
+        items={items}
+        onPress={(item) => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
+        onLongPress={(item) => handleLongPress(item)}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        folderName={folderName}
       />
     </Screen>
   );

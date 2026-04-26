@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import * as Speech from 'expo-speech';
+import { useCallback, useEffect, useRef, useState } from "react";
+import * as Speech from "expo-speech";
 import {
   startSilentSession,
   setMediaPlaying,
@@ -7,7 +7,7 @@ import {
   updateMediaMeta,
   seekMediaSession,
   subscribeRemoteEvents,
-} from '../utils/mediaSession';
+} from "../utils/mediaSession";
 
 export type SpeechPlayerMeta = {
   title: string;
@@ -29,12 +29,9 @@ export type SpeechPlayer = {
   jumpTo: (i: number) => void;
 };
 
-export function useSpeechPlayer(
-  sentences: string[],
-  meta?: SpeechPlayerMeta,
-): SpeechPlayer {
+export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): SpeechPlayer {
   const [index, setIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
 
   // Track the utterance generation to ignore stale onDone callbacks
   // (when we stop+restart, the previous utterance's onDone may still fire).
@@ -45,10 +42,18 @@ export function useSpeechPlayer(
   const mediaStartedRef = useRef(false);
   const metaRef = useRef(meta);
 
-  useEffect(() => { indexRef.current = index; }, [index]);
-  useEffect(() => { sentencesRef.current = sentences; }, [sentences]);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { metaRef.current = meta; }, [meta]);
+  useEffect(() => {
+    indexRef.current = index;
+  }, [index]);
+  useEffect(() => {
+    sentencesRef.current = sentences;
+  }, [sentences]);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  useEffect(() => {
+    metaRef.current = meta;
+  }, [meta]);
 
   useEffect(() => {
     if (!mediaStartedRef.current) return;
@@ -63,9 +68,12 @@ export function useSpeechPlayer(
     }
   }, [meta?.title, meta?.artist]);
 
-  useEffect(() => () => {
-    Speech.stop();
-    endMediaSession();
+  useEffect(() => {
+    play();
+    return () => {
+      Speech.stop();
+      endMediaSession();
+    };
   }, []);
 
   const speakAt = useCallback((i: number) => {
@@ -106,7 +114,9 @@ export function useSpeechPlayer(
   const play = useCallback(() => {
     if (!mediaStartedRef.current && meta) {
       mediaStartedRef.current = true;
-      startSilentSession(meta).catch(() => { mediaStartedRef.current = false; });
+      startSilentSession(meta).catch(() => {
+        mediaStartedRef.current = false;
+      });
     } else {
       setMediaPlaying(true);
     }
@@ -125,16 +135,20 @@ export function useSpeechPlayer(
     else play();
   }, [isPlaying, play, pause]);
 
-  const jumpTo = useCallback((i: number) => {
-    const clamped = Math.max(0, Math.min(sentencesRef.current.length - 1, i));
-    setIndex(clamped);
-    if (isPlaying) {
-      speakAt(clamped);
-    } else {
-      genRef.current += 1;
-      Speech.stop();
-    }
-  }, [isPlaying, speakAt]);
+  const jumpTo = useCallback(
+    (i: number) => {
+      const clamped = Math.max(0, Math.min(sentencesRef.current.length - 1, i));
+      setIndex(clamped);
+      if (isPlaying) {
+        speakAt(clamped);
+      } else {
+        genRef.current += 1;
+        Speech.stop();
+        play();
+      }
+    },
+    [isPlaying, speakAt],
+  );
 
   const next = useCallback(() => jumpTo(indexRef.current + 1), [jumpTo]);
   const prev = useCallback(() => jumpTo(indexRef.current - 1), [jumpTo]);
@@ -154,7 +168,9 @@ export function useSpeechPlayer(
       onNext: () => nextRef.current(),
       onPrev: () => prevRef.current(),
     });
-    return () => { subs.forEach((s) => s.remove()); };
+    return () => {
+      subs.forEach((s) => s.remove());
+    };
   }, []);
 
   return {

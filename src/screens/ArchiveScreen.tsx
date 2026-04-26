@@ -1,13 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  RefreshControl,
-  useWindowDimensions,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, useWindowDimensions } from "react-native";
 import { showModal } from "src/state/modalState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors, Spacing, Typography, Radius } from "../theme";
@@ -16,6 +8,7 @@ import { getArchivedFolders, unarchiveFolder, deleteFolder } from "../db/folders
 import { getArchivedItems, unarchiveItem, deleteItem } from "../db/items";
 import ItemCard from "../components/ItemCard";
 import Screen from "../components/Screen";
+import ItemGrid from "src/components/ItemGrid";
 
 export default function ArchiveScreen() {
   const [archivedFolders, setArchivedFolders] = useState<Folder[]>([]);
@@ -124,6 +117,18 @@ export default function ArchiveScreen() {
 
   const isEmpty = archivedFolders.length === 0 && archivedItems.length === 0;
 
+  const renderItem = useCallback(
+    ({ item }: { item: StashItem }) => (
+      <ItemCard
+        item={item}
+        width={cardWidth}
+        onPress={() => handleItemOptions(item)}
+        onLongPress={() => handleItemOptions(item)}
+      />
+    ),
+    [cardWidth],
+  );
+
   return (
     <Screen>
       {isEmpty ? (
@@ -163,15 +168,14 @@ export default function ArchiveScreen() {
             <>
               <Text style={styles.sectionHeader}>Items</Text>
               <View style={styles.itemGrid}>
-                {archivedItems.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    width={cardWidth}
-                    onPress={() => handleItemOptions(item)}
-                    onLongPress={() => handleItemOptions(item)}
-                  />
-                ))}
+                <ItemGrid
+                  items={archivedItems}
+                  onPress={(item) => handleItemOptions(item)}
+                  onLongPress={(item) => handleItemOptions(item)}
+                  folderName="Archive"
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                />
               </View>
             </>
           )}
@@ -194,13 +198,13 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
-  folderList: { paddingHorizontal: Spacing.md },
+  folderList: { paddingHorizontal: Spacing.sm },
   folderRow: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
-    padding: Spacing.md,
+    padding: Spacing.sm,
     marginBottom: Spacing.sm,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -213,7 +217,7 @@ const styles = StyleSheet.create({
   itemGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: Spacing.sm,
   },
   empty: {
     flex: 1,
