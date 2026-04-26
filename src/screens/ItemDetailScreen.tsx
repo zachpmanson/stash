@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, Linking, Share, Image } from "react-native";
+import { shareAsync, isAvailableAsync } from "expo-sharing";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import * as Clipboard from "expo-clipboard";
@@ -37,7 +38,13 @@ export default function ItemDetailScreen() {
 
   const handleShare = useCallback(async () => {
     if (!item) return;
-    await Share.share({ url: item.type === "image" ? item.uri : undefined, message: item.uri });
+    if (item.type === "image" || item.type === "file") {
+      if (await isAvailableAsync()) {
+        await shareAsync(item.uri, item.mime_type ? { mimeType: item.mime_type } : undefined);
+        return;
+      }
+    }
+    await Share.share({ message: item.uri });
   }, [item]);
 
   const handleArchive = useCallback(() => {

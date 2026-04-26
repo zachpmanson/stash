@@ -10,7 +10,7 @@ type ScreenProps = {
   children: React.ReactNode;
   title?: string;
   options?: StackScreenOptions;
-  buttons: React.ReactNode;
+  buttons?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   applyTopInset?: boolean;
 };
