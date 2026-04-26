@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Linking, Share, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Linking, Share, Image, ActivityIndicator, Switch } from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
+import { useArticle } from "../hooks/useArticle";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import * as Clipboard from "expo-clipboard";
@@ -17,7 +18,8 @@ export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
-  const insets = useSafeAreaInsets();
+  const [splitBySentence, setSplitBySentence] = useState(false);
+  const { state: articleState, sentences } = useArticle(item?.type === "url" ? item.uri : undefined);
 
   useEffect(() => {
     getItemById(itemId).then(setItem);
@@ -119,6 +121,37 @@ export default function ItemDetailScreen() {
             <ActionButton label="Share" icon="↗️" onPress={handleShare} />
             <ActionButton label="Archive" icon="🗃️" onPress={handleArchive} danger />
           </View>
+
+          {item.type === "url" && (
+            <View style={styles.article}>
+              {articleState.kind === "loading" && (
+                <View style={styles.articleStatus}>
+                  <ActivityIndicator color={Colors.accent} />
+                  <Text style={styles.articleStatusText}>Loading article…</Text>
+                </View>
+              )}
+              {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
+              {articleState.kind === "ready" && (
+                <>
+                  <View style={styles.splitToggle}>
+                    <Text style={styles.splitToggleLabel}>Split by sentence</Text>
+                    <Switch value={splitBySentence} onValueChange={setSplitBySentence} />
+                  </View>
+                  {splitBySentence && sentences
+                    ? sentences.map((s, i) => (
+                        <Text style={styles.articleText} key={i} selectable>
+                          {s}
+                        </Text>
+                      ))
+                    : articleState.text.split("\n").map((s, i) => (
+                        <Text style={styles.articleText} key={i} selectable>
+                          {s}
+                        </Text>
+                      ))}
+                </>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
     </Screen>
@@ -211,4 +244,30 @@ const styles = StyleSheet.create({
   actionIcon: { fontSize: 16 },
   actionLabel: { ...Typography.body, fontSize: 14 },
   actionLabelDanger: { color: Colors.danger },
+  article: {
+    marginTop: Spacing.xl,
+    paddingTop: Spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: 12,
+  },
+  articleStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  articleStatusText: { ...Typography.caption },
+  articleError: { ...Typography.body, color: Colors.danger },
+  articleText: {
+    ...Typography.body,
+    fontFamily: "serif",
+    fontSize: 14,
+    lineHeight: 26,
+  },
+  splitToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  splitToggleLabel: { ...Typography.caption },
 });
