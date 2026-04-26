@@ -7,30 +7,23 @@ interface Props {
   item: StashItem;
   onPress: () => void;
   onLongPress?: () => void;
-  width: number;
 }
 
-export default function ItemCard({ item, onPress, onLongPress, width }: Props) {
-  const height = width * 1.1;
-
+export default function ItemCard({ item, onPress, onLongPress }: Props) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, { width, minHeight: height }, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       onPress={onPress}
       onLongPress={onLongPress}
     >
       {item.type === "image" && item.thumbnail_path ? (
-        <Image
-          source={{ uri: item.thumbnail_path }}
-          style={[styles.image, { height: height * 0.65 }]}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: item.thumbnail_path }} style={styles.image} resizeMode="cover" />
       ) : item.type === "url" ? (
-        <UrlPreview item={item} previewHeight={height * 0.55} />
+        <UrlPreview item={item} />
       ) : item.type === "text" ? (
-        <TextPreview item={item} previewHeight={height * 0.55} />
+        <TextPreview item={item} />
       ) : (
-        <FilePreview item={item} previewHeight={height * 0.55} />
+        <FilePreview item={item} />
       )}
 
       <View style={styles.meta}>
@@ -45,9 +38,9 @@ export default function ItemCard({ item, onPress, onLongPress, width }: Props) {
   );
 }
 
-function UrlPreview({ item, previewHeight }: { item: StashItem; previewHeight: number }) {
+function UrlPreview({ item }: { item: StashItem }) {
   return (
-    <View style={[styles.urlPreview, { height: previewHeight }]}>
+    <View style={styles.urlPreview}>
       {item.thumbnail_path ? (
         <Image source={{ uri: item.thumbnail_path }} style={StyleSheet.absoluteFill} resizeMode="cover" />
       ) : null}
@@ -63,9 +56,9 @@ function UrlPreview({ item, previewHeight }: { item: StashItem; previewHeight: n
   );
 }
 
-function TextPreview({ item, previewHeight }: { item: StashItem; previewHeight: number }) {
+function TextPreview({ item }: { item: StashItem }) {
   return (
-    <View style={[styles.textPreview, { height: previewHeight }]}>
+    <View style={styles.textPreview}>
       <Text style={styles.textSnippet} numberOfLines={6}>
         {item.uri}
       </Text>
@@ -73,10 +66,10 @@ function TextPreview({ item, previewHeight }: { item: StashItem; previewHeight: 
   );
 }
 
-function FilePreview({ item, previewHeight }: { item: StashItem; previewHeight: number }) {
+function FilePreview({ item }: { item: StashItem }) {
   const ext = item.mime_type?.split("/")[1]?.toUpperCase() ?? "FILE";
   return (
-    <View style={[styles.filePreview, { height: previewHeight }]}>
+    <View style={styles.filePreview}>
       <Text style={styles.fileIcon}>📎</Text>
       <Text style={styles.fileExt}>{ext}</Text>
     </View>
@@ -106,20 +99,22 @@ function formatDate(ts: number): string {
 
 const styles = StyleSheet.create({
   card: {
+    flex: 1,
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
     overflow: "hidden",
-    margin: Spacing.xs,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   pressed: { opacity: 0.8 },
   image: {
     width: "100%",
+    aspectRatio: 1 / 0.715,
     backgroundColor: Colors.surface2,
   },
   urlPreview: {
     width: "100%",
+    aspectRatio: 1 / 0.605,
     backgroundColor: Colors.surface2,
     overflow: "hidden",
   },
@@ -145,6 +140,7 @@ const styles = StyleSheet.create({
   },
   textPreview: {
     width: "100%",
+    aspectRatio: 1 / 0.605,
     backgroundColor: Colors.surface2,
     padding: Spacing.sm,
     justifyContent: "flex-start",
@@ -155,6 +151,7 @@ const styles = StyleSheet.create({
   },
   filePreview: {
     width: "100%",
+    aspectRatio: 1 / 0.605,
     backgroundColor: Colors.surface2,
     alignItems: "center",
     justifyContent: "center",

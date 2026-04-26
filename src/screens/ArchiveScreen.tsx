@@ -113,21 +113,7 @@ export default function ArchiveScreen() {
     [load],
   );
 
-  const cardWidth = (width - Spacing.md * 2 - Spacing.xs * 4) / 2;
-
   const isEmpty = archivedFolders.length === 0 && archivedItems.length === 0;
-
-  const renderItem = useCallback(
-    ({ item }: { item: StashItem }) => (
-      <ItemCard
-        item={item}
-        width={cardWidth}
-        onPress={() => handleItemOptions(item)}
-        onLongPress={() => handleItemOptions(item)}
-      />
-    ),
-    [cardWidth],
-  );
 
   return (
     <Screen>

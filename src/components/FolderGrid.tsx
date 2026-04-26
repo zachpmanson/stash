@@ -9,6 +9,9 @@ import { useFolderStore } from "src/state/folderState";
 
 const NUM_COLUMNS = 2;
 
+const SHADOW_FOLDER_ID = "__shadow__";
+type GridFolder = Folder | { id: typeof SHADOW_FOLDER_ID };
+
 export default function FolderGrid({
   onFolderPress,
   onFolderLongPress,
@@ -26,18 +29,29 @@ export default function FolderGrid({
   const [refreshing, setRefreshing] = useState(false);
 
   const renderFolder = useCallback(
-    ({ item }: { item: Folder }) => (
-      <FolderCard
-        folder={{ ...item, isSelected: selectedIds?.has(item.id) ?? false }}
-        onPress={(folder) => {
-          onFolderPress(folder);
-        }}
-        onLongPress={(folder) => {
-          onFolderLongPress?.(folder);
-        }}
-      />
-    ),
+    ({ item }: { item: GridFolder }) => {
+      if (item.id === SHADOW_FOLDER_ID) {
+        return <View style={styles.shadow} />;
+      }
+      const folder = item as Folder;
+      return (
+        <FolderCard
+          folder={{ ...folder, isSelected: selectedIds?.has(folder.id) ?? false }}
+          onPress={(f) => {
+            onFolderPress(f);
+          }}
+          onLongPress={(f) => {
+            onFolderLongPress?.(f);
+          }}
+        />
+      );
+    },
     [onFolderPress, onFolderLongPress, selectedIds],
+  );
+
+  const data = useMemo<GridFolder[]>(
+    () => (folders.length % NUM_COLUMNS === 0 ? folders : [...folders, { id: SHADOW_FOLDER_ID }]),
+    [folders],
   );
 
   const onRefresh = useCallback(async () => {
@@ -54,7 +68,7 @@ export default function FolderGrid({
 
   return (
     <FlatList
-      data={folders}
+      data={data}
       keyExtractor={(item) => item.id}
       renderItem={renderFolder}
       numColumns={NUM_COLUMNS}
@@ -77,6 +91,9 @@ const styles = StyleSheet.create({
   grid: {
     // paddingHorizontal: Spacing.md,
     paddingTop: Spacing.xs,
+  },
+  shadow: {
+    flex: 1,
   },
 
   empty: {
