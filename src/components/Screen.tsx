@@ -14,13 +14,7 @@ type ScreenProps = {
   applyTopInset?: boolean;
 };
 
-export default function Screen({
-  children,
-  title,
-  options,
-  style,
-  applyTopInset = true,
-}: ScreenProps) {
+export default function Screen({ children, title, options, style, applyTopInset = false }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const mergedOptions = title ? { title, ...options } : options;
 

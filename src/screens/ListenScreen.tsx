@@ -73,12 +73,34 @@ export default function ListenScreen() {
   );
 }
 
+const WORDS_PER_SECOND = 2.5;
+
+function countWords(s: string): number {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function formatRemaining(seconds: number): string {
+  if (seconds < 60) return "<1 min left";
+  const mins = Math.round(seconds / 60);
+  return `${mins} min left`;
+}
+
 function Player({ title, sentences }: { title: string | null; sentences: string[] }) {
   const meta = useMemo(() => ({ title: title ?? "Article", artist: "Stash" }), [title]);
   const player = useSpeechPlayer(sentences, meta);
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
   const scrollHeightRef = useRef(0);
+
+  const wordsPerSentence = useMemo(() => sentences.map(countWords), [sentences]);
+  const totalWords = useMemo(() => wordsPerSentence.reduce((a, b) => a + b, 0), [wordsPerSentence]);
+  const wordsRemaining = useMemo(() => {
+    let n = 0;
+    for (let i = player.index; i < wordsPerSentence.length; i++) n += wordsPerSentence[i];
+    return n;
+  }, [wordsPerSentence, player.index]);
+  const percent = totalWords === 0 ? 0 : Math.round(((totalWords - wordsRemaining) / totalWords) * 100);
+  const secondsLeft = Math.round(wordsRemaining / WORDS_PER_SECOND);
 
   useEffect(() => {
     const y = offsetsRef.current[player.index];
@@ -94,9 +116,13 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
           {title}
         </Text>
       )}
-      <Text style={styles.position}>
-        {player.index + 1} / {player.total}
-      </Text>
+      <View style={styles.progressRow}>
+        <Text style={styles.progressText}>{percent}%</Text>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${percent}%` }]} />
+        </View>
+        <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
+      </View>
 
       <ScrollView
         ref={scrollRef}
@@ -181,13 +207,31 @@ const styles = StyleSheet.create({
   playerRoot: { flex: 1, padding: Spacing.md },
   title: { ...Typography.subheading, marginBottom: Spacing.xs },
   position: { ...Typography.caption, marginBottom: Spacing.md },
+  progressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  progressText: { ...Typography.caption, minWidth: 56 },
+  progressBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.full,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: Colors.accent,
+  },
   sentenceScroll: { flex: 1 },
   sentenceContent: {
     paddingVertical: Spacing.lg,
   },
   sentence: {
-    fontSize: 18,
-    lineHeight: 32,
+    fontSize: 16,
+    lineHeight: 28,
     color: Colors.text,
     fontWeight: "500",
     marginBottom: Spacing.md,
@@ -204,6 +248,7 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     paddingVertical: Spacing.lg,
     backgroundColor: Colors.accentDim,
+    borderRadius: 5,
   },
   ctrl: {
     width: 56,
