@@ -19,7 +19,9 @@ export default function Screen({ children, title, options, style, applyTopInset 
   const mergedOptions = title ? { title, ...options } : options;
 
   return (
-    <View style={[styles.container, applyTopInset && { paddingTop: insets.top }, style]}>
+    <View
+      style={[styles.container, { paddingBottom: insets.bottom }, applyTopInset && { paddingTop: insets.top }, style]}
+    >
       {mergedOptions && <Stack.Screen options={mergedOptions} />}
       {children}
     </View>

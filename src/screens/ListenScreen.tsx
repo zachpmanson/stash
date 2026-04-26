@@ -9,6 +9,7 @@ import { getItemById } from "../db/items";
 import { fetchArticle } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type LoadState =
   | { kind: "loading" }
@@ -109,44 +110,48 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
     scrollRef.current.scrollTo({ y: target, animated: true });
   }, [player.index]);
 
-  return (
-    <View style={styles.playerRoot}>
-      {title && (
-        <Text style={styles.title} numberOfLines={2}>
-          {title}
-        </Text>
-      )}
-      <View style={styles.progressRow}>
-        <Text style={styles.progressText}>{percent}%</Text>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${percent}%` }]} />
-        </View>
-        <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
-      </View>
+  const insets = useSafeAreaInsets();
 
-      <ScrollView
-        ref={scrollRef}
-        style={styles.sentenceScroll}
-        contentContainerStyle={styles.sentenceContent}
-        onLayout={(e) => {
-          scrollHeightRef.current = e.nativeEvent.layout.height;
-        }}
-      >
-        {sentences.map((text, i) => {
-          const isCurrent = i === player.index;
-          return (
-            <Pressable
-              key={i}
-              onPress={() => player.jumpTo(i)}
-              onLayout={(e) => {
-                offsetsRef.current[i] = e.nativeEvent.layout.y;
-              }}
-            >
-              <Text style={[styles.sentence, !isCurrent && styles.sentenceDim]}>{text}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+  return (
+    <View style={[styles.playerRoot]}>
+      <View style={{ padding: Spacing.sm, flex: 1 }}>
+        {title && (
+          <Text style={styles.title} numberOfLines={2}>
+            {title}
+          </Text>
+        )}
+        <View style={styles.progressRow}>
+          <Text style={styles.progressText}>{percent}%</Text>
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${percent}%` }]} />
+          </View>
+          <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
+        </View>
+
+        <ScrollView
+          ref={scrollRef}
+          style={styles.sentenceScroll}
+          contentContainerStyle={styles.sentenceContent}
+          onLayout={(e) => {
+            scrollHeightRef.current = e.nativeEvent.layout.height;
+          }}
+        >
+          {sentences.map((text, i) => {
+            const isCurrent = i === player.index;
+            return (
+              <Pressable
+                key={i}
+                onPress={() => player.jumpTo(i)}
+                onLayout={(e) => {
+                  offsetsRef.current[i] = e.nativeEvent.layout.y;
+                }}
+              >
+                <Text style={[styles.sentence, !isCurrent && styles.sentenceDim]}>{text}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <View style={styles.controls}>
         <ControlButton icon="skip-previous" onPress={player.prev} disabled={player.index === 0} />
@@ -204,7 +209,10 @@ const styles = StyleSheet.create({
   },
   retryText: { ...Typography.body },
 
-  playerRoot: { flex: 1, padding: Spacing.md },
+  playerRoot: {
+    flex: 1,
+    // padding: Spacing.md
+  },
   title: { ...Typography.subheading, marginBottom: Spacing.xs },
   position: { ...Typography.caption, marginBottom: Spacing.md },
   progressRow: {
@@ -248,7 +256,7 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     paddingVertical: Spacing.lg,
     backgroundColor: Colors.accentDim,
-    borderRadius: 5,
+    // borderRadius: 10,
   },
   ctrl: {
     width: 56,
