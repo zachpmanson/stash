@@ -16,7 +16,10 @@
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "plugins": [
@@ -43,7 +46,10 @@
       "./plugins/share-intent-module"
     ],
     "ios": {
-      "bundleIdentifier": "com.zachmanson.stash"
+      "bundleIdentifier": "com.zachmanson.stash",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     }
   }
 }

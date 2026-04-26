@@ -109,6 +109,7 @@ export default function ItemDetailScreen() {
           <View style={styles.actions}>
             {item.type === 'url' && (
               <>
+                <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
                 <ActionButton label="Open" icon="🌐" onPress={handleOpen} />
                 <ActionButton label="Copy" icon="📋" onPress={handleCopy} />
               </>

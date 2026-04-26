@@ -11,6 +11,16 @@ import { isShareLaunch } from "../src/utils/nativeShareIntent";
 
 const SHARE_LAUNCH = isShareLaunch();
 
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const TrackPlayer = require("react-native-track-player").default;
+  if (TrackPlayer?.registerPlaybackService) {
+    TrackPlayer.registerPlaybackService(() => require("../service").default);
+  }
+} catch (e) {
+  console.warn("TrackPlayer registration failed:", e);
+}
+
 const NAV_THEME = {
   ...DarkTheme,
   colors: {
@@ -54,6 +64,7 @@ function RootLayout() {
         />
         <Stack.Screen name="folder/[id]" />
         <Stack.Screen name="item/[id]" options={{ title: "" }} />
+        <Stack.Screen name="listen/[id]" options={{ title: "Listen" }} />
         <Stack.Screen name="move-item/[id]" options={{ title: "Add to folders", presentation: "modal" }} />
         <Stack.Screen name="edit-folder/[id]" options={{ title: "Edit Folder", presentation: "modal" }} />
       </Stack>
