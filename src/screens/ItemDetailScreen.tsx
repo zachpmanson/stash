@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Switch,
   Modal,
+  RefreshControl,
 } from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
 import { useArticle } from "../hooks/useArticle";
@@ -26,7 +27,6 @@ import Screen from "../components/Screen";
 import TopbarButton from "src/components/TopbarButton";
 import { MaterialIcons } from "@expo/vector-icons";
 import { arrIf } from "src/utils/array";
-import { readImageGeo, mapsUrl, ImageGeo } from "../utils/imageExif";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -34,26 +34,15 @@ export default function ItemDetailScreen() {
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [geo, setGeo] = useState<ImageGeo | null>(null);
-  const { state: articleState, sentences } = useArticle(item?.type === "url" ? item.uri : undefined);
+  const { state: articleState, sentences, refresh: refreshArticle, refreshing } = useArticle(
+    item?.type === "url" ? item.uri : undefined,
+    item?.id,
+    item?.article_text,
+  );
 
   useEffect(() => {
     getItemById(itemId).then(setItem);
   }, [itemId]);
-
-  useEffect(() => {
-    if (item?.type !== "image") {
-      setGeo(null);
-      return;
-    }
-    let cancelled = false;
-    readImageGeo(item.uri).then((g) => {
-      if (!cancelled) setGeo(g);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [item]);
 
   const handleOpen = useCallback(() => {
     if (!item) return;
@@ -118,7 +107,14 @@ export default function ItemDetailScreen() {
         ),
       ]}
     >
-      <ScrollView contentContainerStyle={{ paddingBottom: Spacing.xl }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: Spacing.xl }}
+        refreshControl={
+          item.type === "url" ? (
+            <RefreshControl refreshing={refreshing} onRefresh={refreshArticle} tintColor={Colors.accent} />
+          ) : undefined
+        }
+      >
         {item.type === "image" && <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />}
 
         {item.type === "url" && item.thumbnail_path && (
@@ -144,22 +140,6 @@ export default function ItemDetailScreen() {
 
 
           {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
-
-          {item.type === "image" && geo && (
-            <Pressable
-              onPress={() =>
-                Linking.openURL(mapsUrl(geo)).catch(() =>
-                  showModal({ title: "Cannot open map", message: mapsUrl(geo) }),
-                )
-              }
-              style={styles.location}
-            >
-              <MaterialIcons name="place" size={16} color={Colors.accent} />
-              <Text style={styles.locationText}>
-                {geo.latitude.toFixed(5)}, {geo.longitude.toFixed(5)}
-              </Text>
-            </Pressable>
-          )}
 
           <Text style={styles.meta}>Saved {new Date(item.created_at).toLocaleString()}</Text>
 
@@ -279,17 +259,6 @@ const styles = StyleSheet.create({
   meta: {
     ...Typography.caption,
     marginBottom: Spacing.xl,
-  },
-  location: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginBottom: Spacing.md,
-  },
-  locationText: {
-    ...Typography.body,
-    fontSize: 14,
-    color: Colors.accent,
   },
   actions: {
     flexDirection: "row",

@@ -4,6 +4,7 @@ import { saveItem } from "../db/items";
 import { ItemType, StashItem } from "../types";
 import { copyFileToStash, getExtension, isImageMime, isVideoMime } from "./fileUtils";
 import { fetchLinkPreview } from "./linkPreview";
+import { fetchArticle } from "./readability";
 
 export function detectItemType(payload: ResolvedSharePayload): ItemType {
   if (payload.shareType === "url") return "url";
@@ -34,6 +35,7 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
   let description: string | null = null;
   let faviconUrl: string | null = null;
   let thumbnailPath: string | null = null;
+  let articleText: string | null = null;
 
   if (type === "image" || type === "file") {
     const ext = getExtension(mimeType);
@@ -44,10 +46,17 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
     }
     uri = savedUri;
   } else if (type === "url") {
-    const preview = await fetchLinkPreview(uri.trim());
+    uri = uri.trim();
+    const preview = await fetchLinkPreview(uri);
     title = preview.title;
     description = preview.description;
     faviconUrl = preview.favicon;
+    try {
+      const article = await fetchArticle(uri);
+      articleText = article.text;
+    } catch {
+      // article extraction is best-effort
+    }
     if (preview.image) {
       try {
         const dir = new Directory(Paths.cache, "stash");
@@ -71,6 +80,7 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
     thumbnail_path: thumbnailPath,
     mime_type: mimeType,
     created_at: now,
+    article_text: articleText,
     folder_ids: folderIds,
   };
 
