@@ -31,19 +31,21 @@ export default function FolderGrid({
   const renderFolder = useCallback(
     ({ item }: { item: GridFolder }) => {
       if (item.id === SHADOW_FOLDER_ID) {
-        return <View style={styles.shadow} />;
+        return <View style={styles.cell} />;
       }
       const folder = item as Folder;
       return (
-        <FolderCard
-          folder={{ ...folder, isSelected: selectedIds?.has(folder.id) ?? false }}
-          onPress={(f) => {
-            onFolderPress(f);
-          }}
-          onLongPress={(f) => {
-            onFolderLongPress?.(f);
-          }}
-        />
+        <View style={styles.cell}>
+          <FolderCard
+            folder={{ ...folder, isSelected: selectedIds?.has(folder.id) ?? false }}
+            onPress={(f) => {
+              onFolderPress(f);
+            }}
+            onLongPress={(f) => {
+              onFolderLongPress?.(f);
+            }}
+          />
+        </View>
       );
     },
     [onFolderPress, onFolderLongPress, selectedIds],
@@ -72,6 +74,7 @@ export default function FolderGrid({
       keyExtractor={(item) => item.id}
       renderItem={renderFolder}
       numColumns={NUM_COLUMNS}
+      columnWrapperStyle={styles.row}
       contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + Spacing.xl }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
       ListEmptyComponent={
@@ -89,12 +92,15 @@ export default function FolderGrid({
 
 const styles = StyleSheet.create({
   grid: {
-    // paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.sm,
+    gap: Spacing.sm,
   },
-  shadow: {
+  row: {
+    gap: Spacing.sm,
+  },
+  cell: {
     flex: 1,
-    margin: Spacing.xs,
   },
 
   empty: {
