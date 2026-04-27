@@ -94,6 +94,7 @@ const styles = StyleSheet.create({
   },
   shadow: {
     flex: 1,
+    margin: Spacing.xs,
   },
 
   empty: {

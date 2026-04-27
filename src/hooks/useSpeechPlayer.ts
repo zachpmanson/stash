@@ -8,6 +8,7 @@ import {
   seekMediaSession,
   subscribeRemoteEvents,
 } from "../utils/mediaSession";
+import { useVoiceStore } from "../state/voiceState";
 
 export type SpeechPlayerMeta = {
   title: string;
@@ -41,6 +42,8 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
   const isPlayingRef = useRef(false);
   const mediaStartedRef = useRef(false);
   const metaRef = useRef(meta);
+  const selectedVoice = useVoiceStore((s) => s.selectedVoice);
+  const voiceRef = useRef(selectedVoice);
 
   useEffect(() => {
     indexRef.current = index;
@@ -76,6 +79,13 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
     };
   }, []);
 
+  useEffect(() => {
+    voiceRef.current = selectedVoice;
+    if (isPlayingRef.current) {
+      speakAt(indexRef.current);
+    }
+  }, [selectedVoice]);
+
   const speakAt = useCallback((i: number) => {
     const list = sentencesRef.current;
     if (i < 0 || i >= list.length) {
@@ -107,6 +117,7 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
         setIsPlaying(false);
         setMediaPlaying(false);
       },
+      voice: voiceRef.current,
     });
     setIsPlaying(true);
   }, []);

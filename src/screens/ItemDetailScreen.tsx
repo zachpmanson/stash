@@ -126,6 +126,7 @@ export default function ItemDetailScreen() {
             </Text>
           )}
 
+
           {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
 
           <Text style={styles.meta}>Saved {new Date(item.created_at).toLocaleString()}</Text>
@@ -137,6 +138,9 @@ export default function ItemDetailScreen() {
                 <ActionButton label="Open" icon="🌐" onPress={handleOpen} />
                 <ActionButton label="Copy" icon="📋" onPress={handleCopy} />
               </>
+            )}
+            {item.type === "text" && (
+              <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
             )}
             <ActionButton label="Share" icon="↗️" onPress={handleShare} />
             <ActionButton label="Archive" icon="🗃️" onPress={handleArchive} danger />
