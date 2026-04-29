@@ -76,6 +76,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Stash</Text>
         <View style={styles.headerActions}>
+          <IconButton onPress={() => router.push("/settings")}>⚙️</IconButton>
           <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
           <IconButton style={[styles.addBtn]} onPress={handleNewFolder}>
             <Text style={styles.addBtnText}>+</Text>
