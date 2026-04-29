@@ -3,6 +3,7 @@ import { StatusBar } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider, DarkTheme } from "@react-navigation/native";
+import { PaperProvider, MD3DarkTheme } from "react-native-paper";
 import { useIncomingShare } from "expo-sharing";
 import { Colors } from "../src/theme";
 import { SnackbarHost } from "../src/components/SnackbarHost";
@@ -30,6 +31,20 @@ const NAV_THEME = {
     text: Colors.text,
     border: Colors.border,
     primary: Colors.accent,
+  },
+};
+
+const PAPER_THEME = {
+  ...MD3DarkTheme,
+  colors: {
+    ...MD3DarkTheme.colors,
+    primary: Colors.accent,
+    background: Colors.bg,
+    surface: Colors.surface,
+    onSurface: Colors.text,
+    inverseSurface: Colors.surface2,
+    inverseOnSurface: Colors.text,
+    outline: Colors.border,
   },
 };
 
@@ -76,14 +91,16 @@ export default function App() {
   return (
     // <ShareIntentProvider>
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor={SHARE_LAUNCH ? "transparent" : Colors.bg}
-        translucent={SHARE_LAUNCH}
-      />
-      <RootLayout />
-      <SnackbarHost />
-      <ModalHost />
+      <PaperProvider theme={PAPER_THEME}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={SHARE_LAUNCH ? "transparent" : Colors.bg}
+          translucent={SHARE_LAUNCH}
+        />
+        <RootLayout />
+        <SnackbarHost />
+        <ModalHost />
+      </PaperProvider>
     </SafeAreaProvider>
     // </ShareIntentProvider>
   );

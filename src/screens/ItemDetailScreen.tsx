@@ -9,8 +9,6 @@ import {
   Share,
   Image,
   ActivityIndicator,
-  Switch,
-  Modal,
   RefreshControl,
 } from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
@@ -26,6 +24,7 @@ import { StashItem } from "../types";
 import { getItemById, archiveItem } from "../db/items";
 import Screen from "../components/Screen";
 import TopbarButton from "src/components/TopbarButton";
+import OverflowMenu from "src/components/OverflowMenu";
 import { MaterialIcons } from "@expo/vector-icons";
 import { arrIf } from "src/utils/array";
 
@@ -34,7 +33,6 @@ export default function ItemDetailScreen() {
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const { state: articleState, sentences, refresh: refreshArticle, loadFrom: loadArticleFrom, refreshing } = useArticle(
     item?.type === "url" ? item.uri : undefined,
     item?.id,
@@ -45,7 +43,6 @@ export default function ItemDetailScreen() {
     (source: "is" | "org") => {
       if (!item || item.type !== "url") return;
       const archiveUrl = source === "is" ? archiveIsUrl(item.uri) : archiveOrgUrl(item.uri);
-      setMenuOpen(false);
       loadArticleFrom(archiveUrl).catch(() => {});
     },
     [item, loadArticleFrom],
@@ -112,9 +109,16 @@ export default function ItemDetailScreen() {
         </TopbarButton>,
         ...arrIf(
           item.type === "url",
-          <TopbarButton onPress={() => setMenuOpen(true)}>
-            <MaterialIcons name="more-vert" size={20} color={Colors.text} />
-          </TopbarButton>,
+          <OverflowMenu
+            items={[
+              {
+                title: splitBySentence ? "Unsplit sentences" : "Split by sentence",
+                onPress: () => setSplitBySentence((v) => !v),
+              },
+              { title: "Load from archive.is", onPress: () => handleLoadFromArchive("is") },
+              { title: "Load from archive.org", onPress: () => handleLoadFromArchive("org") },
+            ]}
+          />,
         ),
       ]}
     >
@@ -194,22 +198,6 @@ export default function ItemDetailScreen() {
           )}
         </View>
       </ScrollView>
-      <Modal transparent visible={menuOpen} animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
-          <View style={styles.menu}>
-            <Pressable style={styles.menuItem} onPress={() => setSplitBySentence((v) => !v)}>
-              <Text style={styles.menuItemLabel}>Split by sentence</Text>
-              <Switch value={splitBySentence} onValueChange={setSplitBySentence} />
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => handleLoadFromArchive("is")}>
-              <Text style={styles.menuItemLabel}>Load from archive.is</Text>
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => handleLoadFromArchive("org")}>
-              <Text style={styles.menuItemLabel}>Load from archive.org</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
     </Screen>
   );
 }
@@ -327,28 +315,4 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   splitToggleLabel: { ...Typography.caption },
-  menuBackdrop: {
-    flex: 1,
-    alignItems: "flex-end",
-    paddingTop: 56,
-    paddingHorizontal: Spacing.sm,
-    backgroundColor: "transparent",
-  },
-  menu: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    minWidth: 220,
-    paddingVertical: Spacing.xs,
-  },
-  menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    gap: Spacing.md,
-  },
-  menuItemLabel: { ...Typography.body, fontSize: 14 },
 });

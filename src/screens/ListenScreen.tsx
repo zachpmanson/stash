@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import Screen from "../components/Screen";
-import TopbarButton from "../components/TopbarButton";
+import OverflowMenu from "../components/OverflowMenu";
 import { StashItem } from "../types";
 import { getItemById } from "../db/items";
 import { fetchArticle } from "../utils/readability";
@@ -64,33 +64,15 @@ export default function ListenScreen() {
 
   const sentences = useMemo(() => (state.kind === "ready" ? state.sentences : []), [state]);
 
-  const [overflowOpen, setOverflowOpen] = useState(false);
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
 
   return (
     <Screen
       options={{ title: "Listen" }}
       buttons={[
-        <TopbarButton onPress={() => setOverflowOpen(true)}>
-          <MaterialIcons name="more-vert" size={20} color={Colors.text} />
-        </TopbarButton>,
+        <OverflowMenu items={[{ title: "Voice", onPress: () => setVoiceMenuOpen(true) }]} />,
       ]}
     >
-      <Modal transparent visible={overflowOpen} animationType="fade" onRequestClose={() => setOverflowOpen(false)}>
-        <Pressable style={styles.overflowBackdrop} onPress={() => setOverflowOpen(false)}>
-          <View style={styles.overflowMenu}>
-            <Pressable
-              style={styles.overflowItem}
-              onPress={() => {
-                setOverflowOpen(false);
-                setVoiceMenuOpen(true);
-              }}
-            >
-              <Text style={styles.overflowItemLabel}>Voice</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
       <VoicePickerModal visible={voiceMenuOpen} onClose={() => setVoiceMenuOpen(false)} />
       {state.kind === "loading" && (
         <View style={styles.center}>
@@ -467,23 +449,4 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     gap: Spacing.sm,
   },
-  overflowBackdrop: {
-    flex: 1,
-    alignItems: "flex-end",
-    paddingTop: 56,
-    paddingHorizontal: Spacing.sm,
-  },
-  overflowMenu: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    minWidth: 180,
-    paddingVertical: Spacing.xs,
-  },
-  overflowItem: {
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-  },
-  overflowItemLabel: { ...Typography.body, fontSize: 14 },
 });
