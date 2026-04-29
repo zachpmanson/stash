@@ -7,6 +7,14 @@ export type Article = {
   text: string;
 };
 
+export function archiveIsUrl(url: string): string {
+  return `https://archive.ph/newest/${url}`;
+}
+
+export function archiveOrgUrl(url: string): string {
+  return `https://web.archive.org/web/2/${url}`;
+}
+
 export async function fetchArticle(url: string): Promise<Article> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);

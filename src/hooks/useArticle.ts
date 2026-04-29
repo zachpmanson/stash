@@ -17,6 +17,7 @@ export function useArticle(
   state: ArticleState;
   sentences: string[] | undefined;
   refresh: () => Promise<void>;
+  loadFrom: (sourceUrl: string) => Promise<void>;
   refreshing: boolean;
 } {
   const [state, setState] = useState<ArticleState>(
@@ -69,5 +70,22 @@ export function useArticle(
     }
   }, [url, itemId]);
 
-  return { state, sentences, refresh, refreshing };
+  const loadFrom = useCallback(
+    async (sourceUrl: string) => {
+      setRefreshing(true);
+      setState({ kind: "loading" });
+      try {
+        const { title, text } = await fetchArticle(sourceUrl);
+        setState({ kind: "ready", title, text });
+        if (itemId) await updateItemArticleText(itemId, text);
+      } catch (err) {
+        setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [itemId],
+  );
+
+  return { state, sentences, refresh, loadFrom, refreshing };
 }

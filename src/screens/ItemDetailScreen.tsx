@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
 import { useArticle } from "../hooks/useArticle";
+import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import * as Clipboard from "expo-clipboard";
@@ -34,10 +35,20 @@ export default function ItemDetailScreen() {
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const { state: articleState, sentences, refresh: refreshArticle, refreshing } = useArticle(
+  const { state: articleState, sentences, refresh: refreshArticle, loadFrom: loadArticleFrom, refreshing } = useArticle(
     item?.type === "url" ? item.uri : undefined,
     item?.id,
     item?.article_text,
+  );
+
+  const handleLoadFromArchive = useCallback(
+    (source: "is" | "org") => {
+      if (!item || item.type !== "url") return;
+      const archiveUrl = source === "is" ? archiveIsUrl(item.uri) : archiveOrgUrl(item.uri);
+      setMenuOpen(false);
+      loadArticleFrom(archiveUrl).catch(() => {});
+    },
+    [item, loadArticleFrom],
   );
 
   useEffect(() => {
@@ -189,6 +200,12 @@ export default function ItemDetailScreen() {
             <Pressable style={styles.menuItem} onPress={() => setSplitBySentence((v) => !v)}>
               <Text style={styles.menuItemLabel}>Split by sentence</Text>
               <Switch value={splitBySentence} onValueChange={setSplitBySentence} />
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={() => handleLoadFromArchive("is")}>
+              <Text style={styles.menuItemLabel}>Load from archive.is</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={() => handleLoadFromArchive("org")}>
+              <Text style={styles.menuItemLabel}>Load from archive.org</Text>
             </Pressable>
           </View>
         </Pressable>
