@@ -5,7 +5,6 @@ import {
   setMediaPlaying,
   endMediaSession,
   updateMediaMeta,
-  seekMediaSession,
   subscribeRemoteEvents,
 } from "../utils/mediaSession";
 import { useVoiceStore } from "../state/voiceState";
@@ -16,6 +15,14 @@ export type SpeechPlayerMeta = {
   totalSeconds: number;
   secondsAt: number[];
 };
+
+function remainingFor(meta: SpeechPlayerMeta | undefined, index: number): string | undefined {
+  if (!meta) return undefined;
+  const at = meta.secondsAt[index];
+  if (at == null) return undefined;
+  const mins = Math.max(1, Math.round((meta.totalSeconds - at) / 60));
+  return `${mins} min left`;
+}
 
 export type SpeechPlayer = {
   index: number;
@@ -60,14 +67,23 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
 
   useEffect(() => {
     if (!mediaStartedRef.current) return;
-    const at = metaRef.current?.secondsAt[index];
-    if (at != null) seekMediaSession(at);
+    const m = metaRef.current;
+    if (!m) return;
+    updateMediaMeta({
+      title: m.title,
+      artist: m.artist,
+      album: remainingFor(m, index),
+    });
   }, [index]);
 
   useEffect(() => {
     if (!meta) return;
     if (mediaStartedRef.current) {
-      updateMediaMeta(meta);
+      updateMediaMeta({
+        title: meta.title,
+        artist: meta.artist,
+        album: remainingFor(meta, indexRef.current),
+      });
     }
   }, [meta?.title, meta?.artist]);
 
@@ -125,7 +141,11 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
   const play = useCallback(() => {
     if (!mediaStartedRef.current && meta) {
       mediaStartedRef.current = true;
-      startSilentSession(meta).catch(() => {
+      startSilentSession({
+        title: meta.title,
+        artist: meta.artist,
+        album: remainingFor(meta, indexRef.current),
+      }).catch(() => {
         mediaStartedRef.current = false;
       });
     } else {
