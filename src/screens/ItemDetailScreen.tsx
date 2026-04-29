@@ -12,6 +12,8 @@ import {
   RefreshControl,
 } from "react-native";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
+import * as IntentLauncher from "expo-intent-launcher";
+import * as FileSystem from "expo-file-system/legacy";
 import { useArticle } from "../hooks/useArticle";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { showModal } from "src/state/modalState";
@@ -76,6 +78,20 @@ export default function ItemDetailScreen() {
     await Share.share({ message: item.uri });
   }, [item]);
 
+  const handleOpenImage = useCallback(async () => {
+    if (!item || item.type !== "image") return;
+    try {
+      const contentUri = await FileSystem.getContentUriAsync(item.uri);
+      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+        data: contentUri,
+        flags: 1,
+        type: item.mime_type ?? "image/*",
+      });
+    } catch {
+      showModal({ title: "Cannot open image", message: "No gallery app available." });
+    }
+  }, [item]);
+
   const handleArchive = useCallback(() => {
     if (!item) return;
     showModal({
@@ -130,7 +146,11 @@ export default function ItemDetailScreen() {
           ) : undefined
         }
       >
-        {item.type === "image" && <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />}
+        {item.type === "image" && (
+          <Pressable onPress={handleOpenImage}>
+            <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />
+          </Pressable>
+        )}
 
         {item.type === "url" && item.thumbnail_path && (
           <Image source={{ uri: item.thumbnail_path }} style={styles.ogImage} resizeMode="cover" />

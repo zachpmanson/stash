@@ -38,6 +38,9 @@ importers:
       expo-image:
         specifier: ^55.0.9
         version: 55.0.9(expo@55.0.18)(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.1.3(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+      expo-intent-launcher:
+        specifier: ^55.0.12
+        version: 55.0.12(expo@55.0.18)
       expo-media-library:
         specifier: ^55.0.15
         version: 55.0.15(expo@55.0.18)(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.1.3(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))
@@ -1960,6 +1963,11 @@ packages:
     peerDependenciesMeta:
       react-native-web:
         optional: true
+
+  expo-intent-launcher@55.0.12:
+    resolution: {integrity: sha512-Mo94T8rq1bFSiXX8vR/2U5xIlrbGnXXqT6gfp/fsR5IsBBog3Jf2MbSvAfqj78Z/ho5LK3d/PXJjCOONFqXZ2A==}
+    peerDependencies:
+      expo: '*'
 
   expo-keep-awake@55.0.6:
     resolution: {integrity: sha512-acJjeHqkNxMVckEcJhGQeIksqqsarscSHJtT559bNgyiM4r14dViQ66su7bb6qDVeBt0K7z3glXI1dHVck1Zgg==}
@@ -6074,6 +6082,10 @@ snapshots:
       react: 19.2.0
       react-native: 0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.1.3(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0)
       sf-symbols-typescript: 2.2.0
+
+  expo-intent-launcher@55.0.12(expo@55.0.18):
+    dependencies:
+      expo: 55.0.18(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(@expo/metro-runtime@55.0.9)(expo-router@55.0.13)(react-dom@19.2.5(react@19.2.0))(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.1.3(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.7.3)
 
   expo-keep-awake@55.0.6(expo@55.0.18)(react@19.2.0):
     dependencies:
