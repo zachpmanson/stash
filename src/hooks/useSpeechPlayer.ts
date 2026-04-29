@@ -8,6 +8,7 @@ import {
   subscribeRemoteEvents,
 } from "../utils/mediaSession";
 import { useVoiceStore } from "../state/voiceState";
+import { useListenSession } from "../state/listenSession";
 
 export type SpeechPlayerMeta = {
   title: string;
@@ -24,6 +25,12 @@ function remainingFor(meta: SpeechPlayerMeta | undefined, index: number): string
   return `${mins} min left`;
 }
 
+function artistFor(meta: SpeechPlayerMeta, index: number): string {
+  const remaining = remainingFor(meta, index);
+  const base = meta.artist ?? "Stash";
+  return remaining ? `${base} · ${remaining}` : base;
+}
+
 export type SpeechPlayer = {
   index: number;
   isPlaying: boolean;
@@ -37,8 +44,14 @@ export type SpeechPlayer = {
   jumpTo: (i: number) => void;
 };
 
-export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): SpeechPlayer {
-  const [index, setIndex] = useState(0);
+export function useSpeechPlayer(
+  sentences: string[],
+  meta?: SpeechPlayerMeta,
+  itemId?: string,
+): SpeechPlayer {
+  const [index, setIndex] = useState(() =>
+    itemId ? useListenSession.getState().getRememberedIndex(itemId) : 0,
+  );
   const [isPlaying, setIsPlaying] = useState(true);
 
   // Track the utterance generation to ignore stale onDone callbacks
@@ -54,7 +67,8 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
 
   useEffect(() => {
     indexRef.current = index;
-  }, [index]);
+    if (itemId) useListenSession.getState().rememberIndex(itemId, index);
+  }, [index, itemId]);
   useEffect(() => {
     sentencesRef.current = sentences;
   }, [sentences]);
@@ -71,8 +85,7 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
     if (!m) return;
     updateMediaMeta({
       title: m.title,
-      artist: m.artist,
-      album: remainingFor(m, index),
+      artist: artistFor(m, index),
     });
   }, [index]);
 
@@ -81,8 +94,7 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
     if (mediaStartedRef.current) {
       updateMediaMeta({
         title: meta.title,
-        artist: meta.artist,
-        album: remainingFor(meta, indexRef.current),
+        artist: artistFor(meta, indexRef.current),
       });
     }
   }, [meta?.title, meta?.artist]);
@@ -143,8 +155,7 @@ export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta): S
       mediaStartedRef.current = true;
       startSilentSession({
         title: meta.title,
-        artist: meta.artist,
-        album: remainingFor(meta, indexRef.current),
+        artist: artistFor(meta, indexRef.current),
       }).catch(() => {
         mediaStartedRef.current = false;
       });

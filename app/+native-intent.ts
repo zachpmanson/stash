@@ -1,6 +1,9 @@
 import { getSharedPayloads } from "expo-sharing";
+import { getActiveListenItemId } from "../src/state/listenSession";
 // iOS encodes the shared payload as stash://dataUrl=...
 // Android file shares arrive as a content:// URI — redirect both to /share.
+// react-native-track-player taps arrive as trackplayer://notification.click —
+// redirect to the active Listen screen.
 // Everything else falls through to expo-router's default handling.
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   console.debug({
@@ -9,6 +12,10 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     getSharedPayloads: getSharedPayloads(),
   });
   try {
+    if (path.startsWith("trackplayer://")) {
+      const id = getActiveListenItemId();
+      return id ? `/listen/${id}` : "/";
+    }
     // Share intents: route to home and let _layout push /share as a modal
     // once useIncomingShare surfaces the payload. Routing to /share directly
     // would make it the only entry in the stack (no / to back to).
@@ -20,8 +27,4 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     // Fallback to the root path  on error
     return "/";
   }
-  // if (path.includes("dataUrl=") || path.startsWith("content://")) {
-  // return "/share";
-  // }
-  return null;
 }

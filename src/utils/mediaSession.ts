@@ -72,6 +72,7 @@ export async function startSilentSession(meta: {
       title: meta.title,
       artist: meta.artist ?? 'Stash',
       album: meta.album,
+      duration: 0,
       isLiveStream: true,
     });
     await TrackPlayer.setRepeatMode(m.RepeatMode.Track);

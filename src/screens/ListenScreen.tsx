@@ -13,6 +13,7 @@ import { normalizeText, splitSentences } from "../utils/sentences";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { wordsToSeconds } from "../utils/speech";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useListenSession } from "../state/listenSession";
 
 type LoadState =
   | { kind: "loading" }
@@ -27,6 +28,11 @@ export default function ListenScreen() {
 
   useEffect(() => {
     getItemById(itemId).then(setItem);
+  }, [itemId]);
+
+  useEffect(() => {
+    useListenSession.getState().setActiveItemId(itemId);
+    return () => useListenSession.getState().setActiveItemId(null);
   }, [itemId]);
 
   useEffect(() => {
@@ -69,9 +75,7 @@ export default function ListenScreen() {
   return (
     <Screen
       options={{ title: "Listen" }}
-      buttons={[
-        <OverflowMenu items={[{ title: "Voice", onPress: () => setVoiceMenuOpen(true) }]} />,
-      ]}
+      buttons={[<OverflowMenu items={[{ title: "Voice", onPress: () => setVoiceMenuOpen(true) }]} />]}
     >
       <VoicePickerModal visible={voiceMenuOpen} onClose={() => setVoiceMenuOpen(false)} />
       {state.kind === "loading" && (
@@ -90,7 +94,7 @@ export default function ListenScreen() {
         </View>
       )}
 
-      {state.kind === "ready" && <Player title={state.title} sentences={sentences} />}
+      {state.kind === "ready" && <Player title={state.title} sentences={sentences} itemId={itemId} />}
     </Screen>
   );
 }
@@ -105,7 +109,7 @@ function formatRemaining(seconds: number): string {
   return `${mins} min left`;
 }
 
-function Player({ title, sentences }: { title: string | null; sentences: string[] }) {
+function Player({ title, sentences, itemId }: { title: string | null; sentences: string[]; itemId: string }) {
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
   const scrollHeightRef = useRef(0);
@@ -127,7 +131,7 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
     () => ({ title: title ?? "Article", artist: "Stash", totalSeconds, secondsAt }),
     [title, totalSeconds, secondsAt],
   );
-  const player = useSpeechPlayer(sentences, meta);
+  const player = useSpeechPlayer(sentences, meta, itemId);
 
   const wordsRemaining = useMemo(() => {
     let n = 0;
@@ -150,9 +154,15 @@ function Player({ title, sentences }: { title: string | null; sentences: string[
     <View style={[styles.playerRoot]}>
       <View style={{ padding: Spacing.sm, paddingTop: Spacing.lg, flex: 1 }}>
         {title && (
-          <Text style={styles.title} numberOfLines={2}>
-            {title}
-          </Text>
+          <View
+            style={{
+              backgroundColor: Colors.accentDim,
+            }}
+          >
+            <Text style={[styles.title]} numberOfLines={2}>
+              {title}
+            </Text>
+          </View>
         )}
 
         <ScrollView

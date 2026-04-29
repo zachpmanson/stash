@@ -46,7 +46,3 @@ export function splitSentences(text: string): string[] {
   }
   return result;
 }
-
-export function insertParagraphBreaks(text: string) {
-  return text.replace(/\.([A-Z][a-z])/g, ".\n$1");
-}
