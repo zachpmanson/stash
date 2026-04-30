@@ -1,7 +1,7 @@
-type TrackPlayerModule = typeof import('react-native-track-player');
+type TrackPlayerModule = typeof import("react-native-track-player");
 
 const SILENT_TRACK_URL =
-  'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+  "data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==";
 
 let tp: TrackPlayerModule | null | false = null;
 
@@ -10,10 +10,10 @@ function getTP(): TrackPlayerModule | null {
   if (tp) return tp;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    tp = require('react-native-track-player');
+    tp = require("react-native-track-player");
     return tp as TrackPlayerModule;
   } catch (e) {
-    console.warn('react-native-track-player unavailable:', e);
+    console.warn("react-native-track-player unavailable:", e);
     tp = false;
     return null;
   }
@@ -28,9 +28,12 @@ export function setupMediaSession(): Promise<void> {
   if (!setupPromise) {
     setupPromise = (async () => {
       try {
-        await TrackPlayer.setupPlayer({ autoHandleInterruptions: true });
+        await TrackPlayer.setupPlayer({
+          autoHandleInterruptions: true,
+          androidAudioContentType: m.AndroidAudioContentType.Speech,
+        });
       } catch (e: any) {
-        if (!String(e?.message ?? e).includes('already been initialized')) throw e;
+        if (!String(e?.message ?? e).includes("already been initialized")) throw e;
       }
       await TrackPlayer.updateOptions({
         android: {
@@ -55,11 +58,7 @@ export function setupMediaSession(): Promise<void> {
   return setupPromise;
 }
 
-export async function startSilentSession(meta: {
-  title: string;
-  artist?: string;
-  album?: string;
-}) {
+export async function startSilentSession(meta: { title: string; artist?: string; album?: string }) {
   const m = getTP();
   if (!m) return;
   const TrackPlayer = m.default;
@@ -67,18 +66,16 @@ export async function startSilentSession(meta: {
     await setupMediaSession();
     await TrackPlayer.reset();
     await TrackPlayer.add({
-      id: 'stash-listen',
-      url: SILENT_TRACK_URL,
+      id: "stash-listen",
+      url: "x",
       title: meta.title,
-      artist: meta.artist ?? 'Stash',
+      artist: meta.artist ?? "Stash",
       album: meta.album,
-      duration: 0,
-      isLiveStream: true,
     });
     await TrackPlayer.setRepeatMode(m.RepeatMode.Track);
     await TrackPlayer.play();
   } catch (e) {
-    console.warn('startSilentSession failed:', e);
+    console.warn("startSilentSession failed:", e);
   }
 }
 
@@ -99,7 +96,7 @@ export async function updateMediaMeta(meta: { title: string; artist?: string; al
   try {
     await m.default.updateMetadataForTrack(0, {
       title: meta.title,
-      artist: meta.artist ?? 'Stash',
+      artist: meta.artist ?? "Stash",
       album: meta.album,
     });
   } catch {
@@ -135,7 +132,7 @@ export function subscribeRemoteEvents(handlers: {
       TP.addEventListener(m.Event.RemotePrevious, handlers.onPrev),
     ];
   } catch (e) {
-    console.warn('subscribeRemoteEvents failed:', e);
+    console.warn("subscribeRemoteEvents failed:", e);
     return [];
   }
 }
