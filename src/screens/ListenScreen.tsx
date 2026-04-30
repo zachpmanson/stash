@@ -12,8 +12,8 @@ import { fetchArticle } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { wordsToSeconds } from "../utils/speech";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useListenSession } from "../state/listenSession";
+import { arrIf } from "src/utils/array";
 
 type LoadState =
   | { kind: "loading" }
@@ -68,7 +68,13 @@ export default function ListenScreen() {
     };
   }, [item, reloadKey]);
 
-  const sentences = useMemo(() => (state.kind === "ready" ? state.sentences : []), [state]);
+  const sentences = useMemo(() => {
+    if (state.kind === "ready") {
+      let s = state.title ? [state.title] : [];
+      return [...s, ...state.sentences];
+    }
+    return [];
+  }, [state]);
 
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
 
@@ -148,23 +154,9 @@ function Player({ title, sentences, itemId }: { title: string | null; sentences:
     scrollRef.current.scrollTo({ y: target, animated: true });
   }, [player.index]);
 
-  const insets = useSafeAreaInsets();
-
   return (
     <View style={[styles.playerRoot]}>
-      <View style={{ padding: Spacing.sm, paddingTop: Spacing.lg, flex: 1 }}>
-        {title && (
-          <View
-            style={{
-              backgroundColor: Colors.accentDim,
-            }}
-          >
-            <Text style={[styles.title]} numberOfLines={2}>
-              {title}
-            </Text>
-          </View>
-        )}
-
+      <View style={{ flex: 1 }}>
         <ScrollView
           ref={scrollRef}
           style={styles.sentenceScroll}
@@ -191,17 +183,34 @@ function Player({ title, sentences, itemId }: { title: string | null; sentences:
       </View>
 
       <View style={styles.controls}>
+        {title && (
+          <View
+            style={
+              {
+                // backgroundColor: Colors.accentDim,
+                // padding: Spacing.sm,
+                // paddingTop: Spacing.lg,
+              }
+            }
+          >
+            <Text style={[styles.title]} numberOfLines={2}>
+              {title}
+            </Text>
+          </View>
+        )}
         <View style={styles.controlButtons}>
           <ControlButton icon="skip-previous" onPress={player.prev} disabled={player.index === 0} />
           <ControlButton icon={player.isPlaying ? "pause" : "play-arrow"} onPress={player.toggle} big />
           <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
         </View>
-        <View style={styles.progressRow}>
-          <Text style={styles.progressText}>{percent}%</Text>
+        <View style={[{ flexDirection: "column", alignContent: "stretch", gap: 12 }]}>
+          <View style={styles.progressRow}>
+            <Text style={styles.progressText}>{percent}%</Text>
+            <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
+          </View>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${percent}%` }]} />
           </View>
-          <Text style={styles.progressText}>{formatRemaining(secondsLeft)}</Text>
         </View>
       </View>
     </View>
@@ -264,16 +273,18 @@ const styles = StyleSheet.create({
   progressRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
+    justifyContent: "space-between",
+    // gap: Spacing.sm,
+    // marginBottom: Spacing.md,
   },
   progressText: { ...Typography.caption, minWidth: 56 },
   progressBar: {
-    flex: 1,
+    // flex: 1,
     height: 4,
     backgroundColor: Colors.surface2,
     borderRadius: Radius.full,
     overflow: "hidden",
+    width: "100%",
   },
   progressFill: {
     height: "100%",
@@ -282,6 +293,7 @@ const styles = StyleSheet.create({
   sentenceScroll: { flex: 1 },
   sentenceContent: {
     paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
   },
   sentence: {
     fontSize: 16,
@@ -301,7 +313,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accentDim,
     // borderRadius: 10,
     padding: Spacing.lg,
-    paddingBottom: Spacing.sm,
+    paddingBottom: Spacing.lg,
     gap: 12,
   },
   controlButtons: {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { shareAsync, isAvailableAsync } from "expo-sharing";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as FileSystem from "expo-file-system/legacy";
 import { useArticle } from "../hooks/useArticle";
+import { wordsToSeconds } from "../utils/speech";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
@@ -35,11 +36,25 @@ export default function ItemDetailScreen() {
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
-  const { state: articleState, sentences, refresh: refreshArticle, loadFrom: loadArticleFrom, refreshing } = useArticle(
-    item?.type === "url" ? item.uri : undefined,
-    item?.id,
-    item?.article_text,
-  );
+  const {
+    state: articleState,
+    sentences,
+    refresh: refreshArticle,
+    loadFrom: loadArticleFrom,
+    refreshing,
+  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text);
+
+  const readEstimate = useMemo(() => {
+    let text: string | null = null;
+    if (item?.type === "text") text = item.uri;
+    else if (item?.type === "url" && articleState.kind === "ready") text = articleState.text;
+    if (!text) return null;
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    if (words === 0) return null;
+    const seconds = wordsToSeconds(words);
+    if (seconds < 60) return "<1 min read";
+    return `${Math.round(seconds / 60)} min read`;
+  }, [item, articleState]);
 
   const handleLoadFromArchive = useCallback(
     (source: "is" | "org") => {
@@ -173,10 +188,12 @@ export default function ItemDetailScreen() {
             </Text>
           )}
 
-
           {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
 
-          <Text style={styles.meta}>Saved {new Date(item.created_at).toLocaleString()}</Text>
+          <Text style={styles.meta}>
+            Saved {new Date(item.created_at).toLocaleString()}
+            {readEstimate ? ` · ${readEstimate}` : ""}
+          </Text>
 
           <View style={styles.actions}>
             {item.type === "url" && (
@@ -313,7 +330,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
-    gap: 12,
+    gap: 6,
   },
   articleStatus: {
     flexDirection: "row",
