@@ -316,8 +316,8 @@ const htmlTagStyles = StyleSheet.create({
     borderRadius: Radius.sm,
     fontFamily: "monospace",
   },
-  img: { marginVertical: Spacing.sm },
-  figure: { marginVertical: Spacing.sm },
+  img: { marginVertical: Spacing.sm, borderLeftWidth: 3, borderLeftColor: Colors.border },
+  figure: { marginVertical: Spacing.sm, borderLeftWidth: 3, borderLeftColor: Colors.border },
   p: {
     marginVertical: Spacing.sm,
   },
