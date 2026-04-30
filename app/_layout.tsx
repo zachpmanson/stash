@@ -12,16 +12,6 @@ import { isShareLaunch } from "../src/utils/nativeShareIntent";
 
 const SHARE_LAUNCH = isShareLaunch();
 
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const TrackPlayer = require("react-native-track-player").default;
-  if (TrackPlayer?.registerPlaybackService) {
-    TrackPlayer.registerPlaybackService(() => require("../service").default);
-  }
-} catch (e) {
-  console.warn("TrackPlayer registration failed:", e);
-}
-
 const NAV_THEME = {
   ...DarkTheme,
   colors: {

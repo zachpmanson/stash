@@ -8,7 +8,7 @@ import OverflowMenu from "../components/OverflowMenu";
 import VoicePickerModal from "../components/VoicePickerModal";
 import { StashItem } from "../types";
 import { getItemById } from "../db/items";
-import { fetchArticle } from "../utils/readability";
+import { fetchArticle, htmlToText } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { wordsToSeconds } from "../utils/speech";
@@ -50,9 +50,9 @@ export default function ListenScreen() {
     let cancelled = false;
     setState({ kind: "loading" });
     fetchArticle(item.uri)
-      .then(({ title, text }) => {
+      .then(({ title, html }) => {
         if (cancelled) return;
-        const sentences = splitSentences(normalizeText(text));
+        const sentences = splitSentences(normalizeText(htmlToText(html)));
         if (sentences.length === 0) {
           setState({ kind: "error", message: "No readable text found." });
           return;
