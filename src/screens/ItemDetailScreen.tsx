@@ -294,7 +294,7 @@ function ActionButton({
 }
 
 const htmlTagStyles = StyleSheet.create({
-  a: { color: Colors.accent, textDecorationLine: "underline" as const },
+  a: { color: Colors.textSecondary, textDecorationLine: "underline" as const },
   h1: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
   h2: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
   h3: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
