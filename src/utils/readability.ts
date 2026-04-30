@@ -4,8 +4,17 @@ import { normalizeText } from "./sentences";
 
 export type Article = {
   title: string | null;
-  text: string;
+  html: string;
 };
+
+export function htmlToText(html: string): string {
+  const { document } = parseHTML(html);
+  const body = document.body;
+  const root = (body && body.childNodes.length > 0
+    ? body
+    : (document.documentElement ?? document)) as unknown as DomNode;
+  return normalizeText(extractText(root));
+}
 
 export function archiveIsUrl(url: string): string {
   return `https://archive.ph/newest/${url}`;
@@ -115,18 +124,21 @@ export async function fetchArticle(url: string): Promise<Article> {
     throw new Error("Could not extract article from this page");
   }
 
-  const { document: contentDoc } = parseHTML(parsed.content);
-  const body = contentDoc.body;
-  const root = (body && body.childNodes.length > 0
-    ? body
-    : (contentDoc.documentElement ?? contentDoc)) as unknown as DomNode;
-  const text = normalizeText(extractText(root));
-  if (!text) {
+  const cleanedHtml = stripStyling(parsed.content);
+  if (!htmlToText(cleanedHtml)) {
     throw new Error("Could not extract article from this page");
   }
 
   return {
     title: parsed.title ?? null,
-    text,
+    html: cleanedHtml,
   };
+}
+
+function stripStyling(html: string): string {
+  return html
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, "")
+    .replace(/\s(style|class)="[^"]*"/gi, "")
+    .replace(/\s(style|class)='[^']*'/gi, "");
 }

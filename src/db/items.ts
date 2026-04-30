@@ -14,6 +14,7 @@ interface RawItem {
   created_at: number;
   archived_at: number | null;
   article_text: string | null;
+  article_html: string | null;
 }
 
 export async function getItemsInFolder(folderId: string): Promise<StashItem[]> {
@@ -53,11 +54,11 @@ export async function saveItem(item: Omit<StashItem, 'archived_at'>, folderIds: 
   const db = await getDb();
   const now = Date.now();
   await db.runAsync(
-    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
      item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
-     item.article_text ?? null]
+     item.article_text ?? null, item.article_html ?? null]
   );
   for (const folderId of folderIds) {
     await db.runAsync(
@@ -95,9 +96,9 @@ export async function unarchiveItem(id: string): Promise<void> {
   await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
 }
 
-export async function updateItemArticleText(id: string, text: string | null): Promise<void> {
+export async function updateItemArticleHtml(id: string, html: string | null): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET article_text = ? WHERE id = ?', [text, id]);
+  await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
 }
 
 export async function deleteItem(id: string): Promise<void> {

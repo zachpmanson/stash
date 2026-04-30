@@ -35,7 +35,7 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
   let description: string | null = null;
   let faviconUrl: string | null = null;
   let thumbnailPath: string | null = null;
-  let articleText: string | null = null;
+  let articleHtml: string | null = null;
 
   if (type === "image" || type === "file") {
     const ext = getExtension(mimeType);
@@ -53,7 +53,7 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
     faviconUrl = preview.favicon;
     try {
       const article = await fetchArticle(uri);
-      articleText = article.text;
+      articleHtml = article.html;
     } catch {
       // article extraction is best-effort
     }
@@ -80,7 +80,8 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
     thumbnail_path: thumbnailPath,
     mime_type: mimeType,
     created_at: now,
-    article_text: articleText,
+    article_text: null,
+    article_html: articleHtml,
     folder_ids: folderIds,
   };
 

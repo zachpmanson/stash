@@ -46,7 +46,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       mime_type TEXT,
       created_at INTEGER NOT NULL,
       archived_at INTEGER DEFAULT NULL,
-      article_text TEXT
+      article_text TEXT,
+      article_html TEXT
     );
 
     CREATE TABLE IF NOT EXISTS item_folders (
@@ -65,6 +66,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   const cols = await db.getAllAsync<{ name: string }>("PRAGMA table_info(items)");
   if (!cols.some((c) => c.name === "article_text")) {
     await db.execAsync("ALTER TABLE items ADD COLUMN article_text TEXT");
+  }
+  if (!cols.some((c) => c.name === "article_html")) {
+    await db.execAsync("ALTER TABLE items ADD COLUMN article_html TEXT");
   }
 
   // Seed default Inbox folder if empty

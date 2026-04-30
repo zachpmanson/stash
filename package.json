@@ -31,8 +31,8 @@
     "react": "19.2.0",
     "react-native": "0.83.4",
     "react-native-paper": "^5.15.1",
+    "react-native-render-html": "^6.3.4",
     "react-native-safe-area-context": "~5.6.2",
-    "react-native-track-player": "5.0.0-alpha0",
     "unicode-segmenter": "^0.16.0",
     "uuid": "^11.1.0",
     "zustand": "^5.0.12"

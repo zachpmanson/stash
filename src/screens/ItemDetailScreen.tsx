@@ -10,7 +10,9 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  useWindowDimensions,
 } from "react-native";
+import RenderHtml from "react-native-render-html";
 import { shareAsync, isAvailableAsync } from "expo-sharing";
 import * as IntentLauncher from "expo-intent-launcher";
 import * as FileSystem from "expo-file-system/legacy";
@@ -36,13 +38,16 @@ export default function ItemDetailScreen() {
   const router = useRouter();
   const [item, setItem] = useState<StashItem | null>(null);
   const [splitBySentence, setSplitBySentence] = useState(false);
+  const [showFormatted, setShowFormatted] = useState(true);
+  const [showRawHtml, setShowRawHtml] = useState(false);
+  const { width: windowWidth } = useWindowDimensions();
   const {
     state: articleState,
     sentences,
     refresh: refreshArticle,
     loadFrom: loadArticleFrom,
     refreshing,
-  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text);
+  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html);
 
   const readEstimate = useMemo(() => {
     let text: string | null = null;
@@ -142,6 +147,18 @@ export default function ItemDetailScreen() {
           item.type === "url",
           <OverflowMenu
             items={[
+              ...(articleState.kind === "ready" && articleState.html
+                ? [
+                    {
+                      title: showFormatted ? "Show plain text" : "Show formatted",
+                      onPress: () => setShowFormatted((v) => !v),
+                    },
+                    {
+                      title: showRawHtml ? "Hide raw HTML" : "Show raw HTML",
+                      onPress: () => setShowRawHtml((v) => !v),
+                    },
+                  ]
+                : []),
               {
                 title: splitBySentence ? "Unsplit sentences" : "Split by sentence",
                 onPress: () => setSplitBySentence((v) => !v),
@@ -220,17 +237,32 @@ export default function ItemDetailScreen() {
               )}
               {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
               {articleState.kind === "ready" &&
-                (splitBySentence && sentences
-                  ? sentences.map((s, i) => (
-                      <Text style={styles.articleText} key={i} selectable>
-                        {s}
-                      </Text>
-                    ))
-                  : articleState.text.split("\n").map((s, i) => (
-                      <Text style={styles.articleText} key={i} selectable>
-                        {s}
-                      </Text>
-                    )))}
+                (showRawHtml && articleState.html ? (
+                  <Text style={styles.rawHtml} selectable>
+                    {articleState.html}
+                  </Text>
+                ) : showFormatted && articleState.html && !splitBySentence ? (
+                  <RenderHtml
+                    contentWidth={windowWidth - Spacing.md * 2}
+                    source={{ html: articleState.html }}
+                    baseStyle={styles.articleText}
+                    tagsStyles={htmlTagStyles}
+                    systemFonts={["serif", "mono"]}
+                    defaultTextProps={{ selectable: true }}
+                  />
+                ) : splitBySentence && sentences ? (
+                  sentences.map((s, i) => (
+                    <Text style={styles.articleText} key={i} selectable>
+                      {s}
+                    </Text>
+                  ))
+                ) : (
+                  articleState.text.split("\n").map((s, i) => (
+                    <Text style={styles.articleText} key={i} selectable>
+                      {s}
+                    </Text>
+                  ))
+                ))}
             </View>
           )}
         </View>
@@ -260,6 +292,36 @@ function ActionButton({
     </Pressable>
   );
 }
+
+const htmlTagStyles = StyleSheet.create({
+  a: { color: Colors.accent, textDecorationLine: "underline" as const },
+  h1: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
+  h2: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
+  h3: { ...Typography.subheading, marginTop: Spacing.md, marginBottom: Spacing.sm },
+  blockquote: {
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.border,
+    paddingLeft: Spacing.md,
+    marginVertical: Spacing.sm,
+    color: Colors.textSecondary,
+  },
+  pre: {
+    backgroundColor: Colors.surface2,
+    padding: Spacing.sm,
+    borderRadius: Radius.sm,
+  },
+  code: {
+    backgroundColor: Colors.surface2,
+    paddingHorizontal: 4,
+    borderRadius: Radius.sm,
+    fontFamily: "monospace",
+  },
+  img: { marginVertical: Spacing.sm },
+  figure: { marginVertical: Spacing.sm },
+  p: {
+    marginVertical: Spacing.sm,
+  },
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
@@ -345,6 +407,12 @@ const styles = StyleSheet.create({
     fontFamily: "serif",
     fontSize: 14,
     lineHeight: 26,
+  },
+  rawHtml: {
+    ...Typography.body,
+    fontFamily: "monospace",
+    fontSize: 12,
+    lineHeight: 18,
   },
   splitToggle: {
     flexDirection: "row",

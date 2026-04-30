@@ -43,7 +43,8 @@
           }
         }
       ],
-      "./plugins/share-intent-module"
+      "./plugins/share-intent-module",
+      "./plugins/media-session-module"
     ],
     "ios": {
       "bundleIdentifier": "com.zachmanson.stash",
