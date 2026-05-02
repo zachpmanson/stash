@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import Screen from "../components/Screen";
@@ -10,6 +10,8 @@ import { StashItem } from "../types";
 import { getItemById } from "../db/items";
 import { fetchArticle, htmlToText } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
+import { applySubstitutions } from "../utils/applySubstitutions";
+import { getTextSubstitutions } from "../db/textSubstitutions";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { wordsToSeconds } from "../utils/speech";
 import { useListenSession } from "../state/listenSession";
@@ -21,6 +23,7 @@ type LoadState =
   | { kind: "ready"; title: string | null; sentences: string[] };
 
 export default function ListenScreen() {
+  const router = useRouter();
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const [item, setItem] = useState<StashItem | null>(null);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
@@ -37,22 +40,28 @@ export default function ListenScreen() {
 
   useEffect(() => {
     if (!item) return;
+    let cancelled = false;
     if (item.type === "text") {
-      const sentences = splitSentences(normalizeText(item.uri));
-      if (sentences.length === 0) {
-        setState({ kind: "error", message: "No readable text found." });
-        return;
-      }
-      setState({ kind: "ready", title: item.title ?? null, sentences });
-      return;
+      setState({ kind: "loading" });
+      getTextSubstitutions().then((subs) => {
+        if (cancelled) return;
+        const sentences = splitSentences(applySubstitutions(normalizeText(item.uri), subs));
+        if (sentences.length === 0) {
+          setState({ kind: "error", message: "No readable text found." });
+          return;
+        }
+        setState({ kind: "ready", title: item.title ?? null, sentences });
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     if (item.type !== "url") return;
-    let cancelled = false;
     setState({ kind: "loading" });
-    fetchArticle(item.uri)
-      .then(({ title, html }) => {
+    Promise.all([fetchArticle(item.uri), getTextSubstitutions()])
+      .then(([{ title, html }, subs]) => {
         if (cancelled) return;
-        const sentences = splitSentences(normalizeText(htmlToText(html)));
+        const sentences = splitSentences(applySubstitutions(normalizeText(htmlToText(html)), subs));
         if (sentences.length === 0) {
           setState({ kind: "error", message: "No readable text found." });
           return;
@@ -81,7 +90,14 @@ export default function ListenScreen() {
   return (
     <Screen
       options={{ title: "Listen" }}
-      buttons={[<OverflowMenu items={[{ title: "Voice", onPress: () => setVoiceMenuOpen(true) }]} />]}
+      buttons={[
+        <OverflowMenu
+          items={[
+            { title: "Voice", onPress: () => setVoiceMenuOpen(true) },
+            { title: "Text Substitutions", onPress: () => router.push("/text-substitutions") },
+          ]}
+        />,
+      ]}
     >
       <VoicePickerModal visible={voiceMenuOpen} onClose={() => setVoiceMenuOpen(false)} />
       {state.kind === "loading" && (

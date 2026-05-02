@@ -64,6 +64,7 @@ function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="archive" options={{ title: "Archive" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
+        <Stack.Screen name="text-substitutions" options={{ title: "Text Substitutions" }} />
         <Stack.Screen
           name="share"
           options={{ headerShown: false, presentation: "transparentModal", animation: "fade" }}

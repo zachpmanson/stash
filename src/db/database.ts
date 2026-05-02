@@ -57,6 +57,14 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       PRIMARY KEY (item_id, folder_id)
     );
 
+    CREATE TABLE IF NOT EXISTS text_substitutions (
+      id TEXT PRIMARY KEY,
+      find TEXT NOT NULL,
+      replace TEXT NOT NULL,
+      case_sensitive INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_item_folders_folder ON item_folders(folder_id);
     CREATE INDEX IF NOT EXISTS idx_item_folders_item ON item_folders(item_id);
     CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at DESC);

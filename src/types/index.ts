@@ -30,6 +30,14 @@ export interface StashItem {
   folder_ids?: string[];
 }
 
+export type TextSubstitution = {
+  id: string;
+  find: string;
+  replace: string;
+  case_sensitive: 0 | 1;
+  created_at: number;
+};
+
 export interface LinkPreview {
   title: string | null;
   description: string | null;
