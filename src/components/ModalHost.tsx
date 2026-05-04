@@ -31,52 +31,44 @@ export function ModalHost() {
   }, [current, dismiss, handlePress]);
 
   return (
-    <Modal
-      visible={!!current}
-      transparent
-      animationType="fade"
-      onRequestClose={handleBackdrop}
-    >
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
+    <Modal visible={!!current} transparent animationType="fade" onRequestClose={handleBackdrop}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <Pressable style={styles.overlay} onPress={handleBackdrop}>
           <Pressable style={styles.dialog} onPress={() => {}}>
-          {!!current && (
-            <>
-              <Text style={styles.title}>{current.title}</Text>
-              {!!current.message && <Text style={styles.body}>{current.message}</Text>}
-              <View style={[styles.actions, !hasCancel && buttons.length === 1 && styles.actionsSingle]}>
-                {buttons.map((btn, i) => {
-                  const isCancel = btn.style === "cancel";
-                  const isDestructive = btn.style === "destructive";
-                  return (
-                    <Pressable
-                      key={`${btn.text}-${i}`}
-                      onPress={() => handlePress(btn)}
-                      style={({ pressed }) => [
-                        styles.btn,
-                        isCancel && styles.btnCancel,
-                        isDestructive && styles.btnDestructive,
-                        !isCancel && !isDestructive && styles.btnPrimary,
-                        pressed && styles.btnPressed,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.btnText,
-                          isCancel && styles.btnTextCancel,
-                          (isDestructive || !isCancel) && styles.btnTextOnFilled,
+            {!!current && (
+              <>
+                <Text style={styles.title}>{current.title}</Text>
+                {!!current.message && <Text style={styles.body}>{current.message}</Text>}
+                <View style={[styles.actions, !hasCancel && buttons.length === 1 && styles.actionsSingle]}>
+                  {buttons.map((btn, i) => {
+                    const isCancel = btn.style === "cancel";
+                    const isDestructive = btn.style === "destructive";
+                    return (
+                      <Pressable
+                        key={`${btn.text}-${i}`}
+                        onPress={() => handlePress(btn)}
+                        style={({ pressed }) => [
+                          styles.btn,
+                          isCancel && styles.btnCancel,
+                          isDestructive && styles.btnDestructive,
+                          !isCancel && !isDestructive && styles.btnPrimary,
+                          pressed && styles.btnPressed,
                         ]}
                       >
-                        {btn.text}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </>
+                        <Text
+                          style={[
+                            styles.btnText,
+                            isCancel && styles.btnTextCancel,
+                            (isDestructive || !isCancel) && styles.btnTextOnFilled,
+                          ]}
+                        >
+                          {btn.text}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
             )}
           </Pressable>
         </Pressable>

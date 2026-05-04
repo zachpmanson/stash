@@ -49,7 +49,7 @@ export default function FolderScreen() {
         buttons: [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Move to folder…",
+            text: "Move...",
             onPress: () => router.push({ pathname: "/move-item/[id]", params: { id: item.id } }),
           },
           {
