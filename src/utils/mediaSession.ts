@@ -9,9 +9,8 @@ type StashMediaSessionNative = {
   removeListeners: (count: number) => void;
 };
 
-const Native: StashMediaSessionNative | undefined = (
-  NativeModules as { StashMediaSession?: StashMediaSessionNative }
-).StashMediaSession;
+const Native: StashMediaSessionNative | undefined = (NativeModules as { StashMediaSession?: StashMediaSessionNative })
+  .StashMediaSession;
 
 const emitter = Native ? new NativeEventEmitter(Native as unknown as never) : null;
 
@@ -19,11 +18,7 @@ export function setupMediaSession(): Promise<void> {
   return Promise.resolve();
 }
 
-export async function startSilentSession(meta: {
-  title: string;
-  artist?: string;
-  album?: string;
-}) {
+export async function startSilentSession(meta: { title: string; artist?: string; album?: string }) {
   Native?.startSession(meta.title, meta.artist ?? null, meta.album ?? null);
 }
 
@@ -31,11 +26,7 @@ export async function setMediaPlaying(playing: boolean) {
   Native?.setPlaying(playing);
 }
 
-export async function updateMediaMeta(meta: {
-  title: string;
-  artist?: string;
-  album?: string;
-}) {
+export async function updateMediaMeta(meta: { title: string; artist?: string; album?: string }) {
   Native?.updateMeta(meta.title, meta.artist ?? null, meta.album ?? null);
 }
 

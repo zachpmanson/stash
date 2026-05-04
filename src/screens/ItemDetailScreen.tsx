@@ -22,7 +22,6 @@ import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import * as Clipboard from "expo-clipboard";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import { StashItem } from "../types";

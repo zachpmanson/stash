@@ -9,6 +9,9 @@ import {
 } from "../utils/mediaSession";
 import { useVoiceStore } from "../state/voiceState";
 import { useListenSession } from "../state/listenSession";
+import { applySubstitutions } from "src/utils/applySubstitutions";
+import { getTextSubstitutions } from "src/db/textSubstitutions";
+import { TextSubstitution } from "src/types";
 
 export type SpeechPlayerMeta = {
   title: string;
@@ -44,14 +47,8 @@ export type SpeechPlayer = {
   jumpTo: (i: number) => void;
 };
 
-export function useSpeechPlayer(
-  sentences: string[],
-  meta?: SpeechPlayerMeta,
-  itemId?: string,
-): SpeechPlayer {
-  const [index, setIndex] = useState(() =>
-    itemId ? useListenSession.getState().getRememberedIndex(itemId) : 0,
-  );
+export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta, itemId?: string): SpeechPlayer {
+  const [index, setIndex] = useState(() => (itemId ? useListenSession.getState().getRememberedIndex(itemId) : 0));
   const [isPlaying, setIsPlaying] = useState(true);
 
   // Track the utterance generation to ignore stale onDone callbacks
@@ -99,8 +96,11 @@ export function useSpeechPlayer(
     }
   }, [meta?.title, meta?.artist]);
 
+  const [subs, setSubs] = useState<TextSubstitution[]>();
+
   useEffect(() => {
     play();
+    getTextSubstitutions().then((d) => setSubs(d));
     return () => {
       Speech.stop();
       endMediaSession();
@@ -125,7 +125,8 @@ export function useSpeechPlayer(
     genRef.current += 1;
     const myGen = genRef.current;
     Speech.stop();
-    Speech.speak(list[i], {
+    const subbedSentence = subs ? applySubstitutions(list[i], subs) : list[i];
+    Speech.speak(subbedSentence, {
       onDone: () => {
         if (myGen !== genRef.current) return;
         const nextI = indexRef.current + 1;
@@ -199,7 +200,14 @@ export function useSpeechPlayer(
   const nextRef = useRef<() => void>(() => {});
   const prevRef = useRef<() => void>(() => {});
   useEffect(() => {
-    toggleRef.current = () => (isPlayingRef.current ? pause() : play());
+    toggleRef.current = () => {
+      console.log("[SpeechPlayer] toggle fired", {
+        isPlaying: isPlayingRef.current,
+        index: indexRef.current,
+        ts: Date.now(),
+      });
+      isPlayingRef.current ? pause() : play();
+    };
     nextRef.current = next;
     prevRef.current = prev;
   }, [play, pause, next, prev]);

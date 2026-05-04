@@ -15,7 +15,7 @@ import { getTextSubstitutions } from "../db/textSubstitutions";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { wordsToSeconds } from "../utils/speech";
 import { useListenSession } from "../state/listenSession";
-import { arrIf } from "src/utils/array";
+import { useArticle } from "src/hooks/useArticle";
 
 type LoadState =
   | { kind: "loading" }
@@ -28,6 +28,13 @@ export default function ListenScreen() {
   const [item, setItem] = useState<StashItem | null>(null);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
+
+  const { state: articleState, sentences } = useArticle(
+    item?.type === "url" ? item.uri : undefined,
+    item?.id,
+    item?.article_text,
+    item?.article_html,
+  );
 
   useEffect(() => {
     getItemById(itemId).then(setItem);
@@ -45,7 +52,7 @@ export default function ListenScreen() {
       setState({ kind: "loading" });
       getTextSubstitutions().then((subs) => {
         if (cancelled) return;
-        const sentences = splitSentences(applySubstitutions(normalizeText(item.uri), subs));
+        const sentences = splitSentences(normalizeText(item.uri));
         if (sentences.length === 0) {
           setState({ kind: "error", message: "No readable text found." });
           return;
@@ -57,33 +64,46 @@ export default function ListenScreen() {
       };
     }
     if (item.type !== "url") return;
+
     setState({ kind: "loading" });
-    Promise.all([fetchArticle(item.uri), getTextSubstitutions()])
-      .then(([{ title, html }, subs]) => {
-        if (cancelled) return;
-        const sentences = splitSentences(applySubstitutions(normalizeText(htmlToText(html)), subs));
-        if (sentences.length === 0) {
-          setState({ kind: "error", message: "No readable text found." });
-          return;
-        }
-        setState({ kind: "ready", title, sentences });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setState({ kind: "error", message: err?.message ?? "Failed to load article" });
+    if (sentences && articleState.kind === "ready") {
+      console.log(item.title);
+      setState({
+        kind: "ready",
+        sentences: sentences,
+        title: item.title,
       });
+    }
+    // Promise.all([fetchArticle(item.uri), getTextSubstitutions()])
+    //   .then(([{ title, html }, subs]) => {
+    //     if (cancelled) return;
+    //     const sentences = splitSentences(applySubstitutions(normalizeText(htmlToText(html)), subs));
+    //     if (sentences.length === 0) {
+    //       setState({ kind: "error", message: "No readable text found." });
+    //       return;
+    //     }
+    //     setState({ kind: "ready", title, sentences });
+    //   })
+    //   .catch((err) => {
+    //     if (cancelled) return;
+    //     setState({ kind: "error", message: err?.message ?? "Failed to load article" });
+    //   });
     return () => {
       cancelled = true;
     };
-  }, [item, reloadKey]);
+  }, [item, reloadKey, sentences, articleState]);
 
-  const sentences = useMemo(() => {
-    if (state.kind === "ready") {
+  const sentencesWithTitle = useMemo(() => {
+    if (state.kind === "ready" && sentences) {
+      console.log({
+        state: state.title,
+        n_sentences: sentences.length,
+      });
       let s = state.title ? [state.title] : [];
-      return [...s, ...state.sentences];
+      return [...s, ...sentences];
     }
     return [];
-  }, [state]);
+  }, [state, sentences]);
 
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
 
@@ -116,7 +136,7 @@ export default function ListenScreen() {
         </View>
       )}
 
-      {state.kind === "ready" && <Player title={state.title} sentences={sentences} itemId={itemId} />}
+      {state.kind === "ready" && <Player title={state.title} sentences={sentencesWithTitle} itemId={itemId} />}
     </Screen>
   );
 }

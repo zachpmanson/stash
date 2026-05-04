@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
 import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
@@ -9,6 +10,7 @@ import { useVoiceStore } from "../state/voiceState";
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
   const selectedId = useVoiceStore((s) => s.selectedVoice);
   const voices = useVoiceStore((s) => s.voices);
@@ -24,6 +26,11 @@ export default function SettingsScreen() {
           label="Voice"
           value={voiceLabel}
           onPress={() => setVoiceMenuOpen(true)}
+        />
+        <Row
+          icon="spellcheck"
+          label="Text Substitutions"
+          onPress={() => router.push("/text-substitutions")}
         />
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
       </View>
