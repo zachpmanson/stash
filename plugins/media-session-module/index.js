@@ -72,8 +72,25 @@ function registerService(config) {
         "android:exported": "false",
         "android:foregroundServiceType": "mediaPlayback",
       },
+      "intent-filter": [
+        { action: [{ $: { "android:name": "android.intent.action.MEDIA_BUTTON" } }] },
+      ],
     });
     application.service = filtered;
+
+    const receivers = application.receiver ?? [];
+    const RECEIVER_NAME = "androidx.media.session.MediaButtonReceiver";
+    const filteredReceivers = receivers.filter((r) => r.$?.["android:name"] !== RECEIVER_NAME);
+    filteredReceivers.push({
+      $: {
+        "android:name": RECEIVER_NAME,
+        "android:exported": "true",
+      },
+      "intent-filter": [
+        { action: [{ $: { "android:name": "android.intent.action.MEDIA_BUTTON" } }] },
+      ],
+    });
+    application.receiver = filteredReceivers;
     return config;
   });
 }
