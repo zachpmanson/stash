@@ -1,21 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, Pressable, ScrollView } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
-import { Colors, Spacing, Typography, Radius } from "../theme";
-import Screen from "../components/Screen";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useArticle } from "src/hooks/useArticle";
 import OverflowMenu from "../components/OverflowMenu";
+import Screen from "../components/Screen";
 import VoicePickerModal from "../components/VoicePickerModal";
-import { StashItem } from "../types";
 import { getItemById, updateItemListenedPercent } from "../db/items";
-import { fetchArticle, htmlToText } from "../utils/readability";
-import { normalizeText, splitSentences } from "../utils/sentences";
-import { applySubstitutions } from "../utils/applySubstitutions";
 import { getTextSubstitutions } from "../db/textSubstitutions";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
-import { wordsToSeconds } from "../utils/speech";
 import { useListenSession } from "../state/listenSession";
-import { useArticle } from "src/hooks/useArticle";
+import { Colors, Radius, Spacing, Typography } from "../theme";
+import { StashItem } from "../types";
+import { normalizeText, splitSentences } from "../utils/sentences";
+import { wordsToSeconds } from "../utils/speech";
 
 type LoadState =
   | { kind: "loading" }
@@ -386,6 +384,8 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingBottom: Spacing.lg,
     gap: 12,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
   },
   controlButtons: {
     flexDirection: "row",
