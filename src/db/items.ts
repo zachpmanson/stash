@@ -15,6 +15,7 @@ interface RawItem {
   archived_at: number | null;
   article_text: string | null;
   article_html: string | null;
+  listened_percent: number;
 }
 
 export async function getItemsInFolder(folderId: string): Promise<StashItem[]> {
@@ -94,6 +95,12 @@ export async function archiveItem(id: string): Promise<void> {
 export async function unarchiveItem(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
+}
+
+export async function updateItemListenedPercent(id: string, percent: number): Promise<void> {
+  const db = await getDb();
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
 }
 
 export async function updateItemArticleHtml(id: string, html: string | null): Promise<void> {

@@ -47,8 +47,18 @@ export type SpeechPlayer = {
   jumpTo: (i: number) => void;
 };
 
-export function useSpeechPlayer(sentences: string[], meta?: SpeechPlayerMeta, itemId?: string): SpeechPlayer {
-  const [index, setIndex] = useState(() => (itemId ? useListenSession.getState().getRememberedIndex(itemId) : 0));
+export function useSpeechPlayer(
+  sentences: string[],
+  meta?: SpeechPlayerMeta,
+  itemId?: string,
+  initialIndex: number = 0,
+): SpeechPlayer {
+  const [index, setIndex] = useState(() => {
+    if (!itemId) return initialIndex;
+    const session = useListenSession.getState();
+    if (session.lastItemId === itemId) return session.lastIndex;
+    return initialIndex;
+  });
   const [isPlaying, setIsPlaying] = useState(true);
 
   // Track the utterance generation to ignore stale onDone callbacks

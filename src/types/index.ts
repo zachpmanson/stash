@@ -27,6 +27,7 @@ export interface StashItem {
   archived_at: number | null;
   article_text: string | null;
   article_html: string | null;
+  listened_percent?: number;
   folder_ids?: string[];
 }
 

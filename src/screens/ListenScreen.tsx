@@ -7,7 +7,7 @@ import Screen from "../components/Screen";
 import OverflowMenu from "../components/OverflowMenu";
 import VoicePickerModal from "../components/VoicePickerModal";
 import { StashItem } from "../types";
-import { getItemById } from "../db/items";
+import { getItemById, updateItemListenedPercent } from "../db/items";
 import { fetchArticle, htmlToText } from "../utils/readability";
 import { normalizeText, splitSentences } from "../utils/sentences";
 import { applySubstitutions } from "../utils/applySubstitutions";
@@ -136,7 +136,14 @@ export default function ListenScreen() {
         </View>
       )}
 
-      {state.kind === "ready" && <Player title={state.title} sentences={sentencesWithTitle} itemId={itemId} />}
+      {state.kind === "ready" && (
+        <Player
+          title={state.title}
+          sentences={sentencesWithTitle}
+          itemId={itemId}
+          initialPercent={item?.listened_percent ?? 0}
+        />
+      )}
     </Screen>
   );
 }
@@ -151,7 +158,17 @@ function formatRemaining(seconds: number): string {
   return `${mins} min left`;
 }
 
-function Player({ title, sentences, itemId }: { title: string | null; sentences: string[]; itemId: string }) {
+function Player({
+  title,
+  sentences,
+  itemId,
+  initialPercent,
+}: {
+  title: string | null;
+  sentences: string[];
+  itemId: string;
+  initialPercent: number;
+}) {
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
   const scrollHeightRef = useRef(0);
@@ -173,7 +190,20 @@ function Player({ title, sentences, itemId }: { title: string | null; sentences:
     () => ({ title: title ?? "Article", artist: "Stash", totalSeconds, secondsAt }),
     [title, totalSeconds, secondsAt],
   );
-  const player = useSpeechPlayer(sentences, meta, itemId);
+
+  const initialIndex = useMemo(() => {
+    if (initialPercent <= 0 || totalWords === 0) return 0;
+    const targetWords = (initialPercent / 100) * totalWords;
+    let cum = 0;
+    for (let i = 0; i < wordsPerSentence.length; i++) {
+      if (cum >= targetWords) return i;
+      cum += wordsPerSentence[i];
+    }
+    return Math.max(0, wordsPerSentence.length - 1);
+    // initialPercent intentionally only consulted on first mount via useSpeechPlayer's lazy init
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const player = useSpeechPlayer(sentences, meta, itemId, initialIndex);
 
   const wordsRemaining = useMemo(() => {
     let n = 0;
@@ -189,6 +219,11 @@ function Player({ title, sentences, itemId }: { title: string | null; sentences:
     const target = Math.max(0, y - scrollHeightRef.current / 3);
     scrollRef.current.scrollTo({ y: target, animated: true });
   }, [player.index]);
+
+  useEffect(() => {
+    if (!itemId) return;
+    updateItemListenedPercent(itemId, percent).catch(() => {});
+  }, [itemId, percent]);
 
   return (
     <View style={[styles.playerRoot]}>

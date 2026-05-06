@@ -4,14 +4,18 @@ import { MaterialIcons } from "@expo/vector-icons";
 import Modal from "../components/Modal";
 import Screen from "../components/Screen";
 import TopbarButton from "../components/TopbarButton";
-import { showModal } from "../state/modalState";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { TextSubstitution } from "../types";
-import { createTextSubstitution, deleteTextSubstitution, getTextSubstitutions } from "../db/textSubstitutions";
+import {
+  createTextSubstitution,
+  deleteTextSubstitution,
+  getTextSubstitutions,
+  updateTextSubstitution,
+} from "../db/textSubstitutions";
 
 export default function TextSubstitutionsScreen() {
   const [subs, setSubs] = useState<TextSubstitution[]>([]);
-  const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<TextSubstitution | "new" | null>(null);
 
   const load = useCallback(async () => {
     setSubs(await getTextSubstitutions());
@@ -21,42 +25,22 @@ export default function TextSubstitutionsScreen() {
     load();
   }, [load]);
 
-  const handleRowPress = useCallback(
-    (sub: TextSubstitution) => {
-      showModal({
-        title: `${sub.find} → ${sub.replace}`,
-        buttons: [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              await deleteTextSubstitution(sub.id);
-              load();
-            },
-          },
-        ],
-      });
-    },
-    [load],
-  );
-
   const isEmpty = subs.length === 0;
 
   return (
     <Screen
       options={{ title: "Text Substitutions" }}
       buttons={[
-        <TopbarButton key="add" onPress={() => setAddOpen(true)}>
+        <TopbarButton key="add" onPress={() => setEditing("new")}>
           <MaterialIcons name="add" size={22} color={Colors.text} />
         </TopbarButton>,
       ]}
     >
-      <AddSubstitutionModal
-        visible={addOpen}
-        onClose={() => setAddOpen(false)}
+      <SubstitutionModal
+        target={editing}
+        onClose={() => setEditing(null)}
         onSaved={async () => {
-          setAddOpen(false);
+          setEditing(null);
           await load();
         }}
       />
@@ -75,8 +59,7 @@ export default function TextSubstitutionsScreen() {
             <Pressable
               key={sub.id}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-              onPress={() => handleRowPress(sub)}
-              onLongPress={() => handleRowPress(sub)}
+              onPress={() => setEditing(sub)}
             >
               <View style={styles.rowText}>
                 <Text style={styles.rowFind} numberOfLines={1}>
@@ -100,28 +83,32 @@ export default function TextSubstitutionsScreen() {
   );
 }
 
-function AddSubstitutionModal({
-  visible,
+function SubstitutionModal({
+  target,
   onClose,
   onSaved,
 }: {
-  visible: boolean;
+  target: TextSubstitution | "new" | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const visible = target !== null;
+  const isEdit = visible && target !== "new";
+  const existing = isEdit ? (target as TextSubstitution) : null;
+
   const [find, setFind] = useState("");
   const [replace, setReplace] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!visible) {
-      setFind("");
-      setReplace("");
-      setCaseSensitive(false);
+    if (visible) {
+      setFind(existing?.find ?? "");
+      setReplace(existing?.replace ?? "");
+      setCaseSensitive(existing?.case_sensitive === 1);
       setSaving(false);
     }
-  }, [visible]);
+  }, [visible, existing]);
 
   const canSave = find.trim().length > 0 && !saving;
 
@@ -129,7 +116,22 @@ function AddSubstitutionModal({
     if (!canSave) return;
     setSaving(true);
     try {
-      await createTextSubstitution(find.trim(), replace, caseSensitive);
+      if (existing) {
+        await updateTextSubstitution(existing.id, find.trim(), replace, caseSensitive);
+      } else {
+        await createTextSubstitution(find.trim(), replace, caseSensitive);
+      }
+      onSaved();
+    } catch (e) {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!existing) return;
+    setSaving(true);
+    try {
+      await deleteTextSubstitution(existing.id);
       onSaved();
     } catch (e) {
       setSaving(false);
@@ -138,7 +140,7 @@ function AddSubstitutionModal({
 
   return (
     <Modal visible={visible} onClose={onClose}>
-      <Text style={styles.dialogTitle}>Add substitution</Text>
+      <Text style={styles.dialogTitle}>{existing ? "Edit substitution" : "Add substitution"}</Text>
 
       <Text style={styles.fieldLabel}>Find</Text>
       <TextInput
@@ -172,16 +174,23 @@ function AddSubstitutionModal({
       </View>
 
       <View style={styles.dialogButtons}>
-        <Pressable style={styles.dialogBtn} onPress={onClose}>
-          <Text style={styles.dialogBtnText}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.dialogBtn, styles.dialogBtnPrimary, !canSave && styles.dialogBtnDisabled]}
-          onPress={save}
-          disabled={!canSave}
-        >
-          <Text style={[styles.dialogBtnText, styles.dialogBtnPrimaryText]}>Save</Text>
-        </Pressable>
+        {existing && (
+          <Pressable style={[styles.dialogBtn, styles.dialogBtnDelete]} onPress={remove} disabled={saving}>
+            <Text style={[styles.dialogBtnText, styles.dialogBtnDeleteText]}>Delete</Text>
+          </Pressable>
+        )}
+        <View style={styles.dialogButtonsRight}>
+          <Pressable style={styles.dialogBtn} onPress={onClose}>
+            <Text style={styles.dialogBtnText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.dialogBtn, styles.dialogBtnPrimary, !canSave && styles.dialogBtnDisabled]}
+            onPress={save}
+            disabled={!canSave}
+          >
+            <Text style={[styles.dialogBtnText, styles.dialogBtnPrimaryText]}>Save</Text>
+          </Pressable>
+        </View>
       </View>
     </Modal>
   );
@@ -255,9 +264,16 @@ const styles = StyleSheet.create({
   },
   dialogButtons: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: Spacing.sm,
     marginTop: Spacing.md,
+  },
+  dialogButtonsRight: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: Spacing.sm,
+    marginLeft: "auto",
   },
   dialogBtn: {
     paddingHorizontal: Spacing.md,
@@ -268,4 +284,6 @@ const styles = StyleSheet.create({
   dialogBtnDisabled: { opacity: 0.4 },
   dialogBtnText: { ...Typography.body },
   dialogBtnPrimaryText: { color: Colors.white, fontWeight: "600" },
+  dialogBtnDelete: {},
+  dialogBtnDeleteText: { color: Colors.danger ?? "#e5484d", fontWeight: "600" },
 });

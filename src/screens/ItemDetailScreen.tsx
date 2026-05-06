@@ -209,7 +209,14 @@ export default function ItemDetailScreen() {
           <Text style={styles.meta}>
             Saved {new Date(item.created_at).toLocaleString()}
             {readEstimate ? ` · ${readEstimate}` : ""}
+            {item.listened_percent > 0 ? ` · ${item.listened_percent}% listened` : ""}
           </Text>
+
+          {item.listened_percent > 0 && item.listened_percent < 100 && (item.type === "url" || item.type === "text") && (
+            <View style={styles.listenProgressBar}>
+              <View style={[styles.listenProgressFill, { width: `${item.listened_percent}%` }]} />
+            </View>
+          )}
 
           <View style={styles.actions}>
             {item.type === "url" && (
@@ -361,7 +368,18 @@ const styles = StyleSheet.create({
   },
   meta: {
     ...Typography.caption,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.sm,
+  },
+  listenProgressBar: {
+    height: 3,
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.full,
+    overflow: "hidden",
+    marginBottom: Spacing.lg,
+  },
+  listenProgressFill: {
+    height: "100%",
+    backgroundColor: Colors.accent,
   },
   actions: {
     flexDirection: "row",
