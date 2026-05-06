@@ -1,36 +1,35 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { MaterialIcons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import * as FileSystem from "expo-file-system/legacy";
+import * as IntentLauncher from "expo-intent-launcher";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { isAvailableAsync, shareAsync } from "expo-sharing";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Linking,
-  Share,
-  Image,
   ActivityIndicator,
+  Image,
+  Linking,
+  Pressable,
   RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
   useWindowDimensions,
+  View,
 } from "react-native";
 import RenderHtml from "react-native-render-html";
-import { shareAsync, isAvailableAsync } from "expo-sharing";
-import * as IntentLauncher from "expo-intent-launcher";
-import * as FileSystem from "expo-file-system/legacy";
-import { useArticle } from "../hooks/useArticle";
-import { wordsToSeconds } from "../utils/speech";
-import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
+import OverflowMenu from "src/components/OverflowMenu";
+import TopbarButton from "src/components/TopbarButton";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
-import * as Clipboard from "expo-clipboard";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { Colors, Spacing, Typography, Radius } from "../theme";
-import { StashItem } from "../types";
-import { getItemById, archiveItem } from "../db/items";
 import Screen from "../components/Screen";
-import TopbarButton from "src/components/TopbarButton";
-import OverflowMenu from "src/components/OverflowMenu";
-import { MaterialIcons } from "@expo/vector-icons";
-import { arrIf } from "src/utils/array";
+import { archiveItem, getItemById } from "../db/items";
+import { useArticle } from "../hooks/useArticle";
+import { Colors, Radius, Spacing, Typography } from "../theme";
+import { StashItem } from "../types";
+import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
+import { wordsToSeconds } from "../utils/speech";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -135,39 +134,40 @@ export default function ItemDetailScreen() {
   return (
     <Screen
       title="Stashed Item"
-      buttons={[
-        <TopbarButton onPress={handleArchive}>
-          <MaterialIcons name="archive" size={20} color={Colors.text} />
-        </TopbarButton>,
-        <TopbarButton onPress={handleShare}>
-          <MaterialIcons name="share" size={20} color={Colors.text} />
-        </TopbarButton>,
-        ...arrIf(
-          item.type === "url",
-          <OverflowMenu
-            items={[
-              ...(articleState.kind === "ready" && articleState.html
-                ? [
-                    {
-                      title: showFormatted ? "Show plain text" : "Show formatted",
-                      onPress: () => setShowFormatted((v) => !v),
-                    },
-                    {
-                      title: showRawHtml ? "Hide raw HTML" : "Show raw HTML",
-                      onPress: () => setShowRawHtml((v) => !v),
-                    },
-                  ]
-                : []),
-              {
-                title: splitBySentence ? "Unsplit sentences" : "Split by sentence",
-                onPress: () => setSplitBySentence((v) => !v),
-              },
-              { title: "Load from archive.is", onPress: () => handleLoadFromArchive("is") },
-              { title: "Load from archive.org", onPress: () => handleLoadFromArchive("org") },
-            ]}
-          />,
-        ),
-      ]}
+      buttons={
+        <>
+          <TopbarButton onPress={handleArchive}>
+            <MaterialIcons name="archive" size={20} color={Colors.text} />
+          </TopbarButton>
+          <TopbarButton onPress={handleShare}>
+            <MaterialIcons name="share" size={20} color={Colors.text} />
+          </TopbarButton>
+          {item.type === "url" && (
+            <OverflowMenu
+              items={[
+                ...(articleState.kind === "ready" && articleState.html
+                  ? [
+                      {
+                        title: showFormatted ? "Show plain text" : "Show formatted",
+                        onPress: () => setShowFormatted((v) => !v),
+                      },
+                      {
+                        title: showRawHtml ? "Hide raw HTML" : "Show raw HTML",
+                        onPress: () => setShowRawHtml((v) => !v),
+                      },
+                    ]
+                  : []),
+                {
+                  title: splitBySentence ? "Unsplit sentences" : "Split by sentence",
+                  onPress: () => setSplitBySentence((v) => !v),
+                },
+                { title: "Load from archive.is", onPress: () => handleLoadFromArchive("is") },
+                { title: "Load from archive.org", onPress: () => handleLoadFromArchive("org") },
+              ]}
+            />
+          )}
+        </>
+      }
     >
       <ScrollView
         contentContainerStyle={{ paddingBottom: Spacing.xl }}

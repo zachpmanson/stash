@@ -1,17 +1,16 @@
+import { MaterialIcons } from "@expo/vector-icons";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, RefreshControl, useWindowDimensions, FlatList } from "react-native";
-import { showModal } from "src/state/modalState";
+import { StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import ItemGrid from "src/components/ItemGrid";
+import { showModal } from "src/state/modalState";
+import Screen from "../components/Screen";
+import TopbarButton from "../components/TopbarButton";
+import { archiveFolder } from "../db/folders";
+import { archiveItem, getItemsInFolder } from "../db/items";
 import { Colors, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
-import { getItemsInFolder, archiveItem } from "../db/items";
-import { archiveFolder } from "../db/folders";
-import ItemCard from "../components/ItemCard";
-import TopbarButton from "../components/TopbarButton";
-import Screen from "../components/Screen";
-import { MaterialIcons } from "@expo/vector-icons";
-import ItemGrid from "src/components/ItemGrid";
 
 export default function FolderScreen() {
   const {
@@ -94,14 +93,16 @@ export default function FolderScreen() {
   return (
     <Screen
       title={folderName}
-      buttons={[
-        <TopbarButton onPress={handleEdit}>
-          <MaterialIcons name="edit" size={20} color={Colors.text} />
-        </TopbarButton>,
-        <TopbarButton onPress={handleArchive}>
-          <MaterialIcons name="archive" size={20} color={Colors.text} />
-        </TopbarButton>,
-      ]}
+      buttons={
+        <>
+          <TopbarButton onPress={handleEdit}>
+            <MaterialIcons name="edit" size={20} color={Colors.text} />
+          </TopbarButton>
+          <TopbarButton onPress={handleArchive}>
+            <MaterialIcons name="archive" size={20} color={Colors.text} />
+          </TopbarButton>
+        </>
+      }
     >
       <ItemGrid
         items={items}

@@ -43,8 +43,8 @@ export function subscribeRemoteEvents(handlers: {
 }): RemoteEventSubscription[] {
   if (!emitter) return [];
   return [
-    emitter.addListener("StashMediaToggle", handlers.onToggle),
-    emitter.addListener("StashMediaNext", handlers.onNext),
-    emitter.addListener("StashMediaPrev", handlers.onPrev),
+    emitter.addListener("StashMediaToggle", () => { console.log("[StashMedia] toggle"); handlers.onToggle(); }),
+    emitter.addListener("StashMediaNext", () => { console.log("[StashMedia] next"); handlers.onNext(); }),
+    emitter.addListener("StashMediaPrev", () => { console.log("[StashMedia] prev"); handlers.onPrev(); }),
   ];
 }
