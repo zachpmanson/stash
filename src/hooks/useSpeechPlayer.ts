@@ -12,6 +12,7 @@ import { useListenSession } from "../state/listenSession";
 import { applySubstitutions } from "src/utils/applySubstitutions";
 import { getTextSubstitutions } from "src/db/textSubstitutions";
 import { TextSubstitution } from "src/types";
+import { Sentence } from "../utils/sentences";
 
 export type SpeechPlayerMeta = {
   title: string;
@@ -48,7 +49,7 @@ export type SpeechPlayer = {
 };
 
 export function useSpeechPlayer(
-  sentences: string[],
+  sentences: Sentence[],
   meta?: SpeechPlayerMeta,
   itemId?: string,
   initialIndex: number = 0,
@@ -70,7 +71,8 @@ export function useSpeechPlayer(
   const mediaStartedRef = useRef(false);
   const metaRef = useRef(meta);
   const selectedVoice = useVoiceStore((s) => s.selectedVoice);
-  const voiceRef = useRef(selectedVoice);
+  const quoteVoice = useVoiceStore((s) => s.quoteVoice);
+  const voicesRef = useRef<{ primary: string; quote: string }>({ primary: selectedVoice, quote: quoteVoice });
 
   useEffect(() => {
     indexRef.current = index;
@@ -118,11 +120,11 @@ export function useSpeechPlayer(
   }, []);
 
   useEffect(() => {
-    voiceRef.current = selectedVoice;
+    voicesRef.current = { primary: selectedVoice, quote: quoteVoice };
     if (isPlayingRef.current) {
       speakAt(indexRef.current);
     }
-  }, [selectedVoice]);
+  }, [selectedVoice, quoteVoice]);
 
   const speakAt = useCallback((i: number) => {
     const list = sentencesRef.current;
@@ -135,7 +137,8 @@ export function useSpeechPlayer(
     genRef.current += 1;
     const myGen = genRef.current;
     Speech.stop();
-    const subbedSentence = subs ? applySubstitutions(list[i], subs) : list[i];
+    const sentence = list[i];
+    const subbedSentence = subs ? applySubstitutions(sentence.text, subs) : sentence.text;
     Speech.speak(subbedSentence, {
       onDone: () => {
         if (myGen !== genRef.current) return;
@@ -156,7 +159,7 @@ export function useSpeechPlayer(
         setIsPlaying(false);
         setMediaPlaying(false);
       },
-      voice: voiceRef.current,
+      voice: voicesRef.current[sentence.mode],
     });
     setIsPlaying(true);
   }, []);
@@ -237,7 +240,7 @@ export function useSpeechPlayer(
     index,
     isPlaying,
     total: sentences.length,
-    current: sentences[index] ?? null,
+    current: sentences[index]?.text ?? null,
     play,
     pause,
     toggle,

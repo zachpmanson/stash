@@ -209,12 +209,12 @@ export default function ItemDetailScreen() {
           <Text style={styles.meta}>
             Saved {new Date(item.created_at).toLocaleString()}
             {readEstimate ? ` · ${readEstimate}` : ""}
-            {item.listened_percent > 0 ? ` · ${item.listened_percent}% listened` : ""}
+            {(item.listened_percent ?? 0) > 0 ? ` · ${item.listened_percent}% listened` : ""}
           </Text>
 
-          {item.listened_percent > 0 && item.listened_percent < 100 && (item.type === "url" || item.type === "text") && (
+          {(item.listened_percent ?? 0) > 0 && (item.listened_percent ?? 0) < 100 && (item.type === "url" || item.type === "text") && (
             <View style={styles.listenProgressBar}>
-              <View style={[styles.listenProgressFill, { width: `${item.listened_percent}%` }]} />
+              <View style={[styles.listenProgressFill, { width: `${item.listened_percent ?? 0}%` }]} />
             </View>
           )}
 
@@ -258,8 +258,12 @@ export default function ItemDetailScreen() {
                   />
                 ) : splitBySentence && sentences ? (
                   sentences.map((s, i) => (
-                    <Text style={styles.articleText} key={i} selectable>
-                      {s}
+                    <Text
+                      style={[styles.articleText, s.mode === "quote" && { fontStyle: "italic" }]}
+                      key={i}
+                      selectable
+                    >
+                      {s.text}
                     </Text>
                   ))
                 ) : (

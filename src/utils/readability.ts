@@ -2,9 +2,16 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { normalizeText } from "./sentences";
 
+export type VoiceMode = "primary" | "quote";
+
 export type Article = {
   title: string | null;
   html: string;
+};
+
+export type TextBlock = {
+  text: string;
+  mode: VoiceMode;
 };
 
 export function htmlToText(html: string): string {
@@ -14,6 +21,21 @@ export function htmlToText(html: string): string {
     ? body
     : (document.documentElement ?? document)) as unknown as DomNode;
   return normalizeText(extractText(root));
+}
+
+export function htmlToBlocks(html: string): TextBlock[] {
+  const { document } = parseHTML(html);
+  const body = document.body;
+  const root = (body && body.childNodes.length > 0
+    ? body
+    : (document.documentElement ?? document)) as unknown as DomNode;
+  const blocks: BlockBuilder[] = [];
+  const state: WalkState = { depth: 0, current: null };
+  walkBlocks(root, blocks, state);
+  flushBlock(blocks, state);
+  return blocks
+    .map((b) => ({ text: cleanBlockText(b.parts.join("")), mode: b.mode }))
+    .filter((b) => b.text.length > 0);
 }
 
 export function archiveIsUrl(url: string): string {
@@ -89,6 +111,48 @@ function walk(node: DomNode | null | undefined, out: string[]): void {
   if (isBlock) out.push("\n\n");
   if (node.childNodes) for (const child of Array.from(node.childNodes)) walk(child, out);
   if (isBlock) out.push("\n\n");
+}
+
+type BlockBuilder = { parts: string[]; mode: VoiceMode };
+type WalkState = { depth: number; current: BlockBuilder | null };
+
+function walkBlocks(node: DomNode | null | undefined, out: BlockBuilder[], state: WalkState): void {
+  if (!node) return;
+  if (node.nodeType === 3) {
+    const text = (node.nodeValue ?? "").replace(/\s+/g, " ");
+    if (!text) return;
+    if (!state.current) state.current = { parts: [], mode: state.depth > 0 ? "quote" : "primary" };
+    state.current.parts.push(text);
+    return;
+  }
+  if (node.nodeType !== 1) {
+    if (node.childNodes) for (const child of Array.from(node.childNodes)) walkBlocks(child, out, state);
+    return;
+  }
+  const tag = (node.tagName ?? "").toLowerCase();
+  if (SKIP_TAGS.has(tag)) return;
+  if (tag === "br" || tag === "hr") {
+    flushBlock(out, state);
+    return;
+  }
+  const isBlock = BLOCK_TAGS.has(tag);
+  const isQuote = tag === "blockquote";
+  if (isBlock) flushBlock(out, state);
+  if (isQuote) state.depth += 1;
+  if (node.childNodes) for (const child of Array.from(node.childNodes)) walkBlocks(child, out, state);
+  if (isQuote) state.depth -= 1;
+  if (isBlock) flushBlock(out, state);
+}
+
+function flushBlock(out: BlockBuilder[], state: WalkState): void {
+  if (state.current) {
+    out.push(state.current);
+    state.current = null;
+  }
+}
+
+function cleanBlockText(s: string): string {
+  return normalizeText(s.replace(/[ \t]+/g, " ").trim());
 }
 
 function extractText(root: DomNode): string {

@@ -44,7 +44,13 @@
         }
       ],
       "./plugins/share-intent-module",
-      "./plugins/media-session-module"
+      "./plugins/media-session-module",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Stash to attach photos to items."
+        }
+      ]
     ],
     "ios": {
       "bundleIdentifier": "com.zachmanson.stash",

@@ -1,3 +1,7 @@
+import type { TextBlock, VoiceMode } from "./readability";
+
+export type Sentence = { text: string; mode: VoiceMode };
+
 const ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
   [/“|”/g, '"'],
   [/‘|’/g, "'"],
@@ -42,6 +46,22 @@ export function splitSentences(text: string): string[] {
       const t = line.trim();
       if (!t) continue;
       result.push(...splitLine(t));
+    }
+  }
+  return result;
+}
+
+export function splitSentencesFromBlocks(blocks: TextBlock[]): Sentence[] {
+  const result: Sentence[] = [];
+  for (const block of blocks) {
+    const trimmed = block.text.trim();
+    if (!trimmed) continue;
+    for (const line of trimmed.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      for (const text of splitLine(t)) {
+        result.push({ text, mode: block.mode });
+      }
     }
   }
   return result;

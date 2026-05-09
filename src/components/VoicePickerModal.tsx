@@ -3,13 +3,23 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View
 import { MaterialIcons } from "@expo/vector-icons";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
+import type { VoiceMode } from "../utils/readability";
 
-export default function VoicePickerModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export default function VoicePickerModal({
+  visible,
+  onClose,
+  mode = "primary",
+}: {
+  visible: boolean;
+  onClose: () => void;
+  mode?: VoiceMode;
+}) {
   const voices = useVoiceStore((s) => s.voices);
-  const selected = useVoiceStore((s) => s.selectedVoice);
-  const setSelected = useVoiceStore((s) => s.setSelectedVoice);
+  const selected = useVoiceStore((s) => (mode === "quote" ? s.quoteVoice : s.selectedVoice));
+  const setVoiceFor = useVoiceStore((s) => s.setVoiceFor);
   const loadVoices = useVoiceStore((s) => s.loadVoices);
   const loaded = useVoiceStore((s) => s.loaded);
+  const title = mode === "quote" ? "Quote voice" : "Narrator voice";
 
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<Record<string, number>>({});
@@ -45,7 +55,7 @@ export default function VoicePickerModal({ visible, onClose }: { visible: boolea
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.menuBackdrop} onPress={onClose}>
         <Pressable style={styles.voiceMenu} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.voiceMenuTitle}>Voice</Text>
+          <Text style={styles.voiceMenuTitle}>{title}</Text>
           <ScrollView
             ref={scrollRef}
             style={{ maxHeight: 420 }}
@@ -70,7 +80,7 @@ export default function VoicePickerModal({ visible, onClose }: { visible: boolea
                     offsetsRef.current[v.identifier] = e.nativeEvent.layout.y;
                   }}
                   onPress={() => {
-                    setSelected(v.identifier);
+                    setVoiceFor(mode, v.identifier);
                     onClose();
                   }}
                 >

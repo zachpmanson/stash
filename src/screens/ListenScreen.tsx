@@ -12,13 +12,14 @@ import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { useListenSession } from "../state/listenSession";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
-import { normalizeText, splitSentences } from "../utils/sentences";
+import { normalizeText, Sentence, splitSentences } from "../utils/sentences";
+import { VoiceMode } from "../utils/readability";
 import { wordsToSeconds } from "../utils/speech";
 
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; title: string | null; sentences: string[] };
+  | { kind: "ready"; title: string | null; sentences: Sentence[] };
 
 export default function ListenScreen() {
   const router = useRouter();
@@ -50,7 +51,10 @@ export default function ListenScreen() {
       setState({ kind: "loading" });
       getTextSubstitutions().then((subs) => {
         if (cancelled) return;
-        const sentences = splitSentences(normalizeText(item.uri));
+        const sentences: Sentence[] = splitSentences(normalizeText(item.uri)).map((text) => ({
+          text,
+          mode: "primary" as const,
+        }));
         if (sentences.length === 0) {
           setState({ kind: "error", message: "No readable text found." });
           return;
@@ -91,19 +95,15 @@ export default function ListenScreen() {
     };
   }, [item, reloadKey, sentences, articleState]);
 
-  const sentencesWithTitle = useMemo(() => {
+  const sentencesWithTitle = useMemo<Sentence[]>(() => {
     if (state.kind === "ready" && sentences) {
-      console.log({
-        state: state.title,
-        n_sentences: sentences.length,
-      });
-      let s = state.title ? [state.title] : [];
-      return [...s, ...sentences];
+      const titleSentence: Sentence[] = state.title ? [{ text: state.title, mode: "primary" }] : [];
+      return [...titleSentence, ...sentences];
     }
     return [];
   }, [state, sentences]);
 
-  const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
 
   return (
     <Screen
@@ -111,13 +111,18 @@ export default function ListenScreen() {
       buttons={[
         <OverflowMenu
           items={[
-            { title: "Voice", onPress: () => setVoiceMenuOpen(true) },
+            { title: "Narrator voice", onPress: () => setVoiceMenu("primary") },
+            { title: "Quote voice", onPress: () => setVoiceMenu("quote") },
             { title: "Text Substitutions", onPress: () => router.push("/text-substitutions") },
           ]}
         />,
       ]}
     >
-      <VoicePickerModal visible={voiceMenuOpen} onClose={() => setVoiceMenuOpen(false)} />
+      <VoicePickerModal
+        visible={voiceMenu !== null}
+        mode={voiceMenu ?? "primary"}
+        onClose={() => setVoiceMenu(null)}
+      />
       {state.kind === "loading" && (
         <View style={styles.center}>
           <ActivityIndicator color={Colors.accent} />
@@ -146,8 +151,8 @@ export default function ListenScreen() {
   );
 }
 
-function countWords(s: string): number {
-  return s.trim().split(/\s+/).filter(Boolean).length;
+function countWords(s: Sentence): number {
+  return s.text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function formatRemaining(seconds: number): string {
@@ -163,7 +168,7 @@ function Player({
   initialPercent,
 }: {
   title: string | null;
-  sentences: string[];
+  sentences: Sentence[];
   itemId: string;
   initialPercent: number;
 }) {
@@ -234,8 +239,9 @@ function Player({
             scrollHeightRef.current = e.nativeEvent.layout.height;
           }}
         >
-          {sentences.map((text, i) => {
+          {sentences.map((s, i) => {
             const isCurrent = i === player.index;
+            const isQuote = s.mode === "quote";
             return (
               <Pressable
                 key={i}
@@ -244,7 +250,15 @@ function Player({
                   offsetsRef.current[i] = e.nativeEvent.layout.y;
                 }}
               >
-                <Text style={[styles.sentence, !isCurrent && styles.sentenceDim]}>{text}</Text>
+                <Text
+                  style={[
+                    styles.sentence,
+                    isQuote && styles.sentenceQuote,
+                    !isCurrent && styles.sentenceDim,
+                  ]}
+                >
+                  {s.text}
+                </Text>
               </Pressable>
             );
           })}
@@ -375,6 +389,12 @@ const styles = StyleSheet.create({
   sentenceDim: {
     color: Colors.textMuted,
     fontWeight: "400",
+  },
+  sentenceQuote: {
+    fontStyle: "italic",
+    paddingLeft: Spacing.md,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.border,
   },
 
   controls: {

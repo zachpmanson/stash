@@ -15,22 +15,18 @@ export function detectItemType(payload: ResolvedSharePayload): ItemType {
   return "file";
 }
 
-export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[]): Promise<StashItem> {
-  const type = detectItemType(payload);
+type CoreInput = {
+  type: ItemType;
+  // For url/text: the literal value. For image/file: the source uri to copy.
+  source: string;
+  mimeType: string;
+};
+
+async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string[]): Promise<StashItem> {
   const id = String(Date.now());
   const now = Date.now();
 
-  let uri: string;
-  let mimeType: string;
-
-  if (payload.shareType === "url" || payload.shareType === "text") {
-    uri = payload.value;
-    mimeType = "text/plain";
-  } else {
-    uri = payload.contentUri!;
-    mimeType = payload.contentMimeType ?? payload.mimeType ?? "application/octet-stream";
-  }
-
+  let uri = source;
   let title: string | null = null;
   let description: string | null = null;
   let faviconUrl: string | null = null;
@@ -40,7 +36,7 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
   if (type === "image" || type === "file") {
     const ext = getExtension(mimeType);
     const filename = `${id}.${ext}`;
-    const savedUri = await copyFileToStash(uri, filename);
+    const savedUri = await copyFileToStash(source, filename);
     if (type === "image") {
       thumbnailPath = savedUri;
     }
@@ -87,4 +83,35 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
 
   await saveItem(item, folderIds);
   return { ...item, archived_at: null };
+}
+
+export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[]): Promise<StashItem> {
+  const type = detectItemType(payload);
+  let source: string;
+  let mimeType: string;
+
+  if (payload.shareType === "url" || payload.shareType === "text") {
+    source = payload.value;
+    mimeType = "text/plain";
+  } else {
+    source = payload.contentUri!;
+    mimeType = payload.contentMimeType ?? payload.mimeType ?? "application/octet-stream";
+  }
+
+  return saveCore({ type, source, mimeType }, folderIds);
+}
+
+export type ManualPayload =
+  | { type: "url"; value: string }
+  | { type: "text"; value: string }
+  | { type: "image"; localUri: string; mimeType: string };
+
+export async function saveManualItem(payload: ManualPayload, folderIds: string[]): Promise<StashItem> {
+  if (payload.type === "url") {
+    return saveCore({ type: "url", source: payload.value, mimeType: "text/plain" }, folderIds);
+  }
+  if (payload.type === "text") {
+    return saveCore({ type: "text", source: payload.value, mimeType: "text/plain" }, folderIds);
+  }
+  return saveCore({ type: "image", source: payload.localUri, mimeType: payload.mimeType }, folderIds);
 }

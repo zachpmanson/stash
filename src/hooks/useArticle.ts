@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchArticle, htmlToText } from "../utils/readability";
-import { normalizeText, splitSentences } from "src/utils/sentences";
+import { fetchArticle, htmlToBlocks, htmlToText } from "../utils/readability";
+import { normalizeText, Sentence, splitSentences, splitSentencesFromBlocks } from "src/utils/sentences";
 import { updateItemArticleHtml } from "../db/items";
 
 export type ArticleState =
@@ -21,7 +21,7 @@ export function useArticle(
   initialHtml?: string | null,
 ): {
   state: ArticleState;
-  sentences: string[] | undefined;
+  sentences: Sentence[] | undefined;
   refresh: () => Promise<void>;
   loadFrom: (sourceUrl: string) => Promise<void>;
   refreshing: boolean;
@@ -32,8 +32,13 @@ export function useArticle(
   const [refreshing, setRefreshing] = useState(false);
   const cancelledRef = useRef(false);
 
-  const sentences = useMemo(() => {
-    if (state.kind === "ready" && state.text) return splitSentences(normalizeText(state.text));
+  const sentences = useMemo<Sentence[] | undefined>(() => {
+    if (state.kind !== "ready") return undefined;
+    if (state.html) return splitSentencesFromBlocks(htmlToBlocks(state.html));
+    if (state.text) {
+      return splitSentences(normalizeText(state.text)).map((text) => ({ text, mode: "primary" as const }));
+    }
+    return undefined;
   }, [state]);
 
   useEffect(() => {
