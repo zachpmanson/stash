@@ -4,6 +4,8 @@ import React, { useCallback, useState } from "react";
 import { StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ItemGrid from "src/components/ItemGrid";
+import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
+import AddItemModal from "src/components/AddItemModal";
 import { showModal } from "src/state/modalState";
 import Screen from "../components/Screen";
 import TopbarButton from "../components/TopbarButton";
@@ -21,6 +23,7 @@ export default function FolderScreen() {
   const router = useRouter();
   const [items, setItems] = useState<StashItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
@@ -111,6 +114,14 @@ export default function FolderScreen() {
         onRefresh={onRefresh}
         refreshing={refreshing}
         folderName={folderName}
+      />
+      <AddItemFAB onSelect={setAddItemMode} />
+      <AddItemModal
+        visible={addItemMode !== null}
+        mode={addItemMode}
+        onClose={() => setAddItemMode(null)}
+        initialFolderId={folderId}
+        onSaved={loadItems}
       />
     </Screen>
   );

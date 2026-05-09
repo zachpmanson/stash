@@ -10,6 +10,8 @@ import { Folder } from "../types";
 import { useFolderStore } from "src/state/folderState";
 import FolderGrid from "src/components/FolderGrid";
 import { isShareLaunch } from "src/utils/nativeShareIntent";
+import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
+import AddItemModal from "src/components/AddItemModal";
 
 export default function HomeScreen() {
   if (isShareLaunch()) {
@@ -18,6 +20,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [newFolderVisible, setNewFolderVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const inputRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
   const { refresh } = useFolderStore();
@@ -78,9 +81,6 @@ export default function HomeScreen() {
         <View style={styles.headerActions}>
           <IconButton onPress={() => router.push("/settings")}>⚙️</IconButton>
           <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
-          <IconButton style={[styles.addBtn]} onPress={handleNewFolder}>
-            <Text style={styles.addBtnText}>+</Text>
-          </IconButton>
         </View>
       </View>
       <View style={[styles.gridContainer]}>
@@ -93,6 +93,8 @@ export default function HomeScreen() {
           }
         />
       </View>
+      <AddItemFAB onSelect={setAddItemMode} onNewFolder={handleNewFolder} />
+      <AddItemModal visible={addItemMode !== null} mode={addItemMode} onClose={() => setAddItemMode(null)} />
     </View>
   );
 }
