@@ -15,13 +15,13 @@ import { showModal } from "src/state/modalState";
 import { processAndSaveShare } from "src/utils/shareHandler";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
 import Debug from "src/components/Debug";
-import { Fragment, useCallback, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import FolderSelector from "src/components/FolderSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFolderStore } from "src/state/folderState";
 import { Folder } from "src/types";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { clearNativeShareIntent, finishShareTask } from "src/utils/nativeShareIntent";
+import { clearNativeShareIntent, finishShareTask, isListenShareLaunch } from "src/utils/nativeShareIntent";
 import SharePreview from "src/components/SharePreview";
 
 export default function ShareReceived() {
@@ -34,6 +34,17 @@ export default function ShareReceived() {
   const { refresh, folders } = useFolderStore();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [savingAndListening, setSavingAndListening] = useState(false);
+  const [isListenLaunch, setIsListenLaunch] = useState<boolean | null>(null);
+  const autoListenTriggeredRef = useRef(false);
+
+  const canListen =
+    resolvedSharedPayloads.length === 1 &&
+    (resolvedSharedPayloads[0].shareType === "url" || resolvedSharedPayloads[0].shareType === "text");
+
+  useEffect(() => {
+    isListenShareLaunch().then(setIsListenLaunch);
+  }, []);
 
   const handleDismiss = useCallback(() => {
     clearSharedPayloads();
@@ -95,7 +106,29 @@ export default function ShareReceived() {
     }
   }, [selectedIds, resolvedSharedPayloads, clearSharedPayloads, refresh, router, t]);
 
-  if (isResolving) {
+  const handleSaveAndListen = useCallback(async () => {
+    if (resolvedSharedPayloads.length !== 1) return;
+    setSavingAndListening(true);
+    try {
+      const item = await processAndSaveShare(resolvedSharedPayloads[0], ["inbox"]);
+      refresh();
+      clearSharedPayloads();
+      clearNativeShareIntent();
+      if (t) finishShareTask();
+      router.replace(`/listen/${item.id}`);
+    } catch (e) {
+      setSavingAndListening(false);
+      showModal({ title: "Error", message: `Failed to save item. ${e}` });
+    }
+  }, [resolvedSharedPayloads, clearSharedPayloads, refresh, router, t]);
+
+  useEffect(() => {
+    if (isResolving || !canListen || !isListenLaunch || autoListenTriggeredRef.current) return;
+    autoListenTriggeredRef.current = true;
+    handleSaveAndListen();
+  }, [isResolving, canListen, isListenLaunch, handleSaveAndListen]);
+
+  if (isResolving || isListenLaunch === null || (canListen && isListenLaunch)) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" />
@@ -121,7 +154,7 @@ export default function ShareReceived() {
         <Pressable
           style={({ pressed }) => [styles.saveBtn, saving && styles.saveBtnDisabled, pressed && styles.saveBtnPressed]}
           onPress={handleSave}
-          disabled={saving}
+          disabled={saving || savingAndListening}
         >
           {saving ? (
             <ActivityIndicator color={Colors.white} />

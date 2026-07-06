@@ -96,12 +96,12 @@ export default function ListenScreen() {
   }, [item, reloadKey, sentences, articleState]);
 
   const sentencesWithTitle = useMemo<Sentence[]>(() => {
-    if (state.kind === "ready" && sentences) {
+    if (state.kind === "ready") {
       const titleSentence: Sentence[] = state.title ? [{ text: state.title, mode: "primary" }] : [];
-      return [...titleSentence, ...sentences];
+      return [...titleSentence, ...state.sentences];
     }
     return [];
-  }, [state, sentences]);
+  }, [state]);
 
   const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
 

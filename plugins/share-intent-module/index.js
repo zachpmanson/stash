@@ -66,6 +66,7 @@ function setMainActivityLaunchMode(config) {
 }
 
 const SHARE_ALIAS_NAME = ".ShareActivity";
+const LISTEN_SHARE_ALIAS_NAME = ".ListenShareActivity";
 const SHARE_THEME_NAME = "Theme.ShareTransparent";
 
 function addShareActivityAlias(config) {
@@ -73,10 +74,10 @@ function addShareActivityAlias(config) {
     const application = config.modResults.manifest.application?.[0];
     if (!application) return config;
 
-    const intentFilter = (action) => ({
+    const intentFilter = (action, mimeType) => ({
       $: { "android:autoVerify": "false" },
       action: [{ $: { "android:name": action } }],
-      data: [{ $: { "android:mimeType": "image/*" } }],
+      data: [{ $: { "android:mimeType": mimeType } }],
       category: [{ $: { "android:name": "android.intent.category.DEFAULT" } }],
     });
 
@@ -91,14 +92,33 @@ function addShareActivityAlias(config) {
         "android:theme": `@style/${SHARE_THEME_NAME}`,
       },
       "intent-filter": [
-        intentFilter("android.intent.action.SEND"),
-        intentFilter("android.intent.action.SEND_MULTIPLE"),
+        intentFilter("android.intent.action.SEND", "image/*"),
+        intentFilter("android.intent.action.SEND_MULTIPLE", "image/*"),
       ],
     };
 
+    // Second share-menu entry: shares text/urls straight into the Listen screen,
+    // bypassing the folder picker. Distinguished at runtime by component name
+    // (see ShareIntentModule.getConstants -> componentClassName).
+    const listenAlias = {
+      $: {
+        "android:name": LISTEN_SHARE_ALIAS_NAME,
+        "android:targetActivity": ".MainActivity",
+        "android:label": "Stash: Listen",
+        "android:taskAffinity": "com.zachmanson.stash.listenshare",
+        "android:launchMode": "singleInstancePerTask",
+        "android:excludeFromRecents": "true",
+        "android:exported": "true",
+        "android:theme": `@style/${SHARE_THEME_NAME}`,
+      },
+      "intent-filter": [intentFilter("android.intent.action.SEND", "text/plain")],
+    };
+
     const existing = application["activity-alias"] ?? [];
-    const filtered = existing.filter((a) => a.$?.["android:name"] !== SHARE_ALIAS_NAME);
-    application["activity-alias"] = [...filtered, alias];
+    const filtered = existing.filter(
+      (a) => a.$?.["android:name"] !== SHARE_ALIAS_NAME && a.$?.["android:name"] !== LISTEN_SHARE_ALIAS_NAME,
+    );
+    application["activity-alias"] = [...filtered, alias, listenAlias];
 
     return config;
   });
