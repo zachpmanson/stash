@@ -25,13 +25,9 @@ export default function ItemCard({ item, onPress, onLongPress }: Props) {
     >
       {item.type === "image" && item.thumbnail_path ? (
         <Image source={{ uri: item.thumbnail_path }} style={styles.image} resizeMode="cover" />
-      ) : item.type === "url" ? (
+      ) : item.type === "url" && item.thumbnail_path ? (
         <UrlPreview item={item} />
-      ) : item.type === "text" ? (
-        <TextPreview item={item} />
-      ) : (
-        <FilePreview item={item} />
-      )}
+      ) : null}
 
       {(item.listened_percent ?? 0) > 0 && (item.listened_percent ?? 0) < 100 && (
         <View style={styles.listenProgressBar}>
@@ -40,9 +36,28 @@ export default function ItemCard({ item, onPress, onLongPress }: Props) {
       )}
 
       <View style={styles.meta}>
+        {item.type === "url" && !item.thumbnail_path ? (
+          <View style={styles.compactRow}>
+            {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}
+            <Text style={styles.compactLabel} numberOfLines={1}>
+              {safeHostname(item.uri)}
+            </Text>
+          </View>
+        ) : item.type === "file" ? (
+          <View style={styles.compactRow}>
+            <Text style={styles.compactIcon}>📎</Text>
+            <Text style={styles.compactLabel} numberOfLines={1}>
+              {item.mime_type?.split("/")[1]?.toUpperCase() ?? "FILE"}
+            </Text>
+          </View>
+        ) : null}
         {item.title ? (
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
+          </Text>
+        ) : item.type === "text" ? (
+          <Text style={styles.title} numberOfLines={2}>
+            {item.uri}
           </Text>
         ) : null}
         <Text style={styles.date}>
@@ -68,26 +83,6 @@ function UrlPreview({ item }: { item: StashItem }) {
           </Text>
         </View>
       </View>
-    </View>
-  );
-}
-
-function TextPreview({ item }: { item: StashItem }) {
-  return (
-    <View style={styles.textPreview}>
-      <Text style={styles.textSnippet} numberOfLines={6}>
-        {item.uri}
-      </Text>
-    </View>
-  );
-}
-
-function FilePreview({ item }: { item: StashItem }) {
-  const ext = item.mime_type?.split("/")[1]?.toUpperCase() ?? "FILE";
-  return (
-    <View style={styles.filePreview}>
-      <Text style={styles.fileIcon}>📎</Text>
-      <Text style={styles.fileExt}>{ext}</Text>
     </View>
   );
 }
@@ -154,26 +149,17 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 11,
   },
-  textPreview: {
-    width: "100%",
-    aspectRatio: 1 / 0.605,
-    backgroundColor: Colors.surface2,
-    padding: Spacing.sm,
-    justifyContent: "flex-start",
-  },
-  textSnippet: {
-    ...Typography.caption,
-    lineHeight: 18,
-  },
-  filePreview: {
-    width: "100%",
-    aspectRatio: 1 / 0.605,
-    backgroundColor: Colors.surface2,
+  compactRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    marginBottom: 4,
   },
-  fileIcon: { fontSize: 32, marginBottom: 4 },
-  fileExt: { ...Typography.label, color: Colors.textSecondary },
+  compactIcon: { fontSize: 14, marginRight: 4 },
+  compactLabel: {
+    ...Typography.caption,
+    color: Colors.textSecondary,
+    fontSize: 11,
+  },
   listenProgressBar: {
     height: 3,
     backgroundColor: Colors.surface2,
