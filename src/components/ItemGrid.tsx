@@ -29,11 +29,16 @@ const ItemGrid = React.forwardRef<FlatList<GridItem>, {
       const stashItem = item as StashItem;
       return (
         <View style={styles.cell}>
-          <ItemCard item={stashItem} onPress={() => onPress(stashItem)} onLongPress={() => onLongPress(stashItem)} />
+          <ItemCard
+            item={stashItem}
+            onPress={() => onPress(stashItem)}
+            onLongPress={() => onLongPress(stashItem)}
+            fullWidth={numColumns === 1}
+          />
         </View>
       );
     },
-    [onPress, onLongPress],
+    [onPress, onLongPress, numColumns],
   );
 
   const data = useMemo<GridItem[]>(

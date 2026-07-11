@@ -8,14 +8,19 @@ interface Props {
   item: StashItem;
   onPress: () => void;
   onLongPress?: () => void;
+  fullWidth?: boolean;
 }
 
-export default function ItemCard({ item, onPress, onLongPress }: Props) {
+export default function ItemCard({ item, onPress, onLongPress, fullWidth }: Props) {
   const readEstimate = useMemo(() => {
     if (item.type === "text") return estimateReadLabel(item.uri);
     if (item.type === "url") return estimateReadLabel(item.article_text);
     return null;
   }, [item.type, item.uri, item.article_text]);
+
+  const dateLabel = `${formatDate(item.created_at)}${readEstimate ? ` · ${readEstimate}` : ""}`;
+  const isCompactUrl = item.type === "url" && !item.thumbnail_path;
+  const inlineDate = fullWidth && isCompactUrl;
 
   return (
     <Pressable
@@ -36,12 +41,17 @@ export default function ItemCard({ item, onPress, onLongPress }: Props) {
       )}
 
       <View style={styles.meta}>
-        {item.type === "url" && !item.thumbnail_path ? (
+        {isCompactUrl ? (
           <View style={styles.compactRow}>
             {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}
-            <Text style={styles.compactLabel} numberOfLines={1}>
+            <Text style={[styles.compactLabel, styles.compactLabelGrow]} numberOfLines={1}>
               {safeHostname(item.uri)}
             </Text>
+            {inlineDate ? (
+              <Text style={styles.date} numberOfLines={1}>
+                {dateLabel}
+              </Text>
+            ) : null}
           </View>
         ) : item.type === "file" ? (
           <View style={styles.compactRow}>
@@ -60,10 +70,7 @@ export default function ItemCard({ item, onPress, onLongPress }: Props) {
             {item.uri}
           </Text>
         ) : null}
-        <Text style={styles.date}>
-          {formatDate(item.created_at)}
-          {readEstimate ? ` · ${readEstimate}` : ""}
-        </Text>
+        {inlineDate ? null : <Text style={styles.date}>{dateLabel}</Text>}
       </View>
     </Pressable>
   );
@@ -160,6 +167,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 11,
   },
+  compactLabelGrow: { flex: 1 },
   listenProgressBar: {
     height: 3,
     backgroundColor: Colors.surface2,
