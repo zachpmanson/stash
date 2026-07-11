@@ -45,6 +45,7 @@
       ],
       "./plugins/share-intent-module",
       "./plugins/media-session-module",
+      "./plugins/metro-max-workers",
       [
         "expo-image-picker",
         {
