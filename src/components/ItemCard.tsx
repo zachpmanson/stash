@@ -66,7 +66,7 @@ export default function ItemCard({ item, onPress, onLongPress, fullWidth }: Prop
           </Text>
         ) : null}
         {inlineDate ? (
-          <View style={styles.compactRow}>
+          <View style={[styles.compactRow, styles.compactRowNoMargin]}>
             {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}
             <Text style={[styles.compactLabel, styles.compactLabelGrow]} numberOfLines={1}>
               {safeHostname(item.uri)}
@@ -168,6 +168,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
+  compactRowNoMargin: { marginBottom: 0 },
   compactIcon: { fontSize: 14, marginRight: 4 },
   compactLabel: {
     ...Typography.caption,
