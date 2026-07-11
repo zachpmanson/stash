@@ -1,8 +1,9 @@
 import React from "react";
-import { View, StyleSheet, ViewStyle, StyleProp } from "react-native";
+import { View, StyleSheet, ViewStyle, StyleProp, Pressable, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stack } from "expo-router";
 import { Colors, Spacing } from "../theme";
+import { triggerScrollToTop } from "../state/scrollTopState";
 
 type StackScreenOptions = React.ComponentProps<typeof Stack.Screen>["options"];
 
@@ -17,7 +18,17 @@ type ScreenProps = {
 
 export default function Screen({ children, title, options, style, buttons, applyTopInset = false }: ScreenProps) {
   const insets = useSafeAreaInsets();
-  let mergedOptions = title ? { title, ...options } : options;
+  let mergedOptions = title
+    ? {
+        title,
+        headerTitle: () => (
+          <Pressable onPress={triggerScrollToTop} hitSlop={8}>
+            <Text style={styles.headerTitle}>{title}</Text>
+          </Pressable>
+        ),
+        ...options,
+      }
+    : options;
   mergedOptions = buttons
     ? { headerRight: () => <View style={styles.headerActions}>{buttons}</View>, ...mergedOptions }
     : mergedOptions;
@@ -38,5 +49,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.xs,
+  },
+  headerTitle: {
+    color: Colors.text,
+    fontSize: 17,
+    fontWeight: "600",
   },
 });

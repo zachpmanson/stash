@@ -6,26 +6,36 @@ import Screen from "../components/Screen";
 import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
+import { VoiceMode } from "../utils/readability";
 
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
   const selectedId = useVoiceStore((s) => s.selectedVoice);
+  const quoteId = useVoiceStore((s) => s.quoteVoice);
   const voices = useVoiceStore((s) => s.voices);
   const selectedVoice = voices.find((v) => v.identifier === selectedId);
   const voiceLabel = selectedVoice ? selectedVoice.name : selectedId;
+  const quoteVoice = voices.find((v) => v.identifier === quoteId);
+  const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
 
   return (
     <Screen options={{ title: "Settings" }}>
-      <VoicePickerModal visible={voiceMenuOpen} onClose={() => setVoiceMenuOpen(false)} />
+      <VoicePickerModal visible={voiceMenu !== null} mode={voiceMenu ?? "primary"} onClose={() => setVoiceMenu(null)} />
       <View style={styles.container}>
         <Row
           icon="record-voice-over"
-          label="Voice"
+          label="Narrator voice"
           value={voiceLabel}
-          onPress={() => setVoiceMenuOpen(true)}
+          onPress={() => setVoiceMenu("primary")}
+        />
+        <Row
+          icon="format-quote"
+          label="Quote voice"
+          value={quoteVoiceLabel}
+          onPress={() => setVoiceMenu("quote")}
         />
         <Row
           icon="spellcheck"

@@ -1,12 +1,13 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
-import { StyleSheet, useWindowDimensions } from "react-native";
+import React, { useCallback, useRef, useState } from "react";
+import { FlatList, StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ItemGrid from "src/components/ItemGrid";
 import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
 import AddItemModal from "src/components/AddItemModal";
 import { showModal } from "src/state/modalState";
+import { useScrollTopState } from "src/state/scrollTopState";
 import Screen from "../components/Screen";
 import TopbarButton from "../components/TopbarButton";
 import { archiveFolder } from "../db/folders";
@@ -26,6 +27,8 @@ export default function FolderScreen() {
   const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const listRef = useRef<FlatList>(null);
+  const setScrollTopHandler = useScrollTopState((s) => s.setHandler);
 
   const loadItems = useCallback(async () => {
     const data = await getItemsInFolder(folderId);
@@ -35,7 +38,9 @@ export default function FolderScreen() {
   useFocusEffect(
     useCallback(() => {
       loadItems();
-    }, [loadItems]),
+      setScrollTopHandler(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
+      return () => setScrollTopHandler(null);
+    }, [loadItems, setScrollTopHandler]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -108,12 +113,14 @@ export default function FolderScreen() {
       }
     >
       <ItemGrid
+        ref={listRef}
         items={items}
         onPress={(item) => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
         onLongPress={(item) => handleLongPress(item)}
         onRefresh={onRefresh}
         refreshing={refreshing}
         folderName={folderName}
+        numColumns={folderId === "inbox" ? 1 : 2}
       />
       <AddItemFAB onSelect={setAddItemMode} />
       <AddItemModal

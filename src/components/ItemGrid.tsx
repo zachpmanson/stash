@@ -10,21 +10,15 @@ export const NUM_COLUMNS = 2;
 const SHADOW_ITEM_ID = "__shadow__";
 type GridItem = StashItem | { id: typeof SHADOW_ITEM_ID };
 
-export default function ItemGrid({
-  items,
-  onPress,
-  onLongPress,
-  onRefresh,
-  refreshing,
-  folderName,
-}: {
+const ItemGrid = React.forwardRef<FlatList<GridItem>, {
   items: StashItem[];
   onPress: (item: StashItem) => void;
   onLongPress: (item: StashItem) => void;
   onRefresh: () => void;
   refreshing: boolean;
   folderName: string;
-}) {
+  numColumns?: number;
+}>(function ItemGrid({ items, onPress, onLongPress, onRefresh, refreshing, folderName, numColumns = NUM_COLUMNS }, ref) {
   const insets = useSafeAreaInsets();
 
   const renderItem = useCallback(
@@ -43,17 +37,20 @@ export default function ItemGrid({
   );
 
   const data = useMemo<GridItem[]>(
-    () => (items.length % NUM_COLUMNS === 0 ? items : [...items, { id: SHADOW_ITEM_ID }]),
-    [items],
+    () => (items.length % numColumns === 0 ? items : [...items, { id: SHADOW_ITEM_ID }]),
+    [items, numColumns],
   );
 
   return (
     <FlatList
+      // key forces FlatList to remount when column count changes, since numColumns can't change on the fly
+      key={numColumns}
+      ref={ref}
       data={data}
       keyExtractor={(item) => item.id}
       renderItem={renderItem}
-      numColumns={NUM_COLUMNS}
-      columnWrapperStyle={styles.row}
+      numColumns={numColumns}
+      columnWrapperStyle={numColumns > 1 ? styles.row : undefined}
       contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + Spacing.xl }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />}
       ListEmptyComponent={
@@ -65,7 +62,9 @@ export default function ItemGrid({
       }
     />
   );
-}
+});
+
+export default ItemGrid;
 
 const styles = StyleSheet.create({
   grid: {

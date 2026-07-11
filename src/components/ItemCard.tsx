@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
+import { estimateReadLabel } from "../utils/speech";
 
 interface Props {
   item: StashItem;
@@ -10,6 +11,12 @@ interface Props {
 }
 
 export default function ItemCard({ item, onPress, onLongPress }: Props) {
+  const readEstimate = useMemo(() => {
+    if (item.type === "text") return estimateReadLabel(item.uri);
+    if (item.type === "url") return estimateReadLabel(item.article_text);
+    return null;
+  }, [item.type, item.uri, item.article_text]);
+
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
@@ -26,13 +33,22 @@ export default function ItemCard({ item, onPress, onLongPress }: Props) {
         <FilePreview item={item} />
       )}
 
+      {(item.listened_percent ?? 0) > 0 && (item.listened_percent ?? 0) < 100 && (
+        <View style={styles.listenProgressBar}>
+          <View style={[styles.listenProgressFill, { width: `${item.listened_percent ?? 0}%` }]} />
+        </View>
+      )}
+
       <View style={styles.meta}>
         {item.title ? (
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
           </Text>
         ) : null}
-        <Text style={styles.date}>{formatDate(item.created_at)}</Text>
+        <Text style={styles.date}>
+          {formatDate(item.created_at)}
+          {readEstimate ? ` · ${readEstimate}` : ""}
+        </Text>
       </View>
     </Pressable>
   );
@@ -158,6 +174,14 @@ const styles = StyleSheet.create({
   },
   fileIcon: { fontSize: 32, marginBottom: 4 },
   fileExt: { ...Typography.label, color: Colors.textSecondary },
+  listenProgressBar: {
+    height: 3,
+    backgroundColor: Colors.surface2,
+  },
+  listenProgressFill: {
+    height: "100%",
+    backgroundColor: Colors.accent,
+  },
   meta: {
     padding: Spacing.sm,
   },

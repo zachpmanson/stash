@@ -97,6 +97,11 @@ export async function unarchiveItem(id: string): Promise<void> {
   await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
 }
 
+export async function updateItemTitle(id: string, title: string | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE items SET title = ? WHERE id = ?', [title, id]);
+}
+
 export async function updateItemListenedPercent(id: string, percent: number): Promise<void> {
   const db = await getDb();
   const clamped = Math.max(0, Math.min(100, Math.round(percent)));

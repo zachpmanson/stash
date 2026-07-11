@@ -1,8 +1,9 @@
 import IconButton from "@/components/IconButton";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { showModal } from "src/state/modalState";
+import { useScrollTopState } from "src/state/scrollTopState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { archiveFolder, createFolder, getFolders } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
@@ -22,8 +23,17 @@ export default function HomeScreen() {
   const [newFolderName, setNewFolderName] = useState("");
   const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const inputRef = useRef<TextInput>(null);
+  const gridRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
   const { refresh } = useFolderStore();
+  const setScrollTopHandler = useScrollTopState((s) => s.setHandler);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScrollTopHandler(() => gridRef.current?.scrollToOffset({ offset: 0, animated: true }));
+      return () => setScrollTopHandler(null);
+    }, [setScrollTopHandler]),
+  );
 
   const handleNewFolder = useCallback(() => {
     setNewFolderName("");
@@ -77,7 +87,9 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
       </Modal>
       <View style={styles.header}>
-        <Text style={styles.title}>Stash</Text>
+        <Pressable onPress={() => gridRef.current?.scrollToOffset({ offset: 0, animated: true })}>
+          <Text style={styles.title}>Stash</Text>
+        </Pressable>
         <View style={styles.headerActions}>
           <IconButton onPress={() => router.push("/settings")}>⚙️</IconButton>
           <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
@@ -85,6 +97,7 @@ export default function HomeScreen() {
       </View>
       <View style={[styles.gridContainer]}>
         <FolderGrid
+          ref={gridRef}
           onFolderPress={(item) =>
             router.push({
               pathname: "/folder/[id]",

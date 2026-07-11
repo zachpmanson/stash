@@ -1,15 +1,17 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useArticle } from "src/hooks/useArticle";
 import OverflowMenu from "../components/OverflowMenu";
 import Screen from "../components/Screen";
+import TopbarButton from "../components/TopbarButton";
 import VoicePickerModal from "../components/VoicePickerModal";
-import { getItemById, updateItemListenedPercent } from "../db/items";
+import { archiveItem, getItemById, updateItemListenedPercent } from "../db/items";
 import { getTextSubstitutions } from "../db/textSubstitutions";
 import { useSpeechPlayer } from "../hooks/useSpeechPlayer";
 import { useListenSession } from "../state/listenSession";
+import { showModal } from "../state/modalState";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
 import { normalizeText, Sentence, splitSentences } from "../utils/sentences";
@@ -105,11 +107,34 @@ export default function ListenScreen() {
 
   const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
 
+  const handleArchive = useCallback(() => {
+    if (!item) return;
+    showModal({
+      title: "Archive item?",
+      message: "You can unarchive it later.",
+      buttons: [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive",
+          style: "destructive",
+          onPress: async () => {
+            await archiveItem(item.id);
+            router.back();
+          },
+        },
+      ],
+    });
+  }, [item, router]);
+
   return (
     <Screen
       options={{ title: "Listen" }}
       buttons={[
+        <TopbarButton key="archive" onPress={handleArchive}>
+          <MaterialIcons name="archive" size={20} color={Colors.text} />
+        </TopbarButton>,
         <OverflowMenu
+          key="overflow"
           items={[
             { title: "Narrator voice", onPress: () => setVoiceMenu("primary") },
             { title: "Quote voice", onPress: () => setVoiceMenu("quote") },

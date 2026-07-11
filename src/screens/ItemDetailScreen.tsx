@@ -29,7 +29,7 @@ import { useArticle } from "../hooks/useArticle";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
-import { wordsToSeconds } from "../utils/speech";
+import { estimateReadLabel } from "../utils/speech";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -48,15 +48,9 @@ export default function ItemDetailScreen() {
   } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html);
 
   const readEstimate = useMemo(() => {
-    let text: string | null = null;
-    if (item?.type === "text") text = item.uri;
-    else if (item?.type === "url" && articleState.kind === "ready") text = articleState.text;
-    if (!text) return null;
-    const words = text.trim().split(/\s+/).filter(Boolean).length;
-    if (words === 0) return null;
-    const seconds = wordsToSeconds(words);
-    if (seconds < 60) return "<1 min read";
-    return `${Math.round(seconds / 60)} min read`;
+    if (item?.type === "text") return estimateReadLabel(item.uri);
+    if (item?.type === "url" && articleState.kind === "ready") return estimateReadLabel(articleState.text);
+    return null;
   }, [item, articleState]);
 
   const handleLoadFromArchive = useCallback(

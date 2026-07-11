@@ -1,6 +1,6 @@
 import { Alert, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
 import FolderCard from "../components/FolderCard";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder } from "../types";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Colors, Spacing, Typography } from "../theme";
@@ -12,15 +12,11 @@ const NUM_COLUMNS = 2;
 const SHADOW_FOLDER_ID = "__shadow__";
 type GridFolder = Folder | { id: typeof SHADOW_FOLDER_ID };
 
-export default function FolderGrid({
-  onFolderPress,
-  onFolderLongPress,
-  selectedIds,
-}: {
+const FolderGrid = React.forwardRef<FlatList<GridFolder>, {
   onFolderPress: (folder: Folder) => void;
   onFolderLongPress?: (folder: Folder) => void;
   selectedIds?: Set<string>;
-}) {
+}>(function FolderGrid({ onFolderPress, onFolderLongPress, selectedIds }, ref) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -70,6 +66,7 @@ export default function FolderGrid({
 
   return (
     <FlatList
+      ref={ref}
       data={data}
       keyExtractor={(item) => item.id}
       renderItem={renderFolder}
@@ -88,7 +85,9 @@ export default function FolderGrid({
       }
     />
   );
-}
+});
+
+export default FolderGrid;
 
 const styles = StyleSheet.create({
   grid: {

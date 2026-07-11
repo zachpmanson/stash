@@ -1,11 +1,23 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, RefreshControl, useWindowDimensions } from "react-native";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  RefreshControl,
+  useWindowDimensions,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  TextInput,
+} from "react-native";
 import { showModal } from "src/state/modalState";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors, Spacing, Typography, Radius } from "../theme";
 import { Folder, StashItem } from "../types";
 import { getArchivedFolders, unarchiveFolder, deleteFolder } from "../db/folders";
-import { getArchivedItems, unarchiveItem, deleteItem } from "../db/items";
+import { getArchivedItems, unarchiveItem, updateItemTitle, deleteItem } from "../db/items";
 import ItemCard from "../components/ItemCard";
 import Screen from "../components/Screen";
 import ItemGrid from "src/components/ItemGrid";
@@ -14,8 +26,11 @@ export default function ArchiveScreen() {
   const [archivedFolders, setArchivedFolders] = useState<Folder[]>([]);
   const [archivedItems, setArchivedItems] = useState<StashItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [unarchivingItem, setUnarchivingItem] = useState<StashItem | null>(null);
+  const [unarchiveTitle, setUnarchiveTitle] = useState("");
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const titleInputRef = useRef<TextInput>(null);
 
   const load = useCallback(async () => {
     const [fs, items] = await Promise.all([getArchivedFolders(), getArchivedItems()]);
@@ -73,6 +88,17 @@ export default function ArchiveScreen() {
     [load],
   );
 
+  const handleUnarchiveSubmit = useCallback(async () => {
+    if (!unarchivingItem) return;
+    const trimmed = unarchiveTitle.trim();
+    if (trimmed !== (unarchivingItem.title ?? "").trim()) {
+      await updateItemTitle(unarchivingItem.id, trimmed || null);
+    }
+    await unarchiveItem(unarchivingItem.id);
+    setUnarchivingItem(null);
+    load();
+  }, [unarchivingItem, unarchiveTitle, load]);
+
   const handleItemOptions = useCallback(
     (item: StashItem) => {
       showModal({
@@ -81,9 +107,9 @@ export default function ArchiveScreen() {
           { text: "Cancel", style: "cancel" },
           {
             text: "Unarchive",
-            onPress: async () => {
-              await unarchiveItem(item.id);
-              load();
+            onPress: () => {
+              setUnarchiveTitle(item.title ?? "");
+              setUnarchivingItem(item);
             },
           },
           {
@@ -117,6 +143,41 @@ export default function ArchiveScreen() {
 
   return (
     <Screen>
+      <Modal
+        visible={unarchivingItem !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUnarchivingItem(null)}
+      >
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "padding"}>
+          <Pressable style={styles.overlay} onPress={() => setUnarchivingItem(null)}>
+            <Pressable style={styles.dialog} onPress={() => {}}>
+              <Text style={styles.dialogTitle}>Unarchive item</Text>
+              <Text style={styles.dialogBody}>Update the title before restoring it, or leave it as-is.</Text>
+              <TextInput
+                ref={titleInputRef}
+                style={styles.input}
+                value={unarchiveTitle}
+                onChangeText={setUnarchiveTitle}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={handleUnarchiveSubmit}
+                placeholderTextColor={Colors.textMuted}
+                placeholder="Title"
+                selectionColor={Colors.accent}
+              />
+              <View style={styles.dialogActions}>
+                <Pressable onPress={() => setUnarchivingItem(null)} style={styles.dialogBtn}>
+                  <Text style={styles.dialogBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable onPress={handleUnarchiveSubmit} style={[styles.dialogBtn, styles.dialogBtnPrimary]}>
+                  <Text style={[styles.dialogBtnText, styles.dialogBtnTextPrimary]}>Unarchive</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
       {isEmpty ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🗃️</Text>
@@ -172,7 +233,60 @@ export default function ArchiveScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   container: { flex: 1, backgroundColor: Colors.bg },
+  overlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Spacing.xl,
+  },
+  dialog: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    width: "100%",
+  },
+  dialogTitle: {
+    ...Typography.subheading,
+    marginBottom: Spacing.xs,
+  },
+  dialogBody: {
+    ...Typography.body,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
+  },
+  input: {
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    color: Colors.text,
+    fontSize: 16,
+    marginBottom: Spacing.lg,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: Spacing.sm,
+  },
+  dialogBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.sm,
+  },
+  dialogBtnPrimary: {
+    backgroundColor: Colors.accent,
+  },
+  dialogBtnText: {
+    ...Typography.body,
+    color: Colors.textSecondary,
+    fontWeight: "600",
+  },
+  dialogBtnTextPrimary: {
+    color: Colors.white,
+  },
   header: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
