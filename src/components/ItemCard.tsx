@@ -41,17 +41,12 @@ export default function ItemCard({ item, onPress, onLongPress, fullWidth }: Prop
       )}
 
       <View style={styles.meta}>
-        {isCompactUrl ? (
+        {isCompactUrl && !inlineDate ? (
           <View style={styles.compactRow}>
             {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}
-            <Text style={[styles.compactLabel, styles.compactLabelGrow]} numberOfLines={1}>
+            <Text style={styles.compactLabel} numberOfLines={1}>
               {safeHostname(item.uri)}
             </Text>
-            {inlineDate ? (
-              <Text style={styles.date} numberOfLines={1}>
-                {dateLabel}
-              </Text>
-            ) : null}
           </View>
         ) : item.type === "file" ? (
           <View style={styles.compactRow}>
@@ -70,7 +65,19 @@ export default function ItemCard({ item, onPress, onLongPress, fullWidth }: Prop
             {item.uri}
           </Text>
         ) : null}
-        {inlineDate ? null : <Text style={styles.date}>{dateLabel}</Text>}
+        {inlineDate ? (
+          <View style={styles.compactRow}>
+            {item.favicon_url ? <Image source={{ uri: item.favicon_url }} style={styles.favicon} /> : null}
+            <Text style={[styles.compactLabel, styles.compactLabelGrow]} numberOfLines={1}>
+              {safeHostname(item.uri)}
+            </Text>
+            <Text style={styles.date} numberOfLines={1}>
+              {dateLabel}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.date}>{dateLabel}</Text>
+        )}
       </View>
     </Pressable>
   );
