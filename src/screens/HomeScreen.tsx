@@ -86,15 +86,16 @@ export default function HomeScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
-      <View style={styles.header}>
-        <Pressable onPress={() => gridRef.current?.scrollToOffset({ offset: 0, animated: true })}>
-          <Text style={styles.title}>Stash</Text>
-        </Pressable>
+      <Pressable
+        style={styles.header}
+        onPress={() => gridRef.current?.scrollToOffset({ offset: 0, animated: true })}
+      >
+        <Text style={styles.title}>Stash</Text>
         <View style={styles.headerActions}>
           <IconButton onPress={() => router.push("/settings")}>⚙️</IconButton>
           <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
         </View>
-      </View>
+      </Pressable>
       <View style={[styles.gridContainer]}>
         <FolderGrid
           ref={gridRef}
