@@ -130,9 +130,6 @@ export default function ListenScreen() {
     <Screen
       options={{ title: "Listen" }}
       buttons={[
-        <TopbarButton key="archive" onPress={handleArchive}>
-          <MaterialIcons name="archive" size={20} color={Colors.text} />
-        </TopbarButton>,
         <OverflowMenu
           key="overflow"
           items={[
@@ -311,6 +308,8 @@ function Player({
           <ControlButton icon={player.isPlaying ? "pause" : "play-arrow"} onPress={player.toggle} big />
           <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
         </View>
+        <View style={styles.extraControls}>
+          <ControlButton icon="archive" onPress={handleArchive} />
         <View style={[{ flexDirection: "column", alignContent: "stretch", gap: 12 }]}>
           <View style={styles.progressRow}>
             <Text style={styles.progressText}>{percent}%</Text>
@@ -431,6 +430,9 @@ const styles = StyleSheet.create({
     gap: 12,
     borderTopLeftRadius: Radius.lg,
     borderTopRightRadius: Radius.lg,
+  },
+  extraControls: {
+    padding: 8,
   },
   controlButtons: {
     flexDirection: "row",
