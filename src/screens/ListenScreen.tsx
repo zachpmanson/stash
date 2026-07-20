@@ -130,6 +130,9 @@ export default function ListenScreen() {
     <Screen
       options={{ title: "Listen" }}
       buttons={[
+        <TopbarButton key="archive" onPress={handleArchive}>
+          <MaterialIcons name="archive" size={22} color="white" />
+        </TopbarButton>,
         <OverflowMenu
           key="overflow"
           items={[
@@ -167,7 +170,6 @@ export default function ListenScreen() {
           sentences={sentencesWithTitle}
           itemId={itemId}
           initialPercent={item?.listened_percent ?? 0}
-          onArchive={handleArchive}
         />
       )}
     </Screen>
@@ -189,13 +191,11 @@ function Player({
   sentences,
   itemId,
   initialPercent,
-  onArchive,
 }: {
   title: string | null;
   sentences: Sentence[];
   itemId: string;
   initialPercent: number;
-  onArchive: () => void;
 }) {
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
