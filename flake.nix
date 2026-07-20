@@ -15,7 +15,7 @@
               pkgs.nodejs
               pkgs.pnpm
               # Android build toolchain
-              pkgs.jdk          # Java runtime for Gradle
+              pkgs.jdk17         # Java 17 for Gradle compatibility
               pkgs.gradle       # Build system
               pkgs.android-tools # adb, fastboot
             ];
@@ -26,7 +26,7 @@
                 set -a; source .env; set +a
               fi
               echo "stash dev shell — node $(node -v), java $(java -version 2>&1 | head -1)"
-              echo "ANDROID_HOME: ${ANDROID_HOME:-not set}"
+              echo "ANDROID_HOME: ${ANDROID_HOME+set}"
             '';
           };
         });
