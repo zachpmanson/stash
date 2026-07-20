@@ -4,18 +4,31 @@ import { countGraphemes } from "unicode-segmenter/grapheme";
 
 export async function getFolders(includeArchived = false): Promise<Folder[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<Folder>(
+  const rows = await db.getAllAsync<Folder & { total_text_length: number }>(
     includeArchived
       ? `SELECT f.*, (
            SELECT COUNT(*) FROM item_folders if2
            JOIN items i ON i.id = if2.item_id
            WHERE if2.folder_id = f.id AND i.archived_at IS NULL
-         ) as item_count FROM folders f ORDER BY f.last_used_at DESC`
+         ) as item_count,
+         COALESCE(SUM(LENGTH(i.uri) + COALESCE(LENGTH(i.article_text), 0) + COALESCE(LENGTH(i.title), 0) + COALESCE(LENGTH(i.description), 0)), 0) as total_text_length
+         FROM folders f
+         LEFT JOIN item_folders if3 ON if3.folder_id = f.id
+         LEFT JOIN items i ON i.id = if3.item_id AND i.archived_at IS NULL
+         GROUP BY f.id
+         ORDER BY f.last_used_at DESC`
       : `SELECT f.*, (
            SELECT COUNT(*) FROM item_folders if2
            JOIN items i ON i.id = if2.item_id
            WHERE if2.folder_id = f.id AND i.archived_at IS NULL
-         ) as item_count FROM folders f WHERE f.archived_at IS NULL ORDER BY f.last_used_at DESC`,
+         ) as item_count,
+         COALESCE(SUM(LENGTH(i.uri) + COALESCE(LENGTH(i.article_text), 0) + COALESCE(LENGTH(i.title), 0) + COALESCE(LENGTH(i.description), 0)), 0) as total_text_length
+         FROM folders f
+         LEFT JOIN item_folders if3 ON if3.folder_id = f.id
+         LEFT JOIN items i ON i.id = if3.item_id AND i.archived_at IS NULL
+         GROUP BY f.id
+         WHERE f.archived_at IS NULL
+         ORDER BY f.last_used_at DESC`,
   );
   return rows;
 }
