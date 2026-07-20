@@ -62,20 +62,6 @@ function splitLine(line: string): string[] {
   if (tail) result.push(tail);
   return result;
 }
-  const result: string[] = [];
-  let pos = 0;
-  let m: RegExpExecArray | null;
-  SPLIT_RE.lastIndex = 0;
-  while ((m = SPLIT_RE.exec(line)) !== null) {
-    const end = m.index + m[0].length;
-    const s = line.slice(pos, end).trim();
-    if (s) result.push(s);
-    pos = end;
-  }
-  const tail = line.slice(pos).trim();
-  if (tail) result.push(tail);
-  return result;
-}
 
 export function splitSentences(text: string): string[] {
   const result: string[] = [];

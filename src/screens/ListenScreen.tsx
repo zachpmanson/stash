@@ -320,6 +320,7 @@ function Player({
           </View>
         </View>
       </View>
+      </View>
     </View>
   );
 }
