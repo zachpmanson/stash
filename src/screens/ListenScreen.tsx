@@ -167,6 +167,7 @@ export default function ListenScreen() {
           sentences={sentencesWithTitle}
           itemId={itemId}
           initialPercent={item?.listened_percent ?? 0}
+          onArchive={handleArchive}
         />
       )}
     </Screen>
@@ -188,11 +189,13 @@ function Player({
   sentences,
   itemId,
   initialPercent,
+  onArchive,
 }: {
   title: string | null;
   sentences: Sentence[];
   itemId: string;
   initialPercent: number;
+  onArchive: () => void;
 }) {
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<number[]>([]);
@@ -309,7 +312,7 @@ function Player({
           <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
         </View>
         <View style={styles.extraControls}>
-          <ControlButton icon="archive" onPress={handleArchive} />
+          <ControlButton icon="archive" onPress={onArchive} />
         <View style={[{ flexDirection: "column", alignContent: "stretch", gap: 12 }]}>
           <View style={styles.progressRow}>
             <Text style={styles.progressText}>{percent}%</Text>
