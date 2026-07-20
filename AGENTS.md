@@ -36,11 +36,6 @@ if (!cols.some((c) => c.name === "<column>")) {
 }
 ```
 
-## SQL Gotchas
-
-- **`WHERE` must come BEFORE `GROUP BY`**, not after. SQLite throws a syntax error on `... GROUP BY f.id WHERE ...` which causes the query to silently fail (store never updates, UI appears empty).
-- Subqueries in SELECT are cleaner than LEFT JOIN + GROUP BY for aggregate counts.
-
 ## Read Time Estimates
 
 - `estimateReadLabel(text)` in `src/utils/speech.ts` — counts words, estimates at 150 WPM
