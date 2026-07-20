@@ -11,7 +11,21 @@
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
           default = pkgs.mkShell {
-            packages = [ pkgs.nodejs pkgs.pnpm ];
+            packages = [
+              pkgs.nodejs
+              pkgs.pnpm
+              # Android build toolchain
+              pkgs.jdk          # Java runtime for Gradle
+              pkgs.gradle       # Build system
+              pkgs.android-tools # adb, fastboot
+            ];
+
+            shellHook = ''
+              # ANDROID_HOME is set by the Makefile default or .env file.
+              # On macOS: ~/Library/Android/sdk
+              # On Linux: set via .env or export ANDROID_HOME=/path/to/sdk
+              echo "stash dev shell — node $(node -v), java $(java -version 2>&1 | head -1)"
+            '';
           };
         });
     };
