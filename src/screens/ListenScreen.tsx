@@ -311,8 +311,6 @@ function Player({
           <ControlButton icon={player.isPlaying ? "pause" : "play-arrow"} onPress={player.toggle} big />
           <ControlButton icon="skip-next" onPress={player.next} disabled={player.index >= player.total - 1} />
         </View>
-        <View style={styles.extraControls}>
-          <ControlButton icon="archive" onPress={onArchive} />
         <View style={[{ flexDirection: "column", alignContent: "stretch", gap: 12 }]}>
           <View style={styles.progressRow}>
             <Text style={styles.progressText}>{percent}%</Text>
@@ -322,7 +320,6 @@ function Player({
             <View style={[styles.progressFill, { width: `${percent}%` }]} />
           </View>
         </View>
-      </View>
       </View>
     </View>
   );
@@ -434,9 +431,6 @@ const styles = StyleSheet.create({
     gap: 12,
     borderTopLeftRadius: Radius.lg,
     borderTopRightRadius: Radius.lg,
-  },
-  extraControls: {
-    padding: 8,
   },
   controlButtons: {
     flexDirection: "row",
