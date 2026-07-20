@@ -83,6 +83,12 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync("ALTER TABLE items ADD COLUMN listened_percent INTEGER NOT NULL DEFAULT 0");
   }
 
+  // Migrate folders table: add icon column if missing
+  const folderCols = await db.getAllAsync<{ name: string }>("PRAGMA table_info(folders)");
+  if (!folderCols.some((c) => c.name === "icon")) {
+    await db.execAsync("ALTER TABLE folders ADD COLUMN icon TEXT NOT NULL DEFAULT '📁'");
+  }
+
   // Seed default Inbox folder if empty
   const row = await db.getFirstAsync<{ count: number }>(
     "SELECT COUNT(*) as count FROM folders WHERE archived_at IS NULL",

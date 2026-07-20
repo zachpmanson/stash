@@ -26,8 +26,8 @@ export async function getFolders(includeArchived = false): Promise<Folder[]> {
          FROM folders f
          LEFT JOIN item_folders if3 ON if3.folder_id = f.id
          LEFT JOIN items i ON i.id = if3.item_id AND i.archived_at IS NULL
-         GROUP BY f.id
          WHERE f.archived_at IS NULL
+         GROUP BY f.id
          ORDER BY f.last_used_at DESC`,
   );
   return rows;
