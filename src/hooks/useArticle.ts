@@ -56,7 +56,7 @@ export function useArticle(
       .then(({ title, html }) => {
         if (cancelledRef.current) return;
         setState(buildReady(title, html, null));
-        if (itemId) updateItemArticleHtml(itemId, html).catch(() => {});
+        if (itemId) updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null).catch(() => {});
       })
       .catch((err) => {
         if (cancelledRef.current) return;
@@ -73,7 +73,7 @@ export function useArticle(
     try {
       const { title, html } = await fetchArticle(url);
       setState(buildReady(title, html, null));
-      if (itemId) await updateItemArticleHtml(itemId, html);
+      if (itemId) await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
     } catch (err) {
       setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
     } finally {
@@ -88,7 +88,7 @@ export function useArticle(
       try {
         const { title, html } = await fetchArticle(sourceUrl);
         setState(buildReady(title, html, null));
-        if (itemId) await updateItemArticleHtml(itemId, html);
+        if (itemId) await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
       } catch (err) {
         setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
       } finally {

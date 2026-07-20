@@ -108,9 +108,13 @@ export async function updateItemListenedPercent(id: string, percent: number): Pr
   await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
 }
 
-export async function updateItemArticleHtml(id: string, html: string | null): Promise<void> {
+export async function updateItemArticleHtml(id: string, html: string | null, text?: string | null): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
+  if (text !== undefined) {
+    await db.runAsync('UPDATE items SET article_html = ?, article_text = ? WHERE id = ?', [html, text, id]);
+  } else {
+    await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
+  }
 }
 
 export async function deleteItem(id: string): Promise<void> {
