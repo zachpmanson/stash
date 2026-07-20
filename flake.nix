@@ -21,10 +21,12 @@
             ];
 
             shellHook = ''
-              # ANDROID_HOME is set by the Makefile default or .env file.
-              # On macOS: ~/Library/Android/sdk
-              # On Linux: set via .env or export ANDROID_HOME=/path/to/sdk
+              # Load ANDROID_HOME from .env if present
+              if [ -f .env ]; then
+                set -a; source .env; set +a
+              fi
               echo "stash dev shell — node $(node -v), java $(java -version 2>&1 | head -1)"
+              echo "ANDROID_HOME: ${ANDROID_HOME:-not set}"
             '';
           };
         });
