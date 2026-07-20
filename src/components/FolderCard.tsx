@@ -1,7 +1,8 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Colors, Radius, Spacing, Typography } from "../theme";
-import { Folder, SelectableFolder, estimateFolderReadTime } from "../types";
+import { Folder, SelectableFolder } from "../types";
+import { estimateReadLabel } from "../utils/speech";
 
 interface Props {
   folder: SelectableFolder;
@@ -63,7 +64,7 @@ export default function FolderCard({ folder, onPress, onLongPress }: Props) {
       </Text>
       <Text style={styles.count}>{folder.item_count ?? 0} items</Text>
       {folder.total_text_length ? (
-        <Text style={styles.timeEstimate}>{estimateFolderReadTime(folder.total_text_length)?.label}</Text>
+        <Text style={styles.timeEstimate}>{estimateReadLabel(String(folder.total_text_length))}</Text>
       ) : null}
     </Pressable>
   );

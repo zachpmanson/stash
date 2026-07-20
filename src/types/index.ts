@@ -8,34 +8,9 @@ export type Folder = {
   last_used_at: number;
   archived_at: number | null;
   item_count?: number;
-  total_text_length?: number;
 };
 
-export type SelectableFolder = Folder & {
-  isSelected?: boolean;
-};
 
-type TimeEstimate = {
-  minutes: number;
-  label: string;
-};
-
-export function estimateFolderReadTime(totalTextLength: number | undefined): TimeEstimate | null {
-  if (!totalTextLength) return null;
-  // Average reading speed: ~200 words per minute
-  // Average character per word: ~5
-  const avgWordsPerMinute = 200;
-  const avgCharsPerWord = 5;
-  const words = totalTextLength / avgCharsPerWord;
-  const minutes = words / avgWordsPerMinute;
-  
-  if (minutes < 1) return { minutes: 0, label: "<1 min read" };
-  if (minutes < 60) return { minutes: Math.round(minutes), label: `${Math.round(minutes)} min read` };
-  const hours = minutes / 60;
-  if (hours < 24) return { minutes: Math.round(minutes), label: `${Math.round(hours)} hr read` };
-  const days = hours / 24;
-  return { minutes: Math.round(minutes), label: `${Math.round(days)} days read` };
-}
 
 export interface StashItem {
   id: string;
