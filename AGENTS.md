@@ -7,21 +7,21 @@ React Native/Expo app for stashing photos, links and articles for later. Offline
 
 ### Devshell
 ```bash
-cd /home/beltino/beltino/stash && direnv allow   # first time
-direnv exec . <command>                           # run in devshell
+cd ~/projects/stash && direnv allow   # first time
+cd ~/projects/stash && direnv exec . <command>  # run in devshell
 ```
 Provides: `node`, `pnpm`, `java` (JDK 17), `gradle`, `adb`
 
 ### Build & Install
 ```bash
-direnv exec . make deploy    # builds + installs + launches on connected device
+cd ~/projects/stash && direnv exec . make deploy
 ```
 This runs `pnpm prebuild && cd android && ./gradlew assembleRelease` then `adb install -r`.
 
 ### Wireless Debugging
 ```bash
 adb connect <ip>:<port>     # connect to phone
-make deploy                 # auto-detects device and deploys
+cd ~/projects/stash && direnv exec . make deploy
 ```
 
 ## Database Schema Migrations
