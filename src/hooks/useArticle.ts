@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchArticle, htmlToBlocks, htmlToText } from "../utils/readability";
 import { normalizeText, Sentence, splitSentences, splitSentencesFromBlocks } from "src/utils/sentences";
-import { updateItemArticleHtml } from "../db/items";
+import { updateItemArticleHtml, updateItemRecipeJson } from "../db/items";
+import type { Recipe } from "../types";
 
 export type ArticleState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ready"; title: string | null; text: string; html: string | null }
+  | { kind: "ready"; title: string | null; text: string; html: string | null; recipe: Recipe | null }
   | { kind: "error"; message: string };
 
-function buildReady(title: string | null, html: string | null, fallbackText: string | null): ArticleState {
+function buildReady(title: string | null, html: string | null, fallbackText: string | null, recipe: Recipe | null = null): ArticleState {
   const text = html ? htmlToText(html) : (fallbackText ?? "");
-  return { kind: "ready", title, text, html };
+  return { kind: "ready", title, text, html, recipe };
 }
 
 export function useArticle(
@@ -53,10 +54,13 @@ export function useArticle(
     }
     setState({ kind: "loading" });
     fetchArticle(url)
-      .then(({ title, html }) => {
+      .then(({ title, html, recipe }) => {
         if (cancelledRef.current) return;
-        setState(buildReady(title, html, null));
-        if (itemId) updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null).catch(() => {});
+        setState(buildReady(title, html, null, recipe ?? null));
+        if (itemId) {
+          updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null).catch(() => {});
+          if (recipe) updateItemRecipeJson(itemId, JSON.stringify(recipe)).catch(() => {});
+        }
       })
       .catch((err) => {
         if (cancelledRef.current) return;
@@ -71,9 +75,12 @@ export function useArticle(
     if (!url) return;
     setRefreshing(true);
     try {
-      const { title, html } = await fetchArticle(url);
-      setState(buildReady(title, html, null));
-      if (itemId) await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
+      const { title, html, recipe } = await fetchArticle(url);
+      setState(buildReady(title, html, null, recipe ?? null));
+      if (itemId) {
+        await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
+        if (recipe) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
+      }
     } catch (err) {
       setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
     } finally {
@@ -86,9 +93,12 @@ export function useArticle(
       setRefreshing(true);
       setState({ kind: "loading" });
       try {
-        const { title, html } = await fetchArticle(sourceUrl);
-        setState(buildReady(title, html, null));
-        if (itemId) await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
+        const { title, html, recipe } = await fetchArticle(sourceUrl);
+        setState(buildReady(title, html, null, recipe ?? null));
+        if (itemId) {
+          await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
+          if (recipe) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
+        }
       } catch (err) {
         setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
       } finally {

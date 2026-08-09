@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { normalizeText } from "./sentences";
+import type { HowToStep, Recipe } from "../types";
 
 export type VoiceMode = "primary" | "quote";
 
@@ -166,7 +167,7 @@ function extractText(root: DomNode): string {
     .trim();
 }
 
-export async function fetchArticle(url: string): Promise<Article> {
+export async function fetchArticle(url: string): Promise<Article & { recipe?: Recipe }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -182,6 +183,9 @@ export async function fetchArticle(url: string): Promise<Article> {
     clearTimeout(timeout);
   }
 
+  // Detect Recipe JSON-LD before falling through to Readability
+  const recipe = findRecipe(html);
+
   const { document } = parseHTML(html);
   const parsed = new Readability(document as unknown as Document).parse();
   if (!parsed || !parsed.content) {
@@ -194,8 +198,72 @@ export async function fetchArticle(url: string): Promise<Article> {
   }
 
   return {
-    title: parsed.title ?? null,
+    title: parsed.title ?? (recipe?.name ?? null),
     html: cleanedHtml,
+    ...(recipe ? { recipe } : {}),
+  };
+}
+
+/**
+ * Scan HTML for a JSON-LD script block with @type: "Recipe".
+ * Returns the parsed Recipe or null if none found.
+ */
+export function findRecipe(html: string): Recipe | null {
+  const scriptRegex = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    try {
+      const raw = match[1].trim();
+      // Handle both array responses and single objects
+      const parsed = JSON.parse(raw);
+      const graph = Array.isArray(parsed) ? parsed : parsed["@graph"] ?? [parsed];
+      for (const item of graph) {
+        if (item["@type"] === "Recipe") {
+          return normalizeRecipe(item);
+        }
+      }
+    } catch {
+      // Malformed JSON — skip this script block
+    }
+  }
+  return null;
+}
+
+function normalizeRecipe(raw: Record<string, any>): Recipe {
+  const instructions: HowToStep[] = [];
+  const rawInstructions = raw.recipeInstructions ?? [];
+  for (const step of Array.isArray(rawInstructions) ? rawInstructions : []) {
+    if (typeof step === "string") {
+      instructions.push({ text: step });
+    } else if (step?.text) {
+      instructions.push({ text: step.text, name: step.name, image: step.image });
+    }
+  }
+
+  const ingredients: string[] = [];
+  for (const ing of Array.isArray(raw.recipeIngredient) ? raw.recipeIngredient : []) {
+    if (typeof ing === "string") ingredients.push(ing);
+  }
+
+  return {
+    name: String(raw.name ?? ""),
+    description: raw.description ? String(raw.description) : undefined,
+    image: raw.image ? (typeof raw.image === "string" ? raw.image : raw.image?.url) : undefined,
+    recipeIngredient: ingredients,
+    recipeInstructions: instructions,
+    prepTime: raw.prepTime ? String(raw.prepTime) : undefined,
+    cookTime: raw.cookTime ? String(raw.cookTime) : undefined,
+    totalTime: raw.totalTime ? String(raw.totalTime) : undefined,
+    recipeYield: raw.recipeYield ? String(raw.recipeYield) : undefined,
+    nutrition: raw.nutrition?.calories
+      ? { calories: String(raw.nutrition.calories) }
+      : undefined,
+    author: raw.author
+      ? typeof raw.author === "string"
+        ? raw.author
+        : raw.author?.name
+      : undefined,
+    datePublished: raw.datePublished ? String(raw.datePublished) : undefined,
   };
 }
 

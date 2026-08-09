@@ -82,6 +82,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   if (!cols.some((c) => c.name === "listened_percent")) {
     await db.execAsync("ALTER TABLE items ADD COLUMN listened_percent INTEGER NOT NULL DEFAULT 0");
   }
+  if (!cols.some((c) => c.name === "recipe_json")) {
+    await db.execAsync("ALTER TABLE items ADD COLUMN recipe_json TEXT");
+  }
 
   // Migrate folders table: add icon column if missing
   const folderCols = await db.getAllAsync<{ name: string }>("PRAGMA table_info(folders)");

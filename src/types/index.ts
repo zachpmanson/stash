@@ -25,6 +25,7 @@ export interface StashItem {
   archived_at: number | null;
   article_text: string | null;
   article_html: string | null;
+  recipe_json: string | null;
   listened_percent?: number;
   folder_ids?: string[];
 }
@@ -43,3 +44,26 @@ export interface LinkPreview {
   image: string | null;
   favicon: string | null;
 }
+
+export type HowToStep = {
+  text: string;
+  name?: string;
+  image?: string;
+};
+
+export type Recipe = {
+  name: string;
+  description?: string;
+  image?: string;
+  recipeIngredient: string[];
+  recipeInstructions: HowToStep[];
+  prepTime?: string;
+  cookTime?: string;
+  totalTime?: string;
+  recipeYield?: string;
+  nutrition?: {
+    calories?: string;
+  };
+  author?: string;
+  datePublished?: string;
+};

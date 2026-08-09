@@ -28,6 +28,7 @@ import { archiveItem, getItemById } from "../db/items";
 import { useArticle } from "../hooks/useArticle";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
+import type { Recipe, HowToStep } from "../types";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { estimateReadLabel } from "../utils/speech";
 
@@ -236,6 +237,9 @@ export default function ItemDetailScreen() {
                 </View>
               )}
               {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
+              {articleState.kind === "ready" && articleState.recipe && (
+                <RecipeView recipe={articleState.recipe} />
+              )}
               {articleState.kind === "ready" &&
                 (showRawHtml && articleState.html ? (
                   <Text style={styles.rawHtml} selectable>
@@ -272,6 +276,56 @@ export default function ItemDetailScreen() {
         </View>
       </ScrollView>
     </Screen>
+  );
+}
+
+function RecipeView({ recipe }: { recipe: Recipe }) {
+  const fmtDuration = (iso: string) => {
+    const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
+    if (!m) return iso;
+    const parts: string[] = [];
+    if (m[1]) parts.push(`${m[1]}h`);
+    if (m[2]) parts.push(`${m[2]}m`);
+    return parts.join(" ") || iso;
+  };
+
+  return (
+    <View style={styles.recipeContainer}>
+      {recipe.name ? <Text style={styles.recipeTitle}>{recipe.name}</Text> : null}
+      {recipe.description ? <Text style={styles.recipeDescription}>{recipe.description}</Text> : null}
+      {recipe.author && <Text style={styles.recipeMeta}>By {recipe.author}</Text>}
+
+      <View style={styles.recipeMetaRow}>
+        {recipe.recipeYield && <Text style={styles.recipeMetaChip}>🍽️ {recipe.recipeYield}</Text>}
+        {recipe.prepTime && <Text style={styles.recipeMetaChip}>⏱️ Prep {fmtDuration(recipe.prepTime)}</Text>}
+        {recipe.cookTime && <Text style={styles.recipeMetaChip}>🔥 Cook {fmtDuration(recipe.cookTime)}</Text>}
+        {recipe.totalTime && <Text style={styles.recipeMetaChip}>📊 Total {fmtDuration(recipe.totalTime)}</Text>}
+        {recipe.nutrition?.calories && <Text style={styles.recipeMetaChip}>📈 {recipe.nutrition.calories}</Text>}
+      </View>
+
+      {recipe.recipeIngredient.length > 0 && (
+        <View style={styles.recipeSection}>
+          <Text style={styles.recipeSectionTitle}>Ingredients</Text>
+          {recipe.recipeIngredient.map((ing, i) => (
+            <Text key={i} style={styles.recipeIngredient}>• {ing}</Text>
+          ))}
+        </View>
+      )}
+
+      {recipe.recipeInstructions.length > 0 && (
+        <View style={styles.recipeSection}>
+          <Text style={styles.recipeSectionTitle}>Instructions</Text>
+          {recipe.recipeInstructions.map((step: HowToStep, i: number) => (
+            <View key={i} style={styles.recipeStep}>
+              <View style={styles.recipeStepNumber}>
+                <Text style={styles.recipeStepNumberText}>{i + 1}</Text>
+              </View>
+              <Text style={styles.recipeStepText}>{step.text}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -408,6 +462,76 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     gap: 6,
+  },
+  recipeContainer: {
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  recipeTitle: {
+    ...Typography.subheading,
+    fontSize: 20,
+    lineHeight: 28,
+  },
+  recipeDescription: {
+    ...Typography.body,
+    color: Colors.textSecondary,
+    lineHeight: 22,
+  },
+  recipeMeta: {
+    ...Typography.caption,
+    marginTop: -Spacing.xs,
+  },
+  recipeMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  recipeMetaChip: {
+    ...Typography.caption,
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.full,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    overflow: "hidden",
+  },
+  recipeSection: {
+    marginTop: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  recipeSectionTitle: {
+    ...Typography.subheading,
+    fontSize: 16,
+    marginBottom: Spacing.xs,
+  },
+  recipeIngredient: {
+    ...Typography.body,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  recipeStep: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  recipeStepNumber: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  recipeStepNumberText: {
+    color: Colors.bg,
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+  recipeStepText: {
+    ...Typography.body,
+    fontSize: 15,
+    lineHeight: 24,
+    flex: 1,
   },
   articleStatus: {
     flexDirection: "row",
