@@ -218,7 +218,8 @@ export function findRecipe(html: string): Recipe | null {
       const parsed = JSON.parse(raw);
       const graph = Array.isArray(parsed) ? parsed : parsed["@graph"] ?? [parsed];
       for (const item of graph) {
-        if (item["@type"] === "Recipe") {
+        const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
+        if (types.includes("Recipe")) {
           return normalizeRecipe(item);
         }
       }
@@ -248,7 +249,13 @@ function normalizeRecipe(raw: Record<string, any>): Recipe {
   return {
     name: String(raw.name ?? ""),
     description: raw.description ? String(raw.description) : undefined,
-    image: raw.image ? (typeof raw.image === "string" ? raw.image : raw.image?.url) : undefined,
+    image: raw.image
+      ? Array.isArray(raw.image)
+        ? raw.image[0]?.url
+        : typeof raw.image === "string"
+          ? raw.image
+          : raw.image?.url
+      : undefined,
     recipeIngredient: ingredients,
     recipeInstructions: instructions,
     prepTime: raw.prepTime ? String(raw.prepTime) : undefined,
