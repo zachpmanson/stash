@@ -289,6 +289,12 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
     return parts.join(" ") || iso;
   };
 
+  const formatIngredient = (ing: string) =>
+    ing.replace(/(\d+\.\d{3,})/g, (m) => {
+      const n = parseFloat(m);
+      return n % 1 === 0 ? Math.round(n).toString() : n.toFixed(2);
+    });
+
   return (
     <View style={styles.recipeContainer}>
       {recipe.name ? <Text style={styles.recipeTitle}>{recipe.name}</Text> : null}
@@ -307,7 +313,7 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
         <View style={styles.recipeSection}>
           <Text style={styles.recipeSectionTitle}>Ingredients</Text>
           {recipe.recipeIngredient.map((ing, i) => (
-            <Text key={i} style={styles.recipeIngredient}>• {ing}</Text>
+            <Text key={i} style={styles.recipeIngredient}>• {formatIngredient(ing)}</Text>
           ))}
         </View>
       )}
