@@ -140,7 +140,7 @@ export default function ItemDetailScreen() {
           {item.type === "url" && (
             <OverflowMenu
               items={[
-                ...(articleState.kind === "ready" && articleState.html
+                ...(articleState.kind === "ready" && articleState.html && !articleState.recipe
                   ? [
                       {
                         title: showFormatted ? "Show plain text" : "Show formatted",
@@ -240,7 +240,7 @@ export default function ItemDetailScreen() {
               {articleState.kind === "ready" && articleState.recipe && (
                 <RecipeView recipe={articleState.recipe} />
               )}
-              {articleState.kind === "ready" &&
+              {articleState.kind === "ready" && !articleState.recipe &&
                 (showRawHtml && articleState.html ? (
                   <Text style={styles.rawHtml} selectable>
                     {articleState.html}
