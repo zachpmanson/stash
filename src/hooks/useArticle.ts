@@ -20,6 +20,7 @@ export function useArticle(
   itemId?: string,
   initialText?: string | null,
   initialHtml?: string | null,
+  initialRecipeJson?: string | null,
 ): {
   state: ArticleState;
   sentences: Sentence[] | undefined;
@@ -28,7 +29,14 @@ export function useArticle(
   refreshing: boolean;
 } {
   const [state, setState] = useState<ArticleState>(
-    initialHtml || initialText ? buildReady(null, initialHtml ?? null, initialText ?? null) : { kind: "idle" },
+    initialHtml || initialText
+      ? buildReady(
+          null,
+          initialHtml ?? null,
+          initialText ?? null,
+          initialRecipeJson ? (JSON.parse(initialRecipeJson) as Recipe) : null,
+        )
+      : { kind: "idle" },
   );
   const [refreshing, setRefreshing] = useState(false);
   const cancelledRef = useRef(false);
@@ -49,7 +57,14 @@ export function useArticle(
       return;
     }
     if (initialHtml || initialText) {
-      setState(buildReady(null, initialHtml ?? null, initialText ?? null));
+      setState(
+        buildReady(
+          null,
+          initialHtml ?? null,
+          initialText ?? null,
+          initialRecipeJson ? (JSON.parse(initialRecipeJson) as Recipe) : null,
+        ),
+      );
       return;
     }
     setState({ kind: "loading" });
@@ -69,7 +84,7 @@ export function useArticle(
     return () => {
       cancelledRef.current = true;
     };
-  }, [url, itemId, initialText, initialHtml]);
+  }, [url, itemId, initialText, initialHtml, initialRecipeJson]);
 
   const refresh = useCallback(async () => {
     if (!url) return;

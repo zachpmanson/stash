@@ -46,7 +46,7 @@ export default function ItemDetailScreen() {
     refresh: refreshArticle,
     loadFrom: loadArticleFrom,
     refreshing,
-  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html);
+  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html, item?.recipe_json);
 
   const readEstimate = useMemo(() => {
     if (item?.type === "text") return estimateReadLabel(item.uri);
