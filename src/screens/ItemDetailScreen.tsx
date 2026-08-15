@@ -2,7 +2,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -50,8 +50,10 @@ export default function ItemDetailScreen() {
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
+  const [selActive, setSelActive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const articleRef = useRef<View>(null);
+  const selectionCacheRef = useRef<{ start: number; end: number; length: number } | null>(null);
   const { width: windowWidth } = useWindowDimensions();
   const {
     state: articleState,
@@ -89,27 +91,18 @@ export default function ItemDetailScreen() {
 
   const handleMarkBookmark = useCallback(async () => {
     if (!item || item.type !== "url") return;
-    const tag = findNodeHandle(articleRef.current);
-    if (!tag || !TextSelection?.getSelection) {
-      showSnackbar("Bookmark unavailable here");
+    const sel = selectionCacheRef.current;
+    if (!sel || sel.start < 0 || sel.end <= sel.start || sel.length <= 0) {
+      showModal({
+        title: "Select text first",
+        message: "Long-press the article and highlight your bookmark phrase, then tap the bookmark button.",
+      });
       return;
     }
-    try {
-      const sel = await TextSelection.getSelection(tag);
-      if (!sel || sel.start < 0 || sel.end <= sel.start || sel.length <= 0) {
-        showModal({
-          title: "Select text first",
-          message: "Long-press the article, select your bookmark phrase, then tap Mark bookmark again.",
-        });
-        return;
-      }
-      const percent = Math.min(99, Math.max(1, Math.round((sel.start / sel.length) * 100)));
-      await updateItemListenedPercent(item.id, percent);
-      getItemById(itemId).then(setItem);
-      showSnackbar(`Bookmark saved at ${percent}%`);
-    } catch {
-      showModal({ title: "Couldn't read the selection" });
-    }
+    const percent = Math.min(99, Math.max(1, Math.round((sel.start / sel.length) * 100)));
+    await updateItemListenedPercent(item.id, percent);
+    getItemById(itemId).then(setItem);
+    showSnackbar(`Bookmark saved at ${percent}%`);
   }, [item, itemId]);
 
   const handleScrollToBookmark = useCallback(() => {
@@ -121,6 +114,32 @@ export default function ItemDetailScreen() {
   useEffect(() => {
     getItemById(itemId).then(setItem);
   }, [itemId]);
+
+  // While focused, poll the native text selection so the bookmark button appears
+  // in the action bar exactly when text is highlighted, and cache the offsets.
+  // Native selectable <Text> never tells JS about selection, so we read it here.
+  useFocusEffect(
+    useCallback(() => {
+      const getSel = TextSelection?.getSelection;
+      if (!getSel) return;
+      const tick = async () => {
+        const tag = findNodeHandle(articleRef.current);
+        if (!tag) return;
+        try {
+          const sel = await getSel(tag);
+          const active = !!sel && sel.start >= 0 && sel.end > sel.start && sel.length > 0;
+          selectionCacheRef.current = active ? sel : null;
+          setSelActive(active);
+        } catch {
+          selectionCacheRef.current = null;
+          setSelActive(false);
+        }
+      };
+      tick();
+      const id = setInterval(tick, 400);
+      return () => clearInterval(id);
+    }, []),
+  );
 
   const handleOpen = useCallback(() => {
     if (!item) return;
@@ -197,13 +216,14 @@ export default function ItemDetailScreen() {
               <MaterialIcons name="bookmark" size={20} color={Colors.text} />
             </TopbarButton>
           )}
+          {item?.type === "url" && selActive && (
+            <TopbarButton onPress={handleMarkBookmark}>
+              <MaterialIcons name="bookmark-add" size={20} color={Colors.accent} />
+            </TopbarButton>
+          )}
           {item.type === "url" && (
             <OverflowMenu
               items={[
-                {
-                  title: "🔖 Bookmark selected text",
-                  onPress: handleMarkBookmark,
-                },
                 ...(articleState.kind === "ready" && articleState.html && !articleState.recipe
                   ? [
                       {
