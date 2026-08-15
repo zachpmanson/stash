@@ -50,11 +50,12 @@ export default function ItemDetailScreen() {
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
+  const [scrollY, setScrollY] = useState(0);
   const [selActive, setSelActive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const articleRef = useRef<View>(null);
   const selectionCacheRef = useRef<{ start: number; end: number; length: number } | null>(null);
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const {
     state: articleState,
     sentences,
@@ -91,19 +92,25 @@ export default function ItemDetailScreen() {
 
   const handleMarkBookmark = useCallback(async () => {
     if (!item || item.type !== "url") return;
-    const sel = selectionCacheRef.current;
-    if (!sel || sel.start < 0 || sel.end <= sel.start || sel.length <= 0) {
+    if (!selectionCacheRef.current) {
       showModal({
         title: "Select text first",
         message: "Long-press the article and highlight your bookmark phrase, then tap the bookmark button.",
       });
       return;
     }
-    const percent = Math.min(99, Math.max(1, Math.round((sel.start / sel.length) * 100)));
-    await updateItemListenedPercent(item.id, percent);
+    // Percent is based on scroll position (the reader's actual position), which
+    // round-trips with scroll-to-bookmark. Char offsets from native are only used
+    // to know that a selection exists — RN fragments text across views, so local
+    // offsets aren't a global fraction of the article.
+    const viewport = windowHeight ?? 0;
+    const maxScroll = contentHeight - viewport;
+    const percent = maxScroll > 0 ? Math.round((scrollY / maxScroll) * 100) : 50;
+    const clamped = Math.min(99, Math.max(1, percent));
+    await updateItemListenedPercent(item.id, clamped);
     getItemById(itemId).then(setItem);
-    showSnackbar(`Bookmark saved at ${percent}%`);
-  }, [item, itemId]);
+    showSnackbar(`Bookmark saved at ${clamped}%`);
+  }, [item, itemId, contentHeight, scrollY, windowHeight]);
 
   const handleScrollToBookmark = useCallback(() => {
     const pct = item?.listened_percent ?? 0;
@@ -249,6 +256,8 @@ export default function ItemDetailScreen() {
     >
       <ScrollView
         ref={scrollRef}
+        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
         onContentSizeChange={(_w, h) => setContentHeight(h)}
         contentContainerStyle={{ paddingBottom: Spacing.xl }}
         refreshControl={
