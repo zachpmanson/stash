@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView } from "react-native";
 import { showModal } from "src/state/modalState";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Colors, Spacing, Typography, Radius } from "../theme";
-import { updateFolderName, updateFolderIcon } from "../db/folders";
+import { updateFolderName, updateFolderIcon, updateFolderLayout, getFolderById } from "../db/folders";
+import { FolderLayout } from "../types";
 import { countGraphemes } from "unicode-segmenter/grapheme";
 import Screen from "../components/Screen";
 
@@ -46,7 +47,14 @@ export default function EditFolderScreen() {
   const router = useRouter();
   const [name, setName] = useState(folderName);
   const [icon, setIcon] = useState(folderIcon ?? "📁");
+  const [layout, setLayout] = useState<FolderLayout>("grid");
   const [customInput, setCustomInput] = useState("");
+
+  useEffect(() => {
+    getFolderById(folderId).then((f) => {
+      if (f?.layout) setLayout(f.layout);
+    });
+  }, [folderId]);
 
   const handleCustomChange = (text: string) => {
     setCustomInput(text);
@@ -70,6 +78,7 @@ export default function EditFolderScreen() {
     if (icon !== folderIcon) {
       await updateFolderIcon(folderId, icon);
     }
+    await updateFolderLayout(folderId, layout);
     router.back();
   };
 
@@ -115,6 +124,27 @@ export default function EditFolderScreen() {
             </Pressable>
           ))}
         </View>
+
+        <Text style={styles.label}>Layout</Text>
+        <View style={styles.layoutRow}>
+          <Pressable
+            style={[styles.layoutOption, layout === "grid" && styles.layoutOptionSelected]}
+            onPress={() => setLayout("grid")}
+          >
+            <Text style={[styles.layoutIcon, layout === "grid" && styles.layoutOptionTextSelected]}>▦</Text>
+            <Text style={[styles.layoutLabel, layout === "grid" && styles.layoutOptionTextSelected]}>Grid</Text>
+            <Text style={[styles.layoutSub, layout === "grid" && styles.layoutOptionTextSelected]}>Multi column</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.layoutOption, layout === "list" && styles.layoutOptionSelected]}
+            onPress={() => setLayout("list")}
+          >
+            <Text style={[styles.layoutIcon, layout === "list" && styles.layoutOptionTextSelected]}>☰</Text>
+            <Text style={[styles.layoutLabel, layout === "list" && styles.layoutOptionTextSelected]}>List</Text>
+            <Text style={[styles.layoutSub, layout === "list" && styles.layoutOptionTextSelected]}>Single column</Text>
+          </Pressable>
+        </View>
+
         <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]} onPress={handleSave}>
           <Text style={styles.saveBtnText}>Save</Text>
         </Pressable>
@@ -164,6 +194,39 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Spacing.sm,
+  },
+  layoutRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  layoutOption: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+    alignItems: "center",
+  },
+  layoutOptionSelected: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accentDim,
+  },
+  layoutIcon: {
+    fontSize: 22,
+    marginBottom: 4,
+  },
+  layoutLabel: {
+    ...Typography.body,
+    fontWeight: "600",
+  },
+  layoutSub: {
+    ...Typography.caption,
+    color: Colors.textSecondary,
+    textAlign: "center",
+  },
+  layoutOptionTextSelected: {
+    color: Colors.text,
   },
   iconBtn: {
     width: 52,

@@ -32,7 +32,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       icon TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       last_used_at INTEGER NOT NULL,
-      archived_at INTEGER DEFAULT NULL
+      archived_at INTEGER DEFAULT NULL,
+      layout TEXT NOT NULL DEFAULT 'grid'
     );
 
     CREATE TABLE IF NOT EXISTS items (
@@ -91,6 +92,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   if (!folderCols.some((c) => c.name === "icon")) {
     await db.execAsync("ALTER TABLE folders ADD COLUMN icon TEXT NOT NULL DEFAULT '📁'");
   }
+  if (!folderCols.some((c) => c.name === "layout")) {
+    await db.execAsync("ALTER TABLE folders ADD COLUMN layout TEXT NOT NULL DEFAULT 'grid'");
+  }
 
   // Seed default Inbox folder if empty
   const row = await db.getFirstAsync<{ count: number }>(
@@ -98,12 +102,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   );
   if (!row || row.count === 0) {
     const now = Date.now();
-    await db.runAsync("INSERT OR IGNORE INTO folders (id, name, icon, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)", [
-      "inbox",
-      "Inbox",
-      "📥",
-      now,
-      now,
-    ]);
+    await db.runAsync(
+      "INSERT OR IGNORE INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",
+      ["inbox", "Inbox", "📥", now, now, "list"],
+    );
   }
 }

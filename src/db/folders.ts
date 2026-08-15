@@ -1,5 +1,5 @@
 import { getDb } from "./database";
-import { Folder } from "../types";
+import { Folder, FolderLayout } from "../types";
 import { countGraphemes } from "unicode-segmenter/grapheme";
 
 export async function getFolders(includeArchived = false): Promise<Folder[]> {
@@ -70,18 +70,29 @@ function defaultIcon(name: string): string {
   return ICON_MAP[first] ?? "📁";
 }
 
-export async function createFolder(id: string, name: string, icon?: string): Promise<Folder> {
+export async function getFolderById(id: string): Promise<Folder | null> {
+  const db = await getDb();
+  return db.getFirstAsync<Folder>("SELECT * FROM folders WHERE id = ?", [id]);
+}
+
+export async function createFolder(id: string, name: string, icon?: string, layout?: FolderLayout): Promise<Folder> {
   const db = await getDb();
   const now = Date.now();
   const resolvedIcon = icon ?? defaultIcon(name);
-  await db.runAsync("INSERT INTO folders (id, name, icon, created_at, last_used_at) VALUES (?, ?, ?, ?, ?)", [
+  const resolvedLayout = layout ?? "grid";
+  await db.runAsync(
+    "INSERT INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, name.trim(), resolvedIcon, now, now, resolvedLayout],
+  );
+  return {
     id,
-    name.trim(),
-    resolvedIcon,
-    now,
-    now,
-  ]);
-  return { id, name: name.trim(), icon: resolvedIcon, created_at: now, last_used_at: now, archived_at: null };
+    name: name.trim(),
+    icon: resolvedIcon,
+    created_at: now,
+    last_used_at: now,
+    archived_at: null,
+    layout: resolvedLayout,
+  };
 }
 
 export async function updateFolderName(id: string, name: string): Promise<void> {
@@ -94,6 +105,11 @@ export async function updateFolderIcon(id: string, icon: string): Promise<void> 
   if (countGraphemes(icon) !== 1) throw new Error("Icon must be single emoji");
   const db = await getDb();
   await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon, id]);
+}
+
+export async function updateFolderLayout(id: string, layout: FolderLayout): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE folders SET layout = ? WHERE id = ?", [layout, id]);
 }
 
 export async function touchFolder(id: string): Promise<void> {

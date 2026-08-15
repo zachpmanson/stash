@@ -10,10 +10,10 @@ import { showModal } from "src/state/modalState";
 import { useScrollTopState } from "src/state/scrollTopState";
 import Screen from "../components/Screen";
 import TopbarButton from "../components/TopbarButton";
-import { archiveFolder } from "../db/folders";
+import { archiveFolder, getFolderById } from "../db/folders";
 import { archiveItem, getItemsInFolder } from "../db/items";
 import { Colors, Spacing, Typography } from "../theme";
-import { StashItem } from "../types";
+import { FolderLayout, StashItem } from "../types";
 
 export default function FolderScreen() {
   const {
@@ -23,6 +23,7 @@ export default function FolderScreen() {
   } = useLocalSearchParams<{ id: string; folderName: string; folderIcon?: string }>();
   const router = useRouter();
   const [items, setItems] = useState<StashItem[]>([]);
+  const [layout, setLayout] = useState<FolderLayout>("grid");
   const [refreshing, setRefreshing] = useState(false);
   const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const insets = useSafeAreaInsets();
@@ -38,9 +39,12 @@ export default function FolderScreen() {
   useFocusEffect(
     useCallback(() => {
       loadItems();
+      getFolderById(folderId).then((f) => {
+        if (f?.layout) setLayout(f.layout);
+      });
       setScrollTopHandler(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
       return () => setScrollTopHandler(null);
-    }, [loadItems, setScrollTopHandler]),
+    }, [loadItems, folderId, setScrollTopHandler]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -120,7 +124,7 @@ export default function FolderScreen() {
         onRefresh={onRefresh}
         refreshing={refreshing}
         folderName={folderName}
-        numColumns={folderId === "inbox" ? 1 : 2}
+        numColumns={layout === "list" ? 1 : 2}
       />
       <AddItemFAB onSelect={setAddItemMode} />
       <AddItemModal

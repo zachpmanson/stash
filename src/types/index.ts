@@ -8,7 +8,13 @@ export type Folder = {
   last_used_at: number;
   archived_at: number | null;
   item_count?: number;
+  /** "grid" = multi-column cards, "list" = single full-width column (per-folder config). */
+  layout?: FolderLayout;
 };
+
+export type FolderLayout = "grid" | "list";
+
+export type SelectableFolder = Folder & { isSelected: boolean };
 
 
 
