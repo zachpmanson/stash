@@ -3,6 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
 import { estimateReadLabel } from "../utils/speech";
+import { parseRecipe, recipeCookLabel } from "../utils/recipe";
 
 interface Props {
   item: StashItem;
@@ -18,7 +19,13 @@ export default function ItemCard({ item, onPress, onLongPress, fullWidth }: Prop
     return null;
   }, [item.type, item.uri, item.article_text]);
 
-  const dateLabel = `${formatDate(item.created_at)}${readEstimate ? ` · ${readEstimate}` : ""}`;
+  // Recipe items show cook time instead of reading time.
+  const cookLabel = useMemo(
+    () => (item.type === "url" ? recipeCookLabel(parseRecipe(item.recipe_json)) : null),
+    [item.type, item.recipe_json],
+  );
+  const extraLabel = cookLabel ?? readEstimate;
+  const dateLabel = `${formatDate(item.created_at)}${extraLabel ? ` · ${extraLabel}` : ""}`;
   const isCompactUrl = item.type === "url" && !item.thumbnail_path;
   const inlineDate = fullWidth && isCompactUrl;
 

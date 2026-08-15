@@ -31,6 +31,7 @@ import { StashItem } from "../types";
 import type { Recipe, HowToStep } from "../types";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { estimateReadLabel } from "../utils/speech";
+import { recipeCookLabel } from "../utils/recipe";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -49,6 +50,10 @@ export default function ItemDetailScreen() {
   } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html, item?.recipe_json);
 
   const readEstimate = useMemo(() => {
+    // Recipe items show cook time instead of reading time.
+    if (articleState.kind === "ready" && articleState.recipe) {
+      return recipeCookLabel(articleState.recipe);
+    }
     if (item?.type === "text") return estimateReadLabel(item.uri);
     if (item?.type === "url" && articleState.kind === "ready") return estimateReadLabel(articleState.text);
     return null;
