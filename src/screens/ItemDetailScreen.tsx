@@ -211,11 +211,6 @@ export default function ItemDetailScreen() {
           <TopbarButton onPress={handleShare}>
             <MaterialIcons name="share" size={20} color={Colors.text} />
           </TopbarButton>
-          {item?.type === "url" && (item?.listened_percent ?? 0) > 0 && (
-            <TopbarButton onPress={handleScrollToBookmark}>
-              <MaterialIcons name="bookmark" size={20} color={Colors.text} />
-            </TopbarButton>
-          )}
           {item?.type === "url" && selActive && (
             <TopbarButton onPress={handleMarkBookmark}>
               <MaterialIcons name="bookmark-add" size={20} color={Colors.accent} />
@@ -307,6 +302,9 @@ export default function ItemDetailScreen() {
             {item.type === "url" && (
               <>
                 <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
+                {(item.listened_percent ?? 0) > 0 && (
+                  <ActionButton label="Bookmark" icon="🔖" onPress={handleScrollToBookmark} />
+                )}
                 <ActionButton label="Open" icon="🌐" onPress={handleOpen} />
                 <ActionButton label="Copy" icon="📋" onPress={handleCopy} />
               </>
