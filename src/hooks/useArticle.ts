@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchArticle, htmlToBlocks, htmlToText } from "../utils/readability";
+import { fetchArticle, findRecipe, htmlToBlocks, htmlToText } from "../utils/readability";
 import { normalizeText, Sentence, splitSentences, splitSentencesFromBlocks } from "src/utils/sentences";
 import { updateItemArticleHtml, updateItemRecipeJson } from "../db/items";
 import type { Recipe } from "../types";
@@ -13,6 +13,25 @@ export type ArticleState =
 function buildReady(title: string | null, html: string | null, fallbackText: string | null, recipe: Recipe | null = null): ArticleState {
   const text = html ? htmlToText(html) : (fallbackText ?? "");
   return { kind: "ready", title, text, html, recipe };
+}
+
+/** Resolve the recipe for a stored article: prefer persisted recipe_json, else scan the stored HTML. */
+function storedRecipe(recipeJson: string | null | undefined, html: string | null | undefined): Recipe | null {
+  if (recipeJson) {
+    try {
+      return JSON.parse(recipeJson) as Recipe;
+    } catch {
+      // Malformed — fall through to scanning HTML
+    }
+  }
+  if (html) {
+    try {
+      return findRecipe(html);
+    } catch {
+      // Ignore scan failures
+    }
+  }
+  return null;
 }
 
 export function useArticle(
@@ -34,7 +53,7 @@ export function useArticle(
           null,
           initialHtml ?? null,
           initialText ?? null,
-          initialRecipeJson ? (JSON.parse(initialRecipeJson) as Recipe) : null,
+          storedRecipe(initialRecipeJson, initialHtml ?? null),
         )
       : { kind: "idle" },
   );
@@ -62,7 +81,7 @@ export function useArticle(
           null,
           initialHtml ?? null,
           initialText ?? null,
-          initialRecipeJson ? (JSON.parse(initialRecipeJson) as Recipe) : null,
+          storedRecipe(initialRecipeJson, initialHtml ?? null),
         ),
       );
       return;

@@ -32,6 +32,7 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
   let faviconUrl: string | null = null;
   let thumbnailPath: string | null = null;
   let articleHtml: string | null = null;
+  let recipeJson: string | null = null;
 
   if (type === "image" || type === "file") {
     const ext = getExtension(mimeType);
@@ -50,6 +51,7 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
     try {
       const article = await fetchArticle(uri);
       articleHtml = article.html;
+      if (article.recipe) recipeJson = JSON.stringify(article.recipe);
     } catch {
       // article extraction is best-effort
     }
@@ -78,6 +80,7 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
     created_at: now,
     article_text: null,
     article_html: articleHtml,
+    recipe_json: recipeJson,
     folder_ids: folderIds,
   };
 
