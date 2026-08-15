@@ -167,7 +167,10 @@ function extractText(root: DomNode): string {
     .trim();
 }
 
-export async function fetchArticle(url: string): Promise<Article & { recipe?: Recipe }> {
+export async function fetchArticle(
+  url: string,
+  opts: { useLargestTextBlock?: boolean } = {},
+): Promise<Article & { recipe?: Recipe }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -188,20 +191,66 @@ export async function fetchArticle(url: string): Promise<Article & { recipe?: Re
 
   const { document } = parseHTML(html);
   const parsed = new Readability(document as unknown as Document).parse();
-  if (!parsed || !parsed.content) {
+
+  let contentHtml: string | null = parsed?.content ?? null;
+  const title: string | null = parsed?.title ?? (recipe?.name ?? null);
+
+  // Aggressive mode: when Readability misses (grabbing a short boilerplate block
+  // instead of the real body), fall back to the largest block of <p> text on the
+  // page. Only engage when it's clearly bigger than what Readability produced.
+  // NB: scan a FRESH parse — Readability mutates the document it processes, so
+  // re-scanning the parsed DOM loses the original paragraph structure.
+  if (opts.useLargestTextBlock) {
+    const fresh = parseHTML(html).document;
+    const largest = findLargestTextBlock(fresh.documentElement as unknown as Element);
+    if (largest && largest.html.length > (contentHtml?.length ?? 0) * 1.5) {
+      contentHtml = largest.html;
+    }
+  }
+
+  if (!contentHtml) {
     throw new Error("Could not extract article from this page");
   }
 
-  const cleanedHtml = stripStyling(parsed.content);
+  const cleanedHtml = stripStyling(contentHtml);
   if (!htmlToText(cleanedHtml)) {
     throw new Error("Could not extract article from this page");
   }
 
   return {
-    title: parsed.title ?? (recipe?.name ?? null),
+    title,
     html: cleanedHtml,
     ...(recipe ? { recipe } : {}),
   };
+}
+
+/**
+ * Find the element with the largest total descendant <p> text on the page,
+ * excluding <body>/<html> so whole-page layouts don't win. On ties prefers the
+ * deepest node so we return the most specific container. Returns null if the
+ * page has no paragraphs at all. Used by the "aggressive extraction" fallback.
+ */
+function findLargestTextBlock(root: Element): { html: string } | null {
+  const best = { el: null as Element | null, len: 0, depth: -1 };
+
+  const visit = (el: Element, depth: number) => {
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag !== "body" && tag !== "html") {
+      const ps = Array.from(el.querySelectorAll("p"));
+      let len = 0;
+      for (const p of ps) len += (p.textContent ?? "").replace(/\s+/g, " ").trim().length;
+      if (ps.length > 0 && (len > best.len || (len === best.len && depth > best.depth))) {
+        best.el = el;
+        best.len = len;
+        best.depth = depth;
+      }
+    }
+    for (const child of Array.from(el.children)) visit(child as Element, depth + 1);
+  };
+
+  visit(root, 0);
+  if (!best.el) return null;
+  return { html: best.el.innerHTML };
 }
 
 /**

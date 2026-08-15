@@ -40,6 +40,7 @@ export function useArticle(
   initialText?: string | null,
   initialHtml?: string | null,
   initialRecipeJson?: string | null,
+  useLargestTextBlock?: boolean,
 ): {
   state: ArticleState;
   sentences: Sentence[] | undefined;
@@ -75,7 +76,7 @@ export function useArticle(
       setState({ kind: "idle" });
       return;
     }
-    if (initialHtml || initialText) {
+    if ((initialHtml || initialText) && !useLargestTextBlock) {
       setState(
         buildReady(
           null,
@@ -87,7 +88,7 @@ export function useArticle(
       return;
     }
     setState({ kind: "loading" });
-    fetchArticle(url)
+    fetchArticle(url, { useLargestTextBlock })
       .then(({ title, html, recipe }) => {
         if (cancelledRef.current) return;
         setState(buildReady(title, html, null, recipe ?? null));
@@ -103,13 +104,13 @@ export function useArticle(
     return () => {
       cancelledRef.current = true;
     };
-  }, [url, itemId, initialText, initialHtml, initialRecipeJson]);
+  }, [url, itemId, initialText, initialHtml, initialRecipeJson, useLargestTextBlock]);
 
   const refresh = useCallback(async () => {
     if (!url) return;
     setRefreshing(true);
     try {
-      const { title, html, recipe } = await fetchArticle(url);
+      const { title, html, recipe } = await fetchArticle(url, { useLargestTextBlock });
       setState(buildReady(title, html, null, recipe ?? null));
       if (itemId) {
         await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
@@ -120,14 +121,14 @@ export function useArticle(
     } finally {
       setRefreshing(false);
     }
-  }, [url, itemId]);
+  }, [url, itemId, useLargestTextBlock]);
 
   const loadFrom = useCallback(
     async (sourceUrl: string) => {
       setRefreshing(true);
       setState({ kind: "loading" });
       try {
-        const { title, html, recipe } = await fetchArticle(sourceUrl);
+        const { title, html, recipe } = await fetchArticle(sourceUrl, { useLargestTextBlock });
         setState(buildReady(title, html, null, recipe ?? null));
         if (itemId) {
           await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
@@ -139,7 +140,7 @@ export function useArticle(
         setRefreshing(false);
       }
     },
-    [itemId],
+    [itemId, useLargestTextBlock],
   );
 
   return { state, sentences, refresh, loadFrom, refreshing };

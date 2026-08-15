@@ -40,6 +40,7 @@ export default function ItemDetailScreen() {
   const [splitBySentence, setSplitBySentence] = useState(false);
   const [showFormatted, setShowFormatted] = useState(true);
   const [showRawHtml, setShowRawHtml] = useState(false);
+  const [useLargestExtraction, setUseLargestExtraction] = useState(false);
   const { width: windowWidth } = useWindowDimensions();
   const {
     state: articleState,
@@ -47,7 +48,14 @@ export default function ItemDetailScreen() {
     refresh: refreshArticle,
     loadFrom: loadArticleFrom,
     refreshing,
-  } = useArticle(item?.type === "url" ? item.uri : undefined, item?.id, item?.article_text, item?.article_html, item?.recipe_json);
+  } = useArticle(
+    item?.type === "url" ? item.uri : undefined,
+    item?.id,
+    item?.article_text,
+    item?.article_html,
+    item?.recipe_json,
+    useLargestExtraction,
+  );
 
   const readEstimate = useMemo(() => {
     // Recipe items show cook time instead of reading time.
@@ -160,6 +168,10 @@ export default function ItemDetailScreen() {
                 {
                   title: splitBySentence ? "Unsplit sentences" : "Split by sentence",
                   onPress: () => setSplitBySentence((v) => !v),
+                },
+                {
+                  title: useLargestExtraction ? "Standard extraction" : "Aggressive extraction",
+                  onPress: () => setUseLargestExtraction((v) => !v),
                 },
                 { title: "Load from archive.is", onPress: () => handleLoadFromArchive("is") },
                 { title: "Load from archive.org", onPress: () => handleLoadFromArchive("org") },
