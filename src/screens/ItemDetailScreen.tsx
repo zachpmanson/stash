@@ -4,11 +4,13 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as IntentLauncher from "expo-intent-launcher";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  findNodeHandle,
   Image,
   Linking,
+  NativeModules,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -24,7 +26,13 @@ import TopbarButton from "src/components/TopbarButton";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import Screen from "../components/Screen";
-import { archiveItem, getItemById } from "../db/items";
+import { archiveItem, getItemById, updateItemListenedPercent } from "../db/items";
+
+interface TextSelectionApi {
+  getSelection?: (tag: number) => Promise<{ start: number; end: number; length: number } | null>;
+}
+
+const TextSelection = NativeModules.TextSelection as TextSelectionApi | undefined;
 import { useArticle } from "../hooks/useArticle";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
@@ -41,6 +49,9 @@ export default function ItemDetailScreen() {
   const [showFormatted, setShowFormatted] = useState(true);
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
+  const [contentHeight, setContentHeight] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const articleRef = useRef<View>(null);
   const { width: windowWidth } = useWindowDimensions();
   const {
     state: articleState,
@@ -75,6 +86,37 @@ export default function ItemDetailScreen() {
     },
     [item, loadArticleFrom],
   );
+
+  const handleMarkBookmark = useCallback(async () => {
+    if (!item || item.type !== "url") return;
+    const tag = findNodeHandle(articleRef.current);
+    if (!tag || !TextSelection?.getSelection) {
+      showSnackbar("Bookmark unavailable here");
+      return;
+    }
+    try {
+      const sel = await TextSelection.getSelection(tag);
+      if (!sel || sel.start < 0 || sel.end <= sel.start || sel.length <= 0) {
+        showModal({
+          title: "Select text first",
+          message: "Long-press the article, select your bookmark phrase, then tap Mark bookmark again.",
+        });
+        return;
+      }
+      const percent = Math.min(99, Math.max(1, Math.round((sel.start / sel.length) * 100)));
+      await updateItemListenedPercent(item.id, percent);
+      getItemById(itemId).then(setItem);
+      showSnackbar(`Bookmark saved at ${percent}%`);
+    } catch {
+      showModal({ title: "Couldn't read the selection" });
+    }
+  }, [item, itemId]);
+
+  const handleScrollToBookmark = useCallback(() => {
+    const pct = item?.listened_percent ?? 0;
+    if (pct <= 0 || contentHeight <= 0) return;
+    scrollRef.current?.scrollTo({ y: (pct / 100) * contentHeight, animated: true });
+  }, [item, contentHeight]);
 
   useEffect(() => {
     getItemById(itemId).then(setItem);
@@ -150,9 +192,18 @@ export default function ItemDetailScreen() {
           <TopbarButton onPress={handleShare}>
             <MaterialIcons name="share" size={20} color={Colors.text} />
           </TopbarButton>
+          {item?.type === "url" && (item?.listened_percent ?? 0) > 0 && (
+            <TopbarButton onPress={handleScrollToBookmark}>
+              <MaterialIcons name="bookmark" size={20} color={Colors.text} />
+            </TopbarButton>
+          )}
           {item.type === "url" && (
             <OverflowMenu
               items={[
+                {
+                  title: "🔖 Bookmark selected text",
+                  onPress: handleMarkBookmark,
+                },
                 ...(articleState.kind === "ready" && articleState.html && !articleState.recipe
                   ? [
                       {
@@ -182,6 +233,8 @@ export default function ItemDetailScreen() {
       }
     >
       <ScrollView
+        ref={scrollRef}
+        onContentSizeChange={(_w, h) => setContentHeight(h)}
         contentContainerStyle={{ paddingBottom: Spacing.xl }}
         refreshControl={
           item.type === "url" ? (
@@ -246,7 +299,7 @@ export default function ItemDetailScreen() {
           </View>
 
           {item.type === "url" && (
-            <View style={styles.article}>
+            <View style={styles.article} ref={articleRef}>
               {articleState.kind === "loading" && (
                 <View style={styles.articleStatus}>
                   <ActivityIndicator color={Colors.accent} />
