@@ -18,6 +18,7 @@ import FolderSelector from "src/components/FolderSelector";
 import { useFolderStore } from "src/state/folderState";
 import { showModal } from "src/state/modalState";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
+import { MaterialIcons } from "@expo/vector-icons";
 import { Folder } from "src/types";
 import { isUrl } from "src/utils/fileUtils";
 import { saveManualItem } from "src/utils/shareHandler";
@@ -39,6 +40,7 @@ export default function AddItemModal({ visible, mode, onClose, initialFolderId, 
   const [urlText, setUrlText] = useState("");
   const [textBody, setTextBody] = useState("");
   const [imageAsset, setImageAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [captureLocation, setCaptureLocation] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
@@ -46,6 +48,7 @@ export default function AddItemModal({ visible, mode, onClose, initialFolderId, 
     setUrlText("");
     setTextBody("");
     setImageAsset(null);
+    setCaptureLocation(false);
     setSelectedIds(initialFolderId ? new Set([initialFolderId]) : new Set());
     setSaving(false);
   }, [initialFolderId]);
@@ -119,6 +122,7 @@ export default function AddItemModal({ visible, mode, onClose, initialFolderId, 
             type: "image",
             localUri: imageAsset.uri,
             mimeType: imageAsset.mimeType ?? "image/jpeg",
+            captureLocation,
           },
           folderIds,
         );
@@ -184,6 +188,19 @@ export default function AddItemModal({ visible, mode, onClose, initialFolderId, 
               <Text style={styles.pickBtnText}>Choose from gallery</Text>
             </Pressable>
           )}
+          <Pressable
+            style={styles.locationRow}
+            onPress={() => setCaptureLocation((v) => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: captureLocation }}
+          >
+            <MaterialIcons
+              name={captureLocation ? "check-box" : "check-box-outline-blank"}
+              size={22}
+              color={captureLocation ? Colors.accent : Colors.textSecondary}
+            />
+            <Text style={styles.locationLabel}>Store location</Text>
+          </Pressable>
         </View>
       );
     }
@@ -328,6 +345,14 @@ const styles = StyleSheet.create({
     ...Typography.caption,
     color: Colors.accent,
   },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.xs,
+  },
+  locationLabel: { ...Typography.body, color: Colors.text },
   folderSection: {
     marginTop: Spacing.lg,
     minHeight: 280,

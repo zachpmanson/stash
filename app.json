@@ -24,7 +24,6 @@
     },
     "plugins": [
       "expo-router",
-
       "expo-sqlite",
       "expo-file-system",
       [
@@ -38,8 +37,14 @@
           },
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["image/*", "text/*"],
-            "multipleShareMimeTypes": ["image/*", "text/*"]
+            "singleShareMimeTypes": [
+              "image/*",
+              "text/*"
+            ],
+            "multipleShareMimeTypes": [
+              "image/*",
+              "text/*"
+            ]
           }
         }
       ],
@@ -59,12 +64,15 @@
         {
           "locationWhenInUsePermission": "Allow Stash to use your location when storing a saved item."
         }
-      ]
+      ],
+      "@maplibre/maplibre-react-native"
     ],
     "ios": {
       "bundleIdentifier": "com.zachmanson.stash",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     }
   }
