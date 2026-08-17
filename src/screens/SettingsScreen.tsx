@@ -1,11 +1,14 @@
 import React, { useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
 import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
+import { useFolderStore } from "../state/folderState";
+import { showModal } from "../state/modalState";
+import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
 import { VoiceMode } from "../utils/readability";
 
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
@@ -13,6 +16,7 @@ const GITHUB_URL = "https://github.com/zachpmanson/stash";
 export default function SettingsScreen() {
   const router = useRouter();
   const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
+  const [busy, setBusy] = useState(false);
   const selectedId = useVoiceStore((s) => s.selectedVoice);
   const quoteId = useVoiceStore((s) => s.quoteVoice);
   const voices = useVoiceStore((s) => s.voices);
@@ -21,10 +25,69 @@ export default function SettingsScreen() {
   const quoteVoice = voices.find((v) => v.identifier === quoteId);
   const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
 
+  const handleBackup = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const zipPath = await createBackup();
+      await shareBackup(zipPath);
+    } catch (e) {
+      showModal({ title: "Backup failed", message: `${e}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const fileUri = await pickBackupFile();
+      if (!fileUri) return;
+      showModal({
+        title: "Restore backup?",
+        message: "This will replace your current data with the selected backup.",
+        buttons: [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Restore",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                const manifest = await restoreBackup(fileUri);
+                await useFolderStore.getState().refresh();
+                Alert.alert(
+                  "Restored",
+                  `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders.`,
+                );
+              } catch (e) {
+                showModal({ title: "Restore failed", message: `${e}` });
+              }
+            },
+          },
+        ],
+      });
+    } catch (e) {
+      showModal({ title: "Restore error", message: `${e}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Screen options={{ title: "Settings" }}>
       <VoicePickerModal visible={voiceMenu !== null} mode={voiceMenu ?? "primary"} onClose={() => setVoiceMenu(null)} />
       <View style={styles.container}>
+        <Row
+          icon="save-alt"
+          label="Back up data"
+          onPress={() => handleBackup()}
+        />
+        <Row
+          icon="restore"
+          label="Restore from backup"
+          onPress={() => handleRestore()}
+        />
         <Row
           icon="record-voice-over"
           label="Narrator voice"

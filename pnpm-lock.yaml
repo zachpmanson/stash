@@ -80,6 +80,9 @@ importers:
       react-native-safe-area-context:
         specifier: ~5.6.2
         version: 5.6.2(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+      react-native-zip-archive:
+        specifier: ^9.4.0
+        version: 9.4.0(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       unicode-segmenter:
         specifier: ^0.16.0
         version: 0.16.0
@@ -1378,10 +1381,12 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
     engines: {node: '>=14.6'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@yarnpkg/lockfile@1.1.0':
     resolution: {integrity: sha512-GpSwvyXOcOOlV70vbnzjj4fW5xW/FdUF6nQEt1ENy7m4ZCczi1+/buVUPAqmGfqznsORNFzUMjctTIp8a9tuCQ==}
@@ -3250,6 +3255,12 @@ packages:
     peerDependencies:
       react: '*'
       react-native: '*'
+
+  react-native-zip-archive@9.4.0:
+    resolution: {integrity: sha512-uz5/OyjUmgyKtwvFXp+tLNlO66GyncFWTerbIXZr8vZQDsw7WllxJNu65CBWTBstjmp8B1hF/3RpKj3/IFO3/A==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-native: '>=0.70.0'
 
   react-native@0.83.4:
     resolution: {integrity: sha512-H5Wco3UJyY6zZsjoBayY8RM9uiAEQ3FeG4G2NAt+lr9DO43QeqPlVe9xxxYEukMkEmeIhNjR70F6bhXuWArOMQ==}
@@ -7807,6 +7818,11 @@ snapshots:
       react-freeze: 1.0.4(react@19.2.0)
       react-native: 0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0)
       warn-once: 0.1.1
+
+  react-native-zip-archive@9.4.0(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
+    dependencies:
+      react: 19.2.0
+      react-native: 0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0)
 
   react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0):
     dependencies:

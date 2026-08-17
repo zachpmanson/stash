@@ -21,6 +21,37 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
+/**
+ * Closes the open database connection and resets the cached singleton so the
+ * next {@link getDb} call reopens from disk. Used by restore to swap in a
+ * fresh database file.
+ */
+export async function closeDb(): Promise<void> {
+  const current = db;
+  db = null;
+  dbPromise = null;
+  if (current) {
+    try {
+      await current.closeAsync();
+    } catch {
+      // ignore close errors; the singleton is already reset
+    }
+  }
+}
+
+/**
+ * Flushes the WAL journal into the main database file so the on-disk file is
+ * a complete, self-contained copy (required for a valid backup).
+ */
+export async function checkpointDb(): Promise<void> {
+  const database = await getDb();
+  try {
+    await database.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
+  } catch {
+    // non-fatal; serialize-based backup still captures committed data
+  }
+}
+
 async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
