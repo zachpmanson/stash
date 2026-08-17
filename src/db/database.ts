@@ -80,7 +80,9 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       archived_at INTEGER DEFAULT NULL,
       article_text TEXT,
       article_html TEXT,
-      listened_percent INTEGER NOT NULL DEFAULT 0
+      listened_percent INTEGER NOT NULL DEFAULT 0,
+      lat REAL,
+      lng REAL
     );
 
     CREATE TABLE IF NOT EXISTS item_folders (
@@ -116,6 +118,12 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   }
   if (!cols.some((c) => c.name === "recipe_json")) {
     await db.execAsync("ALTER TABLE items ADD COLUMN recipe_json TEXT");
+  }
+  if (!cols.some((c) => c.name === "lat")) {
+    await db.execAsync("ALTER TABLE items ADD COLUMN lat REAL");
+  }
+  if (!cols.some((c) => c.name === "lng")) {
+    await db.execAsync("ALTER TABLE items ADD COLUMN lng REAL");
   }
 
   // Migrate folders table: add icon column if missing

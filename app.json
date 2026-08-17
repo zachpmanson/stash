@@ -53,6 +53,12 @@
         {
           "photosPermission": "Allow Stash to attach photos to items."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Stash to use your location when storing a saved item."
+        }
       ]
     ],
     "ios": {

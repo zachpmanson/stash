@@ -33,6 +33,9 @@ export interface StashItem {
   article_html: string | null;
   recipe_json: string | null;
   listened_percent?: number;
+  /** GPS latitude/longitude, captured at save time when "Store location" is on. */
+  lat?: number | null;
+  lng?: number | null;
   folder_ids?: string[];
 }
 

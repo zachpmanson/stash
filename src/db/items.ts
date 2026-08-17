@@ -17,6 +17,8 @@ interface RawItem {
   article_html: string | null;
   recipe_json: string | null;
   listened_percent: number;
+  lat: number | null;
+  lng: number | null;
 }
 
 export async function getItemsInFolder(folderId: string): Promise<StashItem[]> {
@@ -56,11 +58,12 @@ export async function saveItem(item: Omit<StashItem, 'archived_at'>, folderIds: 
   const db = await getDb();
   const now = Date.now();
   await db.runAsync(
-    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json, lat, lng)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
      item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
-     item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null]
+     item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null,
+     item.lat ?? null, item.lng ?? null]
   );
   for (const folderId of folderIds) {
     await db.runAsync(

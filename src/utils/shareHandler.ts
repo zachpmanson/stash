@@ -1,8 +1,10 @@
 import { ResolvedSharePayload } from "expo-sharing";
+import * as Location from "expo-location";
 import { Directory, File, Paths } from "expo-file-system";
 import { saveItem } from "../db/items";
 import { ItemType, StashItem } from "../types";
 import { copyFileToStash, getExtension, isImageMime, isVideoMime } from "./fileUtils";
+import { readExifGps, GpsPoint } from "./exif";
 import { fetchLinkPreview } from "./linkPreview";
 import { fetchArticle } from "./readability";
 
@@ -20,9 +22,11 @@ type CoreInput = {
   // For url/text: the literal value. For image/file: the source uri to copy.
   source: string;
   mimeType: string;
+  /** When true, try to capture a GPS location (EXIF first, device GPS fallback). */
+  captureLocation?: boolean;
 };
 
-async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string[]): Promise<StashItem> {
+async function saveCore({ type, source, mimeType, captureLocation }: CoreInput, folderIds: string[]): Promise<StashItem> {
   const id = String(Date.now());
   const now = Date.now();
 
@@ -33,6 +37,8 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
   let thumbnailPath: string | null = null;
   let articleHtml: string | null = null;
   let recipeJson: string | null = null;
+  let lat: number | null = null;
+  let lng: number | null = null;
 
   if (type === "image" || type === "file") {
     const ext = getExtension(mimeType);
@@ -42,6 +48,13 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
       thumbnailPath = savedUri;
     }
     uri = savedUri;
+    if (captureLocation) {
+      const gps = await captureLocationForImage(savedUri);
+      if (gps) {
+        lat = gps.lat;
+        lng = gps.lng;
+      }
+    }
   } else if (type === "url") {
     uri = uri.trim();
     const preview = await fetchLinkPreview(uri);
@@ -81,6 +94,8 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
     article_text: null,
     article_html: articleHtml,
     recipe_json: recipeJson,
+    lat,
+    lng,
     folder_ids: folderIds,
   };
 
@@ -88,7 +103,7 @@ async function saveCore({ type, source, mimeType }: CoreInput, folderIds: string
   return { ...item, archived_at: null };
 }
 
-export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[]): Promise<StashItem> {
+export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[], options?: { captureLocation?: boolean }): Promise<StashItem> {
   const type = detectItemType(payload);
   let source: string;
   let mimeType: string;
@@ -101,13 +116,19 @@ export async function processAndSaveShare(payload: ResolvedSharePayload, folderI
     mimeType = payload.contentMimeType ?? payload.mimeType ?? "application/octet-stream";
   }
 
-  return saveCore({ type, source, mimeType }, folderIds);
+  return saveCore({ type, source, mimeType, captureLocation: options?.captureLocation }, folderIds);
 }
 
-export type ManualPayload =
-  | { type: "url"; value: string }
-  | { type: "text"; value: string }
-  | { type: "image"; localUri: string; mimeType: string };
+export type ManualPayload = {
+  type: "url" | "text";
+  value: string;
+  captureLocation?: boolean;
+} | {
+  type: "image";
+  localUri: string;
+  mimeType: string;
+  captureLocation?: boolean;
+};
 
 export async function saveManualItem(payload: ManualPayload, folderIds: string[]): Promise<StashItem> {
   if (payload.type === "url") {
@@ -116,5 +137,37 @@ export async function saveManualItem(payload: ManualPayload, folderIds: string[]
   if (payload.type === "text") {
     return saveCore({ type: "text", source: payload.value, mimeType: "text/plain" }, folderIds);
   }
-  return saveCore({ type: "image", source: payload.localUri, mimeType: payload.mimeType }, folderIds);
+  const imagePayload = payload as Extract<ManualPayload, { type: "image" }>;
+  return saveCore(
+    { type: "image", source: imagePayload.localUri, mimeType: imagePayload.mimeType, captureLocation: imagePayload.captureLocation },
+    folderIds,
+  );
+}
+
+/**
+ * Captures a GPS location for an image: EXIF GPS first, then device GPS
+ * (requesting permission) as fallback. Returns null if neither is available
+ * or the user denies permission.
+ */
+async function captureLocationForImage(savedUri: string): Promise<GpsPoint | null> {
+  // 1. Try the image's embedded EXIF GPS first — no permission needed.
+  try {
+    const gps = await readExifGps(new File(savedUri));
+    if (gps) return gps;
+  } catch {
+    // fall through to device GPS
+  }
+
+  // 2. Fall back to the device's current position.
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") return null;
+    const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    if (pos && Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+      return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    }
+  } catch {
+    // location unavailable
+  }
+  return null;
 }

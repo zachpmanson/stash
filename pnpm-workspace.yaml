@@ -1,0 +1,4 @@
+minimumReleaseAgeExclude:
+  - '@expo/image-utils@0.8.16'
+  - '@expo/require-utils@55.0.7'
+  - expo-location@55.1.13

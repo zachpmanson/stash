@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import { MaterialIcons } from "@expo/vector-icons";
 import { ResolvedSharePayload, useIncomingShare } from "expo-sharing";
 import {
   BackHandler,
@@ -35,12 +36,17 @@ export default function ShareReceived() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [savingAndListening, setSavingAndListening] = useState(false);
+  const [captureLocation, setCaptureLocation] = useState(false);
   const [isListenLaunch, setIsListenLaunch] = useState<boolean | null>(null);
   const autoListenTriggeredRef = useRef(false);
 
   const canListen =
     resolvedSharedPayloads.length === 1 &&
     (resolvedSharedPayloads[0].shareType === "url" || resolvedSharedPayloads[0].shareType === "text");
+
+  const hasImagePayload = resolvedSharedPayloads.some(
+    (p) => p.shareType !== "url" && p.shareType !== "text",
+  );
 
   useEffect(() => {
     isListenShareLaunch().then(setIsListenLaunch);
@@ -90,7 +96,7 @@ export default function ShareReceived() {
     setSaving(true);
     try {
       for (const payload of resolvedSharedPayloads) {
-        await processAndSaveShare(payload, [...selectedIds]);
+        await processAndSaveShare(payload, [...selectedIds], { captureLocation });
       }
       refresh();
       clearSharedPayloads();
@@ -150,6 +156,22 @@ export default function ShareReceived() {
           onToggle={toggleFolder}
           onFolderCreated={handleFolderCreated}
         />
+
+        {hasImagePayload && (
+          <Pressable
+            style={styles.locationRow}
+            onPress={() => setCaptureLocation((v) => !v)}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: captureLocation }}
+          >
+            <MaterialIcons
+              name={captureLocation ? "check-box" : "check-box-outline-blank"}
+              size={22}
+              color={captureLocation ? Colors.accent : Colors.textSecondary}
+            />
+            <Text style={styles.locationLabel}>Store location</Text>
+          </Pressable>
+        )}
 
         <Pressable
           style={({ pressed }) => [styles.saveBtn, saving && styles.saveBtnDisabled, pressed && styles.saveBtnPressed]}
@@ -230,4 +252,12 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.6 },
   saveBtnPressed: { opacity: 0.85 },
   saveBtnText: { ...Typography.body, fontWeight: "700", color: Colors.white, fontSize: 16 },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingTop: Spacing.md,
+  },
+  locationLabel: { ...Typography.body, color: Colors.text },
 });
