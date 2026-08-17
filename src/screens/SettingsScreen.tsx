@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -56,10 +56,10 @@ export default function SettingsScreen() {
               try {
                 const manifest = await restoreBackup(fileUri);
                 await useFolderStore.getState().refresh();
-                Alert.alert(
-                  "Restored",
-                  `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders.`,
-                );
+                showModal({
+                  title: "Restored",
+                  message: `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders.`,
+                });
               } catch (e) {
                 showModal({ title: "Restore failed", message: `${e}` });
               }
