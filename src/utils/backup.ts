@@ -111,6 +111,13 @@ export async function restoreBackup(fileUri: string): Promise<BackupManifest> {
     await replaceDatabase(new Directory(stagingRoot));
     await replaceFilesDir(new Directory(stagingRoot, FILES_DIR_NAME));
 
+    // 4. Rewrite stored media URIs. `copyFileToStash` saves ABSOLUTE paths
+    //    (file:///data/user/0/<package>/files/stash/<file>), so a backup made
+    //    in one app (e.g. release) restored into another (e.g. debug) still
+    //    points at the old package's private dir. Re-target any such URI at
+    //    this app's own document stash dir.
+    await rewriteStoredUris();
+
     return manifest;
   } finally {
     try {
@@ -158,6 +165,67 @@ async function buildManifest(): Promise<BackupManifest> {
     folderCount: folders.length,
     itemCount: items.length,
   };
+}
+
+/**
+ * Re-targets stored media URIs at this app's document stash dir.
+ *
+ * `copyFileToStash` writes absolute `file:///data/user/0/<pkg>/files/stash/<f>`
+ * URIs into the DB. When a backup made in another app instance (e.g. release
+ * vs debug) is restored, those paths still point at the old package's private
+ * dir. Rewrite every local stash URI using the current document dir, keyed by
+ * filename (the restored files are already in place by the time this runs).
+ */
+async function rewriteStoredUris(): Promise<void> {
+  const db = await getDb();
+  const stashDir = new Directory(Paths.document, FILES_DIR_NAME);
+  if (!stashDir.exists) return;
+
+  // Filenames present in the restored stash dir.
+  const present = new Set<string>();
+  const collect = (dir: Directory) => {
+    for (const entry of dir.list()) {
+      if (entry instanceof Directory) {
+        collect(entry);
+      } else {
+        present.add(entry.name);
+      }
+    }
+  };
+  collect(stashDir);
+
+  const rows = await db.getAllAsync<{ id: string; uri: string; thumbnail_path: string | null }>(
+    "SELECT id, uri, thumbnail_path FROM items",
+  );
+
+  for (const row of rows) {
+    const rewrittenUri = retargetLocalUri(row.uri, stashDir, present);
+    const rewrittenThumb = retargetLocalUri(row.thumbnail_path, stashDir, present);
+    if (rewrittenUri === row.uri && rewrittenThumb === row.thumbnail_path) {
+      continue;
+    }
+    await db.runAsync("UPDATE items SET uri = ?, thumbnail_path = ? WHERE id = ?", [
+      rewrittenUri,
+      rewrittenThumb,
+      row.id,
+    ]);
+  }
+}
+
+function retargetLocalUri(
+  value: string | null,
+  stashDir: Directory,
+  present: Set<string>,
+): string | null {
+  if (!value || !value.startsWith("file://") || !value.includes(`/${FILES_DIR_NAME}/`)) {
+    return value;
+  }
+  const filename = value.split("/").pop();
+  if (!filename || !present.has(filename)) {
+    return value;
+  }
+  const target = new File(stashDir, filename);
+  return target.uri;
 }
 
 function copyFileContents(src: File, dest: File): void {
