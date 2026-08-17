@@ -5,7 +5,9 @@ import { checkpointDb, closeDb, getDb } from "../db/database";
 import { Folder, StashItem } from "../types";
 
 const DB_FILENAME = "stash.db";
-const FILES_DIR_NAME = "files";
+// The stashed media/files live in <document>/stash/ (see src/utils/fileUtils.ts).
+// We keep the same name both where they're read from and the zip-internal folder.
+const FILES_DIR_NAME = "stash";
 const MANIFEST_NAME = "manifest.json";
 const BACKUP_FORMAT = 1;
 const ZIP_MIME = "application/zip";
