@@ -1,4 +1,6 @@
-import exifr from "exifr";
+// Import the static "mini" build directly — the default "full" build uses
+// dynamic import() for lazy-loaded parsers, which Hermes can't bundle.
+import { gps } from "exifr/dist/mini.esm.mjs";
 import { File } from "expo-file-system";
 
 export type GpsPoint = { lat: number; lng: number };
@@ -11,15 +13,15 @@ export type GpsPoint = { lat: number; lng: number };
 export async function readExifGps(imageFile: File): Promise<GpsPoint | null> {
   try {
     const bytes = imageFile.bytesSync();
-    const gps = await exifr.gps(bytes);
+    const gpsData = await gps(bytes);
     if (
-      gps &&
-      typeof gps.latitude === "number" &&
-      typeof gps.longitude === "number" &&
-      Number.isFinite(gps.latitude) &&
-      Number.isFinite(gps.longitude)
+      gpsData &&
+      typeof gpsData.latitude === "number" &&
+      typeof gpsData.longitude === "number" &&
+      Number.isFinite(gpsData.latitude) &&
+      Number.isFinite(gpsData.longitude)
     ) {
-      return { lat: gps.latitude, lng: gps.longitude };
+      return { lat: gpsData.latitude, lng: gpsData.longitude };
     }
   } catch {
     // unsupported format or unreadable — no GPS
