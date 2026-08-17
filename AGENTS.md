@@ -18,6 +18,15 @@ cd ~/projects/stash && direnv exec . make deploy
 ```
 This runs `pnpm prebuild && cd android && ./gradlew assembleRelease` then `adb install -r`.
 
+### Debug builds are SELF-CONTAINED
+Debug APKs must embed the JS bundle — no Metro dependency. Set in `android/app/build.gradle`:
+```gradle
+react {
+  debuggableVariants = []
+}
+```
+This forces bundling for the debug variant; without it the debug app tries to fetch its JS from Metro at runtime and fails with `Unable to load script` over wireless ADB (reverse tunnel + Metro entry-path issues). `android/` is gitignored, so this setting must be re-applied by the `debug-variant` config plugin after every `expo prebuild` (see `plugins/debug-variant/index.js`).
+
 ### Wireless Debugging
 ```bash
 adb connect <ip>:<port>     # connect to phone

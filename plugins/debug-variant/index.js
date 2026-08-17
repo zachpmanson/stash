@@ -9,6 +9,9 @@ const path = require("path");
 // be installed and identified alongside the release build:
 //   - label:   "Stash (debug)"   (via a debug source-set manifest overlay)
 //   - app id:  com.zachmanson.stash.debug
+//   - self-contained: debug APKs embed the JS bundle (debuggableVariants = [])
+//     so the app needs no Metro at runtime — wireless ADB + Metro reverse
+//     tunnels are unreliable for "Unable to load script"
 // Both edits live in the generated android/ dir, so they must be re-applied
 // by this plugin on every `expo prebuild`.
 module.exports = function withDebugVariant(config) {
@@ -49,6 +52,24 @@ module.exports = function withDebugVariant(config) {
           if (head.includes("applicationIdSuffix")) return match;
           return `${head}            applicationIdSuffix ".debug"\n        }`;
         },
+      );
+      if (updated !== contents) {
+        config.modResults.contents = updated;
+      }
+    }
+    return config;
+  });
+
+  // 3. Make the debug build self-contained: force JS bundling for the debug
+  //    variant so the APK doesn't need Metro at runtime. Without this the
+  //    debug app fetches its JS from a dev server and fails with
+  //    "Unable to load script" over wireless ADB.
+  config = withAppBuildGradle(config, (config) => {
+    let contents = config.modResults.contents;
+    if (!contents.includes("debuggableVariants = []")) {
+      const updated = contents.replace(
+        /(\s*\/\/ debuggableVariants = \["liteDebug", "prodDebug"\])/,
+        (...args) => `${args[1]}\n    debuggableVariants = []`,
       );
       if (updated !== contents) {
         config.modResults.contents = updated;
