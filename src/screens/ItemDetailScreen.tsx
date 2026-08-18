@@ -308,6 +308,15 @@ export default function ItemDetailScreen() {
           )}
 
           <View style={styles.actions}>
+            {item.lat != null && item.lng != null && (
+              <ActionButton
+                label="Open in Maps"
+                icon="📍"
+                onPress={() =>
+                  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`)
+                }
+              />
+            )}
             {item.type === "url" && (
               <>
                 <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />

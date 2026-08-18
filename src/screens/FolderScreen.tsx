@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useState } from "react";
 import { FlatList, StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ItemGrid from "src/components/ItemGrid";
+import FolderMap from "src/components/FolderMap";
 import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
 import AddItemModal from "src/components/AddItemModal";
 import { showModal } from "src/state/modalState";
@@ -116,16 +117,20 @@ export default function FolderScreen() {
         </>
       }
     >
-      <ItemGrid
-        ref={listRef}
-        items={items}
-        onPress={(item) => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
-        onLongPress={(item) => handleLongPress(item)}
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        folderName={folderName}
-        numColumns={layout === "list" ? 1 : 2}
-      />
+      {layout === "map" ? (
+        <FolderMap items={items} folderName={folderName} />
+      ) : (
+        <ItemGrid
+          ref={listRef}
+          items={items}
+          onPress={(item) => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
+          onLongPress={(item) => handleLongPress(item)}
+          onRefresh={onRefresh}
+          refreshing={refreshing}
+          folderName={folderName}
+          numColumns={layout === "list" ? 1 : 2}
+        />
+      )}
       <AddItemFAB onSelect={setAddItemMode} />
       <AddItemModal
         visible={addItemMode !== null}
