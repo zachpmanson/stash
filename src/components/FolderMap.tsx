@@ -4,7 +4,7 @@ import {
   Marker,
 } from "@maplibre/maplibre-react-native";
 import React, { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { StashItem } from "../types";
 import { Colors, Spacing, Typography } from "../theme";
@@ -40,18 +40,28 @@ export default function FolderMap({ items, folderName }: Props) {
     <View style={styles.container}>
       <Map style={styles.map} mapStyle={STYLE_URL}>
         <Camera center={[first.lng!, first.lat!]} zoom={12} />
-        {located.map((item) => (
-          <Marker
-            key={item.id}
-            lngLat={[item.lng!, item.lat!]}
-            anchor="bottom"
-            onPress={() => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
-          >
-            <View style={styles.pin}>
-              <View style={styles.pinInner} />
-            </View>
-          </Marker>
-        ))}
+        {located.map((item) => {
+          const thumb = item.type === "image" ? item.uri : item.thumbnail_path;
+          return (
+            <Marker
+              key={item.id}
+              lngLat={[item.lng!, item.lat!]}
+              anchor="bottom"
+              onPress={() => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
+            >
+              <View style={styles.marker}>
+                {thumb ? (
+                  <Image source={{ uri: thumb }} style={styles.markerThumb} resizeMode="cover" />
+                ) : (
+                  <View style={styles.markerFallback}>
+                    <Text style={styles.markerFallbackIcon}>📍</Text>
+                  </View>
+                )}
+                <View style={styles.markerTail} />
+              </View>
+            </Marker>
+          );
+        })}
       </Map>
       <View style={styles.legend}>
         <Text style={styles.legendText}>
@@ -89,13 +99,29 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   legendText: { ...Typography.caption, color: "#ffffff" },
-  pin: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: Colors.accent,
-    borderWidth: 3,
+  marker: {
+    alignItems: "center",
+  },
+  markerThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 2,
     borderColor: "#ffffff",
+    backgroundColor: Colors.surface,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  markerFallback: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    backgroundColor: Colors.accent,
     alignItems: "center",
     justifyContent: "center",
     elevation: 4,
@@ -104,10 +130,16 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 2 },
   },
-  pinInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#ffffff",
+  markerFallbackIcon: { fontSize: 20 },
+  markerTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#ffffff",
+    marginTop: -1,
   },
 });
