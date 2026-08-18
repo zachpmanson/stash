@@ -143,14 +143,6 @@ export default function EditFolderScreen() {
             <Text style={[styles.layoutLabel, layout === "list" && styles.layoutOptionTextSelected]}>List</Text>
             <Text style={[styles.layoutSub, layout === "list" && styles.layoutOptionTextSelected]}>Single column</Text>
           </Pressable>
-          <Pressable
-            style={[styles.layoutOption, layout === "map" && styles.layoutOptionSelected]}
-            onPress={() => setLayout("map")}
-          >
-            <Text style={[styles.layoutIcon, layout === "map" && styles.layoutOptionTextSelected]}>🗺</Text>
-            <Text style={[styles.layoutLabel, layout === "map" && styles.layoutOptionTextSelected]}>Map</Text>
-            <Text style={[styles.layoutSub, layout === "map" && styles.layoutOptionTextSelected]}>Show locations</Text>
-          </Pressable>
         </View>
 
         <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]} onPress={handleSave}>

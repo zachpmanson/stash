@@ -25,6 +25,7 @@ export default function FolderScreen() {
   const router = useRouter();
   const [items, setItems] = useState<StashItem[]>([]);
   const [layout, setLayout] = useState<FolderLayout>("grid");
+  const [showMap, setShowMap] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [addItemMode, setAddItemMode] = useState<AddItemMode | null>(null);
   const insets = useSafeAreaInsets();
@@ -36,6 +37,8 @@ export default function FolderScreen() {
     const data = await getItemsInFolder(folderId);
     setItems(data);
   }, [folderId]);
+
+  const hasGpsItems = items.some((i) => i.lat != null && i.lng != null);
 
   useFocusEffect(
     useCallback(() => {
@@ -108,6 +111,11 @@ export default function FolderScreen() {
       title={folderName}
       buttons={
         <>
+          {hasGpsItems && (
+            <TopbarButton onPress={() => setShowMap((v) => !v)}>
+              <MaterialIcons name={showMap ? "grid-view" : "map"} size={20} color={Colors.text} />
+            </TopbarButton>
+          )}
           <TopbarButton onPress={handleEdit}>
             <MaterialIcons name="edit" size={20} color={Colors.text} />
           </TopbarButton>
@@ -117,7 +125,7 @@ export default function FolderScreen() {
         </>
       }
     >
-      {layout === "map" ? (
+      {showMap ? (
         <FolderMap items={items} folderName={folderName} />
       ) : (
         <ItemGrid

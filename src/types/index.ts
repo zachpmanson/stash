@@ -12,7 +12,7 @@ export type Folder = {
   layout?: FolderLayout;
 };
 
-export type FolderLayout = "grid" | "list" | "map";
+export type FolderLayout = "grid" | "list";
 
 export type SelectableFolder = Folder & { isSelected: boolean };
 

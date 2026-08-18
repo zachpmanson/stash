@@ -2,7 +2,6 @@ import {
   Map,
   Camera,
   Marker,
-  Callout,
 } from "@maplibre/maplibre-react-native";
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
@@ -48,7 +47,9 @@ export default function FolderMap({ items, folderName }: Props) {
             anchor="bottom"
             onPress={() => router.push({ pathname: "/item/[id]", params: { id: item.id } })}
           >
-            <Callout title={item.title ?? "Stashed item"} />
+            <View style={styles.pin}>
+              <View style={styles.pinInner} />
+            </View>
           </Marker>
         ))}
       </Map>
@@ -88,4 +89,25 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   legendText: { ...Typography.caption, color: "#ffffff" },
+  pin: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.accent,
+    borderWidth: 3,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  pinInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#ffffff",
+  },
 });
