@@ -386,6 +386,16 @@ export default function ItemDetailScreen() {
 }
 
 function RecipeView({ recipe }: { recipe: Recipe }) {
+  const [checkedIngs, setCheckedIngs] = useState<Set<number>>(new Set());
+  const toggleIngredient = (i: number) => {
+    setCheckedIngs((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
   const fmtDuration = (iso: string) => {
     const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
     if (!m) return iso;
@@ -418,9 +428,32 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
       {recipe.recipeIngredient.length > 0 && (
         <View style={styles.recipeSection}>
           <Text style={styles.recipeSectionTitle}>Ingredients</Text>
-          {recipe.recipeIngredient.map((ing, i) => (
-            <Text key={i} style={styles.recipeIngredient}>• {formatIngredient(ing)}</Text>
-          ))}
+          {recipe.recipeIngredient.map((ing, i) => {
+            const checked = checkedIngs.has(i);
+            return (
+              <Pressable
+                key={i}
+                style={styles.recipeIngredientRow}
+                onPress={() => toggleIngredient(i)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked }}
+              >
+                <View style={[styles.recipeCheckbox, checked && styles.recipeCheckboxChecked]}>
+                  {checked && (
+                    <MaterialIcons name="check" size={14} color={Colors.bg} />
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.recipeIngredient,
+                    checked && styles.recipeIngredientChecked,
+                  ]}
+                >
+                  {formatIngredient(ing)}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       )}
 
@@ -615,10 +648,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: Spacing.xs,
   },
+  recipeIngredientRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingVertical: 3,
+  },
+  recipeCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  recipeCheckboxChecked: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
   recipeIngredient: {
     ...Typography.body,
     fontSize: 15,
     lineHeight: 22,
+    flex: 1,
+  },
+  recipeIngredientChecked: {
+    color: Colors.textSecondary,
+    textDecorationLine: "line-through",
   },
   recipeStep: {
     flexDirection: "row",
