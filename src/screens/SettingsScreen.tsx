@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -7,6 +7,7 @@ import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
 import { useFolderStore } from "../state/folderState";
+import { useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
 import { VoiceMode } from "../utils/readability";
@@ -24,6 +25,8 @@ export default function SettingsScreen() {
   const voiceLabel = selectedVoice ? selectedVoice.name : selectedId;
   const quoteVoice = voices.find((v) => v.identifier === quoteId);
   const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
+  const auRecipe = useSettingsStore((s) => s.auRecipe);
+  const setAuRecipe = useSettingsStore((s) => s.setAuRecipe);
 
   const handleBackup = async () => {
     if (busy) return;
@@ -105,6 +108,12 @@ export default function SettingsScreen() {
           label="Text Substitutions"
           onPress={() => router.push("/text-substitutions")}
         />
+        <ToggleRow
+          icon="emoji-food-beverage"
+          label="Australian recipe ingredients"
+          value={auRecipe}
+          onValueChange={setAuRecipe}
+        />
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
       </View>
     </Screen>
@@ -135,6 +144,28 @@ function Row({
       </View>
       <MaterialIcons name="chevron-right" size={22} color={Colors.textMuted} />
     </Pressable>
+  );
+}
+
+function ToggleRow({
+  icon,
+  label,
+  value,
+  onValueChange,
+}: {
+  icon: React.ComponentProps<typeof MaterialIcons>["name"];
+  label: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  return (
+    <View style={styles.row}>
+      <MaterialIcons name={icon} size={22} color={Colors.text} />
+      <View style={styles.rowText}>
+        <Text style={styles.rowLabel}>{label}</Text>
+      </View>
+      <Switch value={value} onValueChange={onValueChange} />
+    </View>
   );
 }
 

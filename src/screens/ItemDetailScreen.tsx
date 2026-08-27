@@ -34,12 +34,14 @@ interface TextSelectionApi {
 
 const TextSelection = NativeModules.TextSelection as TextSelectionApi | undefined;
 import { useArticle } from "../hooks/useArticle";
+import { useSettingsStore } from "../state/settingsState";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { StashItem } from "../types";
 import type { Recipe, HowToStep } from "../types";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { estimateReadLabel } from "../utils/speech";
 import { recipeCookLabel } from "../utils/recipe";
+import { convertToAustralian } from "../utils/auRecipe";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -386,6 +388,7 @@ export default function ItemDetailScreen() {
 }
 
 function RecipeView({ recipe }: { recipe: Recipe }) {
+  const auRecipe = useSettingsStore((s) => s.auRecipe);
   const [checkedIngs, setCheckedIngs] = useState<Set<number>>(new Set());
   const toggleIngredient = (i: number) => {
     setCheckedIngs((prev) => {
@@ -405,11 +408,14 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
     return parts.join(" ") || iso;
   };
 
-  const formatIngredient = (ing: string) =>
-    ing.replace(/(\d+\.\d{3,})/g, (m) => {
+  const formatIngredient = (ing: string) => {
+    let value = auRecipe ? convertToAustralian(ing) : ing;
+    value = value.replace(/(\d+\.\d{3,})/g, (m) => {
       const n = parseFloat(m);
       return n % 1 === 0 ? Math.round(n).toString() : n.toFixed(2);
     });
+    return value;
+  };
 
   return (
     <View style={styles.recipeContainer}>
