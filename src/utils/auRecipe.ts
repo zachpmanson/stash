@@ -4,7 +4,7 @@
  * Singlesource function `convertToAustralian` does all of:
  *  1. Name swaps (US/UK → as-spoken AU): marjoram→oregano, arugula→rocket, …
  *  2. Temperature °F → °C.
- *  3. US fluid volume → ml (cup≈240ml, US tbsp=15ml, tsp=5ml).
+ *  3. US fluid volume → ml (AU cup≈250ml, US tbsp=15ml, tsp=5ml).
  *  4. Weight oz/lb → g.
  *
  * Built from a single qualified-ingredient regex so "2 cups", "1½ tbsp",
@@ -61,8 +61,8 @@ const AMOUNT = String.raw`(?:\d+(?:\.\d+)?(?:\s+|\s*[-–]\s*)\d+\s*\/\s*\d+|\d+
 const UNIT = `(fl\\s*oz|cups?|tbsp?|tsp|oz|lbs?|pounds?)\\b`;
 
 const VOLUME_FACTOR: Record<string, number> = {
-  cup: 240,
-  cups: 240,
+  cup: 250,
+  cups: 250,
   tbsp: 15,
   tsp: 5,
   floz: 30,
