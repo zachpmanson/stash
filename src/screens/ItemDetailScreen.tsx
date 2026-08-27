@@ -471,7 +471,9 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
               <View style={styles.recipeStepNumber}>
                 <Text style={styles.recipeStepNumberText}>{i + 1}</Text>
               </View>
-              <Text style={styles.recipeStepText}>{step.text}</Text>
+              <Text style={styles.recipeStepText}>
+                {auRecipe ? convertToAustralian(step.text) : step.text}
+              </Text>
             </View>
           ))}
         </View>
