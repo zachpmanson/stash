@@ -1,14 +1,13 @@
 /**
  * Australian English recipe conversions.
  *
- * Singlesource function `convertToAustralian` does all of:
- *  1. Name swaps (US/UK → as-spoken AU): marjoram→oregano, arugula→rocket, …
- *  2. Temperature °F → °C.
- *  3. US fluid volume → ml (AU cup≈250ml, US tbsp=15ml, tsp=5ml).
- *  4. Weight oz/lb → g.
- *
- * Built from a single qualified-ingredient regex so "2 cups", "1½ tbsp",
- * "350°F", "8 fl oz" and "1 lb" are all rewritten kitchen-friendly.
+ * Two independent passes (so each can be triggered separately):
+ *  - `convertToAustralian`  — name swaps + temperature + weight. Kept behind
+ *    the "Australian recipe ingredients" settings toggle.
+ *  - `convertVolumeUnits`   — US fluid-volume → ml. Deliberately NOT in the
+ *    auto toggle (an AU recipe is already metric, and "cups" are ambiguous),
+ *    so it only fires when the user presses "Convert volumes" in the recipe
+ *    overflow menu.
  */
 
 const AU_INGREDIENT_MAP: ReadonlyArray<readonly [string, string]> = [
@@ -57,9 +56,9 @@ function fmtQty(n: number): string {
 
 /** Amount regex: "3", "3.5", "1/2", "1 1/2", "1½", "1 ½", "½". */
 const AMOUNT = String.raw`(?:\d+(?:\.\d+)?(?:\s+|\s*[-–]\s*)\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:\.\d+)?|\d+\s*[\u00BC-\u00BE\u2150-\u215E]|[\u00BC-\u00BE\u2150-\u215E])`;
-/** Unit: fl oz first so it wins over plain oz. \b after each member. */
-const UNIT = `(fl\\s*oz|cups?|tbsp?|tsp|oz|lbs?|pounds?)\\b`;
 
+/** Volume units only (fl oz first so it wins over plain oz). */
+const VOLUME_UNIT = `(fl\\s*oz|cups?|tbsp?|tsp)\\b`;
 const VOLUME_FACTOR: Record<string, number> = {
   cup: 250,
   cups: 250,
@@ -68,21 +67,10 @@ const VOLUME_FACTOR: Record<string, number> = {
   floz: 30,
 };
 
-/** Convert a matched amount+unit to metric; returns null if not a known unit. */
-function convertUnit(amount: string, unitWord: string): { value: number; label: string } | null {
-  const n = parseAmount(amount);
-  if (n === null) return null;
-  const u = unitWord.toLowerCase().replace(/[\s.]/g, "");
-  const vol = VOLUME_FACTOR[u];
-  if (vol !== undefined) return { value: n * vol, label: "ml" };
-  if (u === "lb" || u === "lbs" || u === "pound" || u === "pounds") return { value: n * 454, label: "g" };
-  if (u === "oz") return { value: n * 28.35, label: "g" };
-  return null;
-}
+/** Weight units only. */
+const WEIGHT_UNIT = `(lbs?|pounds?|oz)\\b`;
 
-/**
- * Full Australian conversion: name swaps then metric units.
- */
+/** Australian name + temperature + weight conversion. */
 export function convertToAustralian(text: string): string {
   let out = text;
 
@@ -100,14 +88,33 @@ export function convertToAustralian(text: string): string {
     (full, n: string) => c2c(n),
   );
 
-  // 3) Volume & weight.
+  // 3) Weight (oz/lb → g).
   out = out.replace(
-    new RegExp(`(${AMOUNT})\\s*(${UNIT})`, "gi"),
+    new RegExp(`(${AMOUNT})\\s*(${WEIGHT_UNIT})`, "gi"),
     (full, amt: string, unit: string) => {
-      const r = convertUnit(amt, unit);
-      return r ? `${fmtQty(r.value)} ${r.label}` : full;
+      const n = parseAmount(amt);
+      if (n === null) return full;
+      const u = unit.toLowerCase().replace(/[\s.]/g, "");
+      let g: number | null = null;
+      if (u === "lb" || u === "lbs" || u === "pound" || u === "pounds") g = n * 454;
+      else if (u === "oz") g = n * 28.35;
+      return g !== null ? `${fmtQty(g)} g` : full;
     },
   );
 
   return out;
+}
+
+/** US fluid-volume (cups/tbsp/tsp/fl oz) → ml. Manual, opt-in only. */
+export function convertVolumeUnits(text: string): string {
+  return text.replace(
+    new RegExp(`(${AMOUNT})\\s*(${VOLUME_UNIT})`, "gi"),
+    (full, amt: string, unit: string) => {
+      const n = parseAmount(amt);
+      if (n === null) return full;
+      const u = unit.toLowerCase().replace(/[\s.]/g, "");
+      const f = VOLUME_FACTOR[u];
+      return f !== undefined ? `${fmtQty(n * f)} ml` : full;
+    },
+  );
 }

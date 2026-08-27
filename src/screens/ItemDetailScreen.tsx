@@ -41,7 +41,7 @@ import type { Recipe, HowToStep } from "../types";
 import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { estimateReadLabel } from "../utils/speech";
 import { recipeCookLabel } from "../utils/recipe";
-import { convertToAustralian } from "../utils/auRecipe";
+import { convertToAustralian, convertVolumeUnits } from "../utils/auRecipe";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -51,6 +51,7 @@ export default function ItemDetailScreen() {
   const [showFormatted, setShowFormatted] = useState(true);
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
+  const [convertVolume, setConvertVolume] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
   const [scrollY, setScrollY] = useState(0);
   const [selActive, setSelActive] = useState(false);
@@ -250,6 +251,14 @@ export default function ItemDetailScreen() {
                 },
                 { title: "Load from archive.is", onPress: () => handleLoadFromArchive("is") },
                 { title: "Load from archive.org", onPress: () => handleLoadFromArchive("org") },
+                ...(articleState.kind === "ready" && articleState.recipe
+                  ? [
+                      {
+                        title: convertVolume ? "Show original volumes" : "Convert volumes to metric",
+                        onPress: () => setConvertVolume((v) => !v),
+                      },
+                    ]
+                  : []),
               ]}
             />
           )}
@@ -346,7 +355,7 @@ export default function ItemDetailScreen() {
               )}
               {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
               {articleState.kind === "ready" && articleState.recipe && (
-                <RecipeView recipe={articleState.recipe} />
+                <RecipeView recipe={articleState.recipe} convertVolume={convertVolume} />
               )}
               {articleState.kind === "ready" && !articleState.recipe &&
                 (showRawHtml && articleState.html ? (
@@ -387,7 +396,7 @@ export default function ItemDetailScreen() {
   );
 }
 
-function RecipeView({ recipe }: { recipe: Recipe }) {
+function RecipeView({ recipe, convertVolume }: { recipe: Recipe; convertVolume: boolean }) {
   const auRecipe = useSettingsStore((s) => s.auRecipe);
   const [checkedIngs, setCheckedIngs] = useState<Set<number>>(new Set());
   const toggleIngredient = (i: number) => {
@@ -408,8 +417,14 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
     return parts.join(" ") || iso;
   };
 
+  const apply = (text: string): string => {
+    let value = auRecipe ? convertToAustralian(text) : text;
+    if (convertVolume) value = convertVolumeUnits(value);
+    return value;
+  };
+
   const formatIngredient = (ing: string) => {
-    let value = auRecipe ? convertToAustralian(ing) : ing;
+    let value = apply(ing);
     value = value.replace(/(\d+\.\d{3,})/g, (m) => {
       const n = parseFloat(m);
       return n % 1 === 0 ? Math.round(n).toString() : n.toFixed(2);
@@ -472,7 +487,7 @@ function RecipeView({ recipe }: { recipe: Recipe }) {
                 <Text style={styles.recipeStepNumberText}>{i + 1}</Text>
               </View>
               <Text style={styles.recipeStepText}>
-                {auRecipe ? convertToAustralian(step.text) : step.text}
+                {apply(step.text)}
               </Text>
             </View>
           ))}
