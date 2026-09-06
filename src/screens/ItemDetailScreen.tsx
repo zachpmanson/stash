@@ -42,6 +42,7 @@ import { archiveIsUrl, archiveOrgUrl } from "../utils/readability";
 import { estimateReadLabel } from "../utils/speech";
 import { recipeCookLabel } from "../utils/recipe";
 import { convertToAustralian, convertVolumeUnits } from "../utils/auRecipe";
+import { useRecipeCheckStore } from "../state/recipeCheckState";
 
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
@@ -355,7 +356,11 @@ export default function ItemDetailScreen() {
               )}
               {articleState.kind === "error" && <Text style={styles.articleError}>{articleState.message}</Text>}
               {articleState.kind === "ready" && articleState.recipe && (
-                <RecipeView recipe={articleState.recipe} convertVolume={convertVolume} />
+                <RecipeView
+                  recipe={articleState.recipe}
+                  convertVolume={convertVolume}
+                  itemId={item?.id}
+                />
               )}
               {articleState.kind === "ready" && !articleState.recipe &&
                 (showRawHtml && articleState.html ? (
@@ -396,16 +401,23 @@ export default function ItemDetailScreen() {
   );
 }
 
-function RecipeView({ recipe, convertVolume }: { recipe: Recipe; convertVolume: boolean }) {
+function RecipeView({
+  recipe,
+  convertVolume,
+  itemId,
+}: {
+  recipe: Recipe;
+  convertVolume: boolean;
+  itemId?: string;
+}) {
   const auRecipe = useSettingsStore((s) => s.auRecipe);
-  const [checkedIngs, setCheckedIngs] = useState<Set<number>>(new Set());
+  const checkedIngs = useRecipeCheckStore((s) =>
+    itemId ? new Set(s.checked[itemId] ?? []) : new Set<number>(),
+  );
+  const toggleChecked = useRecipeCheckStore((s) => s.toggleChecked);
+  const resetRecipe = useRecipeCheckStore((s) => s.resetRecipe);
   const toggleIngredient = (i: number) => {
-    setCheckedIngs((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
+    if (itemId) toggleChecked(itemId, i);
   };
 
   const fmtDuration = (iso: string) => {
@@ -448,7 +460,18 @@ function RecipeView({ recipe, convertVolume }: { recipe: Recipe; convertVolume: 
 
       {recipe.recipeIngredient.length > 0 && (
         <View style={styles.recipeSection}>
-          <Text style={styles.recipeSectionTitle}>Ingredients</Text>
+          <View style={styles.recipeSectionHeader}>
+            <Text style={styles.recipeSectionTitle}>Ingredients</Text>
+            {checkedIngs.size > 0 && itemId && (
+              <Pressable
+                onPress={() => resetRecipe(itemId)}
+                style={({ pressed }) => [styles.recipeResetBtn, pressed && styles.recipeResetBtnPressed]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.recipeResetText}>Reset</Text>
+              </Pressable>
+            )}
+          </View>
           {recipe.recipeIngredient.map((ing, i) => {
             const checked = checkedIngs.has(i);
             return (
@@ -666,10 +689,28 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     gap: Spacing.xs,
   },
+  recipeSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   recipeSectionTitle: {
     ...Typography.subheading,
     fontSize: 16,
     marginBottom: Spacing.xs,
+  },
+  recipeResetBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surface2,
+  },
+  recipeResetBtnPressed: {
+    opacity: 0.6,
+  },
+  recipeResetText: {
+    ...Typography.caption,
+    color: Colors.textSecondary,
   },
   recipeIngredientRow: {
     flexDirection: "row",
