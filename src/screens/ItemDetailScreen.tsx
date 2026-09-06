@@ -32,6 +32,9 @@ interface TextSelectionApi {
   getSelection?: (tag: number) => Promise<{ start: number; end: number; length: number } | null>;
 }
 
+/** Stable empty array for unchecked recipes (never inline — must keep its ref). */
+const EMPTY_CHECKED: number[] = [];
+
 const TextSelection = NativeModules.TextSelection as TextSelectionApi | undefined;
 import { useArticle } from "../hooks/useArticle";
 import { useSettingsStore } from "../state/settingsState";
@@ -411,9 +414,13 @@ function RecipeView({
   itemId?: string;
 }) {
   const auRecipe = useSettingsStore((s) => s.auRecipe);
-  const checkedIngs = useRecipeCheckStore((s) =>
-    itemId ? new Set(s.checked[itemId] ?? []) : new Set<number>(),
+  // Select the stable array ref from the store (never a fresh Set — a
+  // new-reference selector makes zustand's getSnapshot unstable and React
+  // loops on "maximum update depth exceeded"). Derive the Set via useMemo.
+  const checkedArr = useRecipeCheckStore((s) =>
+    itemId ? s.checked[itemId] ?? EMPTY_CHECKED : EMPTY_CHECKED,
   );
+  const checkedIngs = useMemo(() => new Set(checkedArr), [checkedArr]);
   const toggleChecked = useRecipeCheckStore((s) => s.toggleChecked);
   const resetRecipe = useRecipeCheckStore((s) => s.resetRecipe);
   const toggleIngredient = (i: number) => {
