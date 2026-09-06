@@ -15,6 +15,7 @@ const AU_INGREDIENT_MAP: ReadonlyArray<readonly [string, string]> = [
   ["arugula", "rocket"],
   ["cilantro", "coriander"],
   ["bell pepper", "capsicum"],
+  ["red pepper", "red capsicum"],
   ["scallion", "spring onion"],
   ["green onion", "spring onion"],
   ["ground beef", "minced beef"],
