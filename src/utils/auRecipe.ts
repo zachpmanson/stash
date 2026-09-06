@@ -10,12 +10,15 @@
  *    overflow menu.
  */
 
-const AU_INGREDIENT_MAP: ReadonlyArray<readonly [string, string]> = [
+/** [find, replace, exclude?] — exclude is a trailing negative-lookahead pattern
+ * (e.g. "flakes\\b" keeps "red pepper flakes" as-is: those are crushed
+ * chilli, not capsicum). */
+const AU_INGREDIENT_MAP: ReadonlyArray<readonly [string, string, string?]> = [
   ["marjoram", "oregano"],
   ["arugula", "rocket"],
   ["cilantro", "coriander"],
-  ["bell pepper", "capsicum"],
-  ["red pepper", "red capsicum"],
+  ["bell pepper", "capsicum", "flakes\\b"],
+  ["red pepper", "red capsicum", "flakes\\b"],
   ["scallion", "spring onion"],
   ["green onion", "spring onion"],
   ["ground beef", "minced beef"],
@@ -76,9 +79,10 @@ export function convertToAustralian(text: string): string {
   let out = text;
 
   // 1) Name swaps (whole word, case-insensitive, optional plural).
-  for (const [find, replace] of AU_INGREDIENT_MAP) {
+  for (const [find, replace, exclude] of AU_INGREDIENT_MAP) {
     const escaped = find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`\\b${escaped}s?\\b`, "gi"), replace);
+    const guard = exclude ? `(?!\\s*${exclude})` : "";
+    out = out.replace(new RegExp(`\\b${escaped}s?\\b${guard}`, "gi"), replace);
   }
 
   // 2) Temperature °F → °C (nearest 5°). Ranges first ("350-375°F").
