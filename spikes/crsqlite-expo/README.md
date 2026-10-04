@@ -4,14 +4,14 @@ Disposable Android-only slice; it does not change Stash's production database, a
 
 ## What it checks
 
-- Expo SDK 55's existing `expo-sqlite.loadExtensionAsync` API can be built into an Android arm64 APK with CR-SQLite's upstream native library.
+- Expo SDK 55's existing `expo-sqlite.loadExtensionAsync` API can be built into Android arm64 and x86_64 APKs with CR-SQLite native libraries.
 - On-device, two independent Expo SQLite connections can each write offline, exchange `crsql_changes` rows, and converge.
 - On-device, Stash's current `serializeAsync` database-backup primitive preserves CRR rows/schema metadata through serialization and restore.
 - On the host/server side, a Node 24 `node:sqlite` process can load the upstream Linux x86_64 build, exchange changes between independent SQLite databases, and serialize/restore CRR data.
 
 The native client test is an in-process exchange between two SQLite connections, not the eventual HTTP/WebSocket transport. No transport, auth, or production migration is included.
 
-## Build the arm64 Android app
+## Build the Android app
 
 From the Stash repo root (the build uses the repository's capped Gradle runner):
 
@@ -19,15 +19,16 @@ From the Stash repo root (the build uses the repository's capped Gradle runner):
 nix develop . --command bash -c '
   cd spikes/crsqlite-expo
   ./scripts/prepare-android-crsqlite.sh
+  ./scripts/build-android-x86_64-crsqlite.sh
   ANDROID_HOME="$HOME/android-sdk" NODE_ENV=production ../../node_modules/.bin/expo prebuild --platform android --clean
 '
 ANDROID_HOME="$HOME/android-sdk" /home/beltino/beltino/scripts/build-capped.sh \
-  "$PWD/spikes/crsqlite-expo" -- assembleRelease -PreactNativeArchitectures=arm64-v8a
+  "$PWD/spikes/crsqlite-expo" -- assembleRelease -PreactNativeArchitectures=x86_64
 ```
 
-Install the resulting `spikes/crsqlite-expo/android/app/build/outputs/apk/release/app-release.apk` on an **arm64** Android device. Open **CR-SQLite Expo Spike** and tap **Run spike**; all three reported checks must pass. The `10.0.0.118` Pixel was not reachable over ADB when this spike was built, and the available local emulator images are x86_64, so the on-device assertions remain unrun.
+`prepare-android-crsqlite.sh` fetches the pinned upstream arm64 release library. The x86_64 builder compiles CR-SQLite v0.16.3 from its SHA-256-pinned npm source package using its upstream Makefile, Android NDK, Rust nightly, and Nix-provided build tools; no compiled binaries are committed. The Expo config plugin packages each prepared ABI under its matching `jniLibs` directory.
 
-The binary fetch is pinned to CR-SQLite v0.16.3; no compiled binary is committed. The config plugin copies the upstream `aarch64-linux-android` `.so` into `jniLibs/arm64-v8a`. The APK build passed for that ABI and contains `lib/arm64-v8a/libcrsqlite.so`; it is **not** evidence of multi-ABI support.
+Install the resulting `spikes/crsqlite-expo/android/app/build/outputs/apk/release/app-release.apk` on an x86_64 Android emulator. Open **CR-SQLite Expo Spike** and tap **Run spike**. Verified on the local Android 35 x86_64 AVD: extension load passed; the independent Expo SQLite connections converged on both offline-written rows; serialize/restore preserved the rows and four CR-SQLite schema objects. The Pixel is not required for this first runtime proof.
 
 ## Test the host/server SQLite side
 
@@ -43,4 +44,4 @@ This validates bidirectional CR-SQLite change exchange and backup serialization 
 
 ## Early schema finding / remaining gate
 
-CR-SQLite v0.16.3 rejects CRR tables with a `NOT NULL` non-key column that has no default. The existing Stash schema has several such columns; those definitions need an intentional defaults/nullability migration or this choice needs revisiting. Before adopting CRRs, still test the native screen on a real arm64 Android device, exercise the actual populated Stash DB/backup ZIP, settle field semantics and schema evolution, and source supported binaries for every target ABI. iOS is out of scope for this spike. Do not enable CRRs in Stash's real database yet.
+CR-SQLite v0.16.3 rejects CRR tables with a `NOT NULL` non-key column that has no default. The existing Stash schema has several such columns; those definitions need an intentional defaults/nullability migration or this choice needs revisiting. Before adopting CRRs, exercise the actual populated Stash DB/backup ZIP, settle field semantics and schema evolution, and validate the arm64 binary on a device. This slice does not test transport/auth, iOS, or production migration. Do not enable CRRs in Stash's real database yet.

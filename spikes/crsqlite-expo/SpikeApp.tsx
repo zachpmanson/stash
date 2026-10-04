@@ -90,7 +90,7 @@ async function runSpike(): Promise<string[]> {
 }
 
 export default function Index() {
-  const [lines, setLines] = useState<string[]>(["Ready. Run the native CR-SQLite spike on an arm64 Android build."]);
+  const [lines, setLines] = useState<string[]>(["Ready. Run the native CR-SQLite spike on Android."]);
   const [running, setRunning] = useState(false);
 
   async function run() {
