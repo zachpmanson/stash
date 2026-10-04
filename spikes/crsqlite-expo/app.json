@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "CR-SQLite Expo Spike",
+    "slug": "crsqlite-expo-spike",
+    "version": "0.0.0",
+    "android": {
+      "package": "com.zachmanson.stash.crsqlite.spike",
+      "minSdkVersion": 24
+    },
+    "plugins": [
+      "expo-sqlite",
+      "./plugins/with-crsqlite-android"
+    ]
+  }
+}
