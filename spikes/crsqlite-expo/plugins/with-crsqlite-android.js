@@ -1,8 +1,18 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { withDangerousMod } = require("@expo/config-plugins");
+const { withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
 
 module.exports = function withCrsqliteAndroid(config) {
+  config = withAndroidManifest(config, (modConfig) => {
+    const application = modConfig.modResults.manifest.application?.[0];
+    if (!application) throw new Error("Android manifest has no application element");
+    application.$ = {
+      ...application.$,
+      "android:usesCleartextTraffic": "true",
+    };
+    return modConfig;
+  });
+
   return withDangerousMod(config, ["android", async (modConfig) => {
     const nativeRoot = path.resolve(modConfig.modRequest.projectRoot, "native");
     const jniLibs = path.join(modConfig.modRequest.platformProjectRoot, "app/src/main/jniLibs");

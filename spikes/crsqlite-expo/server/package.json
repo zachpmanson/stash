@@ -1,0 +1,28 @@
+{
+  "name": "stash-crsqlite-server-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "node --test test/*.test.mjs",
+    "build": "tsc --outDir dist",
+    "db": "node scripts/db-admin.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vlcn.io/crsqlite": "0.16.3",
+    "@vlcn.io/ws-common": "0.2.0",
+    "@vlcn.io/ws-server": "0.2.3",
+    "better-sqlite3": "12.6.2",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "ws": "8.18.3"
+  }
+}

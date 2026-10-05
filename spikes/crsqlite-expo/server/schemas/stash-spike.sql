@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL DEFAULT '');
+SELECT crsql_as_crr('notes');

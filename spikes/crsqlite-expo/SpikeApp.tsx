@@ -1,103 +1,28 @@
-import * as SQLite from "expo-sqlite";
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { backupRestoreZip, createAndroidNote, listNotes, startSync, waitForConvergence, type Note } from "./networkSync";
 
-type Change = {
-  table: string;
-  pk: unknown;
-  cid: string;
-  val: unknown;
-  col_version: number;
-  db_version: number;
-  site_id: unknown;
-  cl: number;
-  seq: number;
-};
+const DEFAULT_SERVER_URL = "http://127.0.0.1:8787";
 
-const ENTRY_POINT = "sqlite3_crsqlite_init";
-const CHANGE_COLUMNS = '"table", "pk", "cid", "val", "col_version", "db_version", "site_id", cl, seq';
-const INSERT_CHANGE = `INSERT INTO crsql_changes (${CHANGE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-function asSqlValue(value: unknown): unknown {
-  return value instanceof Uint8Array ? value : value;
-}
-
-async function newDb(name: string): Promise<SQLite.SQLiteDatabase> {
-  const db = await SQLite.openDatabaseAsync(name, { useNewConnection: true });
-  await db.loadExtensionAsync("libcrsqlite.so", ENTRY_POINT);
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL DEFAULT '');`);
-  const isCrr = await db.getFirstAsync<{ crsql_as_crr: number }>("SELECT crsql_as_crr('notes')");
-  if (!isCrr) throw new Error("crsql_as_crr returned no result");
-  return db;
-}
-
-async function changes(db: SQLite.SQLiteDatabase): Promise<Change[]> {
-  return db.getAllAsync<Change>(`SELECT ${CHANGE_COLUMNS} FROM crsql_changes`);
-}
-
-async function apply(db: SQLite.SQLiteDatabase, batch: Change[]): Promise<void> {
-  for (const change of batch) {
-    await db.runAsync(INSERT_CHANGE, ...Object.values(change).map(asSqlValue) as never[]);
-  }
-}
-
-async function runSpike(): Promise<string[]> {
-  const a = await newDb("crsqlite-spike-a.db");
-  const b = await newDb(":memory:");
-  try {
-    await a.runAsync("INSERT OR REPLACE INTO notes (id, body) VALUES (?, ?)", "from-device", "offline on device");
-    await apply(b, await changes(a));
-
-    await b.runAsync("INSERT OR REPLACE INTO notes (id, body) VALUES (?, ?)", "from-peer", "offline on peer");
-    await apply(a, await changes(b));
-
-    const aRows = await a.getAllAsync<{ id: string; body: string }>("SELECT id, body FROM notes ORDER BY id");
-    const bRows = await b.getAllAsync<{ id: string; body: string }>("SELECT id, body FROM notes ORDER BY id");
-    if (JSON.stringify(aRows) !== JSON.stringify(bRows)) {
-      throw new Error(`Replicas did not converge: A=${JSON.stringify(aRows)} B=${JSON.stringify(bRows)}`);
-    }
-
-    // Mirror Stash's backup flow: serialize a live DB, restore it to a fresh
-    // connection, load CR-SQLite again, then ensure both user rows and CRR data
-    // survive the round trip.
-    const backup = await a.serializeAsync();
-    const restored = await SQLite.deserializeDatabaseAsync(backup, { useNewConnection: true });
-    try {
-      await restored.loadExtensionAsync("libcrsqlite.so", ENTRY_POINT);
-      const restoredRows = await restored.getAllAsync<{ id: string; body: string }>("SELECT id, body FROM notes ORDER BY id");
-      if (JSON.stringify(restoredRows) !== JSON.stringify(aRows)) {
-        throw new Error(`Backup round trip differed: ${JSON.stringify(restoredRows)}`);
-      }
-      const crrCount = await restored.getFirstAsync<{ count: number }>(
-        "SELECT count(*) AS count FROM sqlite_master WHERE name GLOB 'crsql_*'",
-      );
-      return [
-        `CR-SQLite extension load: OK (${ENTRY_POINT})`,
-        `Offline exchange and convergence: OK (${aRows.length} rows on both peers)`,
-        `SQLite serialize/restore with CRR tables: OK (${crrCount?.count ?? 0} CR-SQLite schema objects)`,
-        ...aRows.map((row) => `${row.id}: ${row.body}`),
-      ];
-    } finally {
-      await restored.getFirstAsync("SELECT crsql_finalize()").catch(() => undefined);
-      await restored.closeAsync();
-    }
-  } finally {
-    await a.getFirstAsync("SELECT crsql_finalize()").catch(() => undefined);
-    await b.getFirstAsync("SELECT crsql_finalize()").catch(() => undefined);
-    await a.closeAsync();
-    await b.closeAsync();
-  }
-}
+type SyncHandle = { stop: () => boolean };
 
 export default function Index() {
-  const [lines, setLines] = useState<string[]>(["Ready. Run the native CR-SQLite spike on Android."]);
+  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+  const [lines, setLines] = useState<string[]>([
+    "1. Start the Node server and seed its offline row.",
+    "2. Write an Android row while disconnected.",
+    "3. Connect and verify both server and Android hold both rows.",
+  ]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [androidNoteId, setAndroidNoteId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const sync = useRef<SyncHandle | null>(null);
 
-  async function run() {
+  async function run(label: string, action: () => Promise<void>) {
     setRunning(true);
-    setLines(["Running..."]);
+    setLines([`${label}…`]);
     try {
-      setLines(await runSpike());
+      await action();
     } catch (error) {
       setLines([`FAILED: ${error instanceof Error ? error.message : String(error)}`]);
     } finally {
@@ -107,24 +32,95 @@ export default function Index() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>CR-SQLite Expo feasibility</Text>
-      <Text style={styles.caption}>Two independent Expo SQLite connections, bidirectional changes, then Stash-style serialize/restore.</Text>
-      <Pressable accessibilityRole="button" disabled={running} onPress={run} style={styles.button}>
-        <Text style={styles.buttonText}>{running ? "Testing…" : "Run spike"}</Text>
+      <Text style={styles.title}>CR-SQLite Android ↔ server spike</Text>
+      <Text style={styles.caption}>
+        Separate Expo Android and persistent Node peers using @vlcn.io/ws-client / ws-server.
+        Write independently while offline, then reconnect and verify both databases.
+      </Text>
+      <TextInput
+        accessibilityLabel="Server URL"
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={setServerUrl}
+        value={serverUrl}
+        style={styles.input}
+      />
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Seeding server", async () => {
+        const response = await fetch(`${serverUrl.replace(/\/$/, "")}/test/offline-write`, { method: "POST" });
+        if (!response.ok) throw new Error(`Server seed failed: HTTP ${response.status}`);
+        setLines(["Server offline row written. Android is still disconnected."]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>Write server row (offline)</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Writing Android row", async () => {
+        const note = await createAndroidNote(`android-${Date.now()}`);
+        setAndroidNoteId(note.id);
+        setNotes(await listNotes());
+        setLines([`Android row written locally: ${note.id}`, "No sync connection was opened."]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>Write Android row (offline)</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Connecting peers", async () => {
+        if (!androidNoteId) throw new Error("Write the Android offline row first.");
+        if (!sync.current) sync.current = await startSync(serverUrl);
+        const converged = await waitForConvergence(serverUrl, androidNoteId);
+        setNotes(converged);
+        setLines([
+          "PASS: independently-written rows converged on Android and server.",
+          `Android row: ${androidNoteId}`,
+          "Server row: server-offline",
+          "Disconnect/reconnect and press again to check idempotence/reconnect.",
+        ]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>{sync.current ? "Reconnect + verify" : "Connect + verify"}</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running || !sync.current} onPress={() => run("Backing up/restoring ZIP", async () => {
+        if (!androidNoteId) throw new Error("Write the Android offline row first.");
+        sync.current?.stop();
+        sync.current = null;
+        const restored = await backupRestoreZip();
+        sync.current = await startSync(serverUrl);
+        const converged = await waitForConvergence(serverUrl, androidNoteId);
+        setNotes(converged);
+        setLines([
+          "PASS: Stash-style database ZIP backup/restore retained CR-SQLite metadata.",
+          `Rows after restore: ${restored.notes.length}; CR-SQLite schema objects: ${restored.crsqlObjects}.`,
+          "PASS: restored Android database resumed WebSocket exchange without duplicate rows.",
+        ]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>Backup ZIP → restore → reconnect</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running || !sync.current} onPress={() => run("Disconnecting", async () => {
+        sync.current?.stop();
+        sync.current = null;
+        setLines(["Disconnected. Local writes remain available; reconnect to resume exchange."]);
+      })} style={[styles.button, styles.secondary]}>
+        <Text style={styles.buttonText}>Disconnect</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Reading local database", async () => {
+        const current = await listNotes();
+        setNotes(current);
+        setLines([`Local database: ${current.length} note(s).`]);
+      })} style={[styles.button, styles.secondary]}>
+        <Text style={styles.buttonText}>Refresh local rows</Text>
       </Pressable>
       <View style={styles.output}>
         {lines.map((line, index) => <Text key={`${index}-${line}`} style={styles.line}>{line}</Text>)}
+        {notes.map((note) => <Text key={note.id} style={styles.note}>{note.id}: {note.body}</Text>)}
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, padding: 24, paddingTop: 64, gap: 16, backgroundColor: "#10151d" },
+  container: { flexGrow: 1, padding: 24, paddingTop: 64, gap: 14, backgroundColor: "#10151d" },
   title: { color: "white", fontSize: 24, fontWeight: "700" },
   caption: { color: "#c1cad4", fontSize: 15, lineHeight: 22 },
+  input: { backgroundColor: "#202a35", borderColor: "#52616f", borderWidth: 1, borderRadius: 8, color: "white", padding: 12 },
   button: { backgroundColor: "#8dc4ff", padding: 14, borderRadius: 8, alignItems: "center" },
+  secondary: { backgroundColor: "#52616f" },
   buttonText: { color: "#102030", fontSize: 16, fontWeight: "700" },
   output: { gap: 8, padding: 16, borderWidth: 1, borderColor: "#52616f", borderRadius: 8 },
   line: { color: "#d4f7dc", fontFamily: "monospace" },
+  note: { color: "#c1cad4", fontFamily: "monospace", fontSize: 12 },
 });

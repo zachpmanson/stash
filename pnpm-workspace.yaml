@@ -1,3 +1,15 @@
+packages:
+  - '.'
+  - 'spikes/crsqlite-expo'
+  - 'spikes/crsqlite-expo/server'
+
+patchedDependencies:
+  '@vlcn.io/crsqlite@0.16.3': spikes/crsqlite-expo/server/patches/crsqlite-node24-json-import.patch
+  '@vlcn.io/ws-server@0.2.3': spikes/crsqlite-expo/server/patches/@vlcn.io__ws-server@0.2.3.patch
+
+overrides:
+  better-sqlite3: 12.6.2
+
 minimumReleaseAgeExclude:
   - '@expo/image-utils@0.8.16'
   - '@expo/require-utils@55.0.7'
