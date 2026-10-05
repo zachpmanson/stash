@@ -25,30 +25,36 @@ Startup creates/validates the database before opening the listener: schema name/
 
 ## Local development and tests
 
-Install workspace dependencies once from the Stash repo root (the upstream CR-SQLite Node installer needs `unzip`):
+Install workspace dependencies from this server directory using its own flake (the devshell includes `unzip`):
 
 ```sh
-cd ~/projects/stash
-nix shell nixpkgs#unzip --command nix develop . --command pnpm install --frozen-lockfile
+cd ~/projects/stash/spikes/crsqlite-expo/server
+nix develop --command pnpm install --frozen-lockfile
+```
+
+Build the isolated x86_64 Linux service package used by Naboo:
+
+```sh
+nix build .#packages.x86_64-linux.crsqlite-sync
 ```
 
 Run static checking and the auth/restart/backup test:
 
 ```sh
-nix develop . --command pnpm --dir spikes/crsqlite-expo/server typecheck
-nix develop . --command pnpm --dir spikes/crsqlite-expo/server test
+nix develop --command pnpm typecheck
+nix develop --command pnpm test
 ```
 
-For a local server, use the spike's documented Android flow in `../README.md`; the normal test endpoints remain disabled unless explicitly opted in. Do not use the test endpoints as a product API.
+For the end-to-end Android flow, see [`../app/README.md`](../app/README.md). The normal test endpoints remain disabled unless explicitly opted in; do not use them as a product API.
 
 ## Backup, restore, and reset
 
 **Stop the service before backup, restore, or reset.** The helper uses SQLite's online backup API and checks SQLite integrity, CR-SQLite schema identity/version, and CRR metadata in both the produced backup and restore source:
 
 ```sh
-cd ~/projects/stash
-nix develop . --command pnpm --dir spikes/crsqlite-expo/server db backup /safe/path/stash-sync.sqlite
-nix develop . --command pnpm --dir spikes/crsqlite-expo/server db restore /safe/path/stash-sync.sqlite
+cd ~/projects/stash/spikes/crsqlite-expo/server
+nix develop --command pnpm db backup /safe/path/stash-sync.sqlite
+nix develop --command pnpm db restore /safe/path/stash-sync.sqlite
 ```
 
 Restore first makes a timestamped rollback backup of the current database, validates the selected backup, then atomically replaces the live database and removes stale WAL/SHM sidecars. Keep the rollback file until the service has restarted and health/data checks pass. To reset only the disposable peer, stop the service and remove `spikes/crsqlite-expo/server/data/`; the next startup creates an empty database from the candidate schema. Never point this service at Stash's production database.
