@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@vlcn.io/ws-client@0.2.0': fcd322f85d7114a56cb324a8b537d63ce514c256714fc9c00b07c5d25df497cf
+
 importers:
 
   .:
     dependencies:
       '@vlcn.io/ws-client':
         specifier: 0.2.0
-        version: 0.2.0
+        version: 0.2.0(patch_hash=fcd322f85d7114a56cb324a8b537d63ce514c256714fc9c00b07c5d25df497cf)
       '@vlcn.io/ws-common':
         specifier: 0.2.0
         version: 0.2.0
@@ -36,6 +39,9 @@ importers:
         specifier: ^9.4.0
         version: 9.5.2(react-native@0.83.4(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.0)(supports-color@8.1.1))(react@19.2.0)
     devDependencies:
+      '@expo/config-plugins':
+        specifier: ~55.0.11
+        version: 55.0.11(supports-color@8.1.1)
       '@types/react':
         specifier: ~19.2.14
         version: 19.2.18
@@ -3724,7 +3730,7 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@vlcn.io/ws-client@0.2.0':
+  '@vlcn.io/ws-client@0.2.0(patch_hash=fcd322f85d7114a56cb324a8b537d63ce514c256714fc9c00b07c5d25df497cf)':
     dependencies:
       '@types/throttle-debounce': 5.0.2
       '@vlcn.io/ws-common': 0.2.0

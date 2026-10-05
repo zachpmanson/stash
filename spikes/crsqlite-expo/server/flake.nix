@@ -12,6 +12,13 @@
         url = "https://github.com/vlcn-io/cr-sqlite/releases/download/v0.16.3/crsqlite-linux-x86_64.zip";
         hash = "sha256-j2/TGiviuowxAarQZ6UEouY8jptRzErOeGAJwC5+y64=";
       };
+      # Node 24.19+ headers trigger an ObjectWrap cleanup-hook abort in
+      # better-sqlite3 during GC. 24.18.1 headers share the 24.x ABI and are
+      # a verified build-time workaround until the Node 24 backport lands.
+      nodeHeaders24_18 = linux.fetchzip {
+        url = "https://nodejs.org/dist/v24.18.1/node-v24.18.1-headers.tar.gz";
+        hash = "sha256-1eRD0cO82bG4NDYyr5EhNjwGkl4qhcUF8xrfEytTlOQ=";
+      };
       pnpmDeps = linux.fetchPnpmDeps {
         pname = "stash-crsqlite-sync";
         version = "0.1.0";
@@ -34,7 +41,9 @@
           unzip -o ${crsqliteLinuxBinary} -d "$crsqlite_pkg/dist"
           pnpm rebuild @vlcn.io/crsqlite
           better_sqlite3=$(readlink -f node_modules/better-sqlite3)
-          (cd "$better_sqlite3" && node-gyp rebuild --release --nodedir=${linux.nodejs_24})
+          # Bypass the Nix node-gyp wrapper, which forces npm_config_nodedir to the runtime headers.
+          (cd "$better_sqlite3" && node ${linux.node-gyp}/lib/node_modules/node-gyp/bin/node-gyp.js rebuild --release --nodedir=${nodeHeaders24_18})
+          node --test test/better-sqlite3-gc.test.mjs
           pnpm exec tsc --outDir dist
           runHook postBuild
         '';

@@ -6,7 +6,15 @@ import type { Change } from "@vlcn.io/ws-common";
 import { DATABASE_ROOM, SCHEMA_NAME, SCHEMA_SQL, SCHEMA_VERSION } from "./schema";
 
 const DATABASE_NAME = "crsqlite-network-test.db";
+const OBSERVER_DATABASE_NAME = "crsqlite-network-observer.db";
 const EXTENSION_ENTRY_POINT = "sqlite3_crsqlite_init";
+
+type RemoteCredentials = { username: string; password: string };
+type ReactNativeWebSocket = new (
+  url: string,
+  protocols: string[],
+  options: { headers: Record<string, string> },
+) => WebSocket;
 const CHANGE_COLUMNS = '"table", "pk", "cid", "val", "col_version", "db_version", NULL, "cl", "seq"';
 const INSERT_CHANGE = `INSERT INTO crsql_changes ("table", "pk", "cid", "val", "col_version", "db_version", "site_id", "cl", "seq") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 const TRACK_PEER = `INSERT INTO crsql_tracked_peers (site_id, event, version, seq, tag)
@@ -117,11 +125,10 @@ class ExpoReplica implements DB {
 }
 
 let database: SQLite.SQLiteDatabase | null = null;
+let observerDatabase: SQLite.SQLiteDatabase | null = null;
 
-export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (database) return database;
-
-  const db = await SQLite.openDatabaseAsync(DATABASE_NAME, {
+async function openReplicaDatabase(name: string): Promise<SQLite.SQLiteDatabase> {
+  const db = await SQLite.openDatabaseAsync(name, {
     useNewConnection: true,
     enableChangeListener: true,
   });
@@ -143,16 +150,31 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   await db.execAsync(
     `INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_version', ${SCHEMA_VERSION})`,
   );
-
-  database = db;
   return db;
 }
 
-export async function createAndroidNote(id: string): Promise<Note> {
-  const db = await getDatabase();
-  const note = { id, body: `offline write from Android (${id})` };
+export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  database ??= await openReplicaDatabase(DATABASE_NAME);
+  return database;
+}
+
+async function getObserverDatabase(): Promise<SQLite.SQLiteDatabase> {
+  observerDatabase ??= await openReplicaDatabase(OBSERVER_DATABASE_NAME);
+  return observerDatabase;
+}
+
+async function createNote(db: SQLite.SQLiteDatabase, peer: string, id: string): Promise<Note> {
+  const note = { id, body: `offline write from ${peer} (${id})` };
   await db.runAsync("INSERT OR REPLACE INTO notes (id, body) VALUES (?, ?)", note.id, note.body);
   return note;
+}
+
+export async function createAndroidNote(id: string): Promise<Note> {
+  return createNote(await getDatabase(), "Android", id);
+}
+
+export async function createObserverNote(id: string): Promise<Note> {
+  return createNote(await getObserverDatabase(), "observer peer", id);
 }
 
 export async function listNotes(): Promise<Note[]> {
@@ -160,26 +182,58 @@ export async function listNotes(): Promise<Note[]> {
   return db.getAllAsync<Note>("SELECT id, body FROM notes ORDER BY id");
 }
 
-export async function probeWebSocket(serverUrl: string): Promise<void> {
-  const url = `${serverUrl.replace(/^http/, "ws")}/sync`;
+function normalizedServerUrl(serverUrl: string): URL {
+  const url = new URL(serverUrl.trim());
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Server URL must start with https://");
+  }
+  if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) {
+    throw new Error("Basic-auth credentials require HTTPS");
+  }
+  return url;
+}
+
+function basicAuthorization(credentials: RemoteCredentials): string {
+  const username = credentials.username.trim();
+  if (!username || !credentials.password) throw new Error("Enter the Caddy username and password.");
+  return `Basic ${btoa(`${username}:${credentials.password}`)}`;
+}
+
+function websocketUrl(serverUrl: URL, path: string): string {
+  const protocol = serverUrl.protocol === "https:" ? "wss:" : "ws:";
+  return new URL(path, serverUrl).toString().replace(/^https?:/, protocol);
+}
+
+export async function probeWebSocket(serverUrl: string, credentials: RemoteCredentials): Promise<void> {
+  const base = normalizedServerUrl(serverUrl);
+  const authorization = basicAuthorization(credentials);
+  const health = await fetch(new URL("/healthz", base), {
+    headers: { Authorization: authorization },
+  });
+  if (!health.ok) throw new Error(`Authenticated health check returned HTTP ${health.status}`);
+
+  const url = websocketUrl(base, "/sync");
   const protocol = btoa(`room=${DATABASE_ROOM}`).replaceAll("=", "");
+  const Socket = WebSocket as unknown as ReactNativeWebSocket;
   await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(url, [protocol]);
+    const socket = new Socket(url, [protocol], { headers: { Authorization: authorization } });
+    let opened = false;
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error(`WebSocket probe timed out: ${url}`));
-    }, 5_000);
+    }, 8_000);
     socket.onopen = () => {
+      opened = true;
       clearTimeout(timeout);
       socket.close();
       resolve();
     };
     socket.onerror = () => {
       clearTimeout(timeout);
-      reject(new Error(`WebSocket probe failed: ${url}`));
+      reject(new Error(`Authenticated WebSocket probe failed: ${url}`));
     };
     socket.onclose = (event) => {
-      if (event.code !== 1000) {
+      if (!opened) {
         clearTimeout(timeout);
         reject(new Error(`WebSocket probe closed before opening (code ${event.code})`));
       }
@@ -187,23 +241,47 @@ export async function probeWebSocket(serverUrl: string): Promise<void> {
   });
 }
 
-export async function startSync(serverUrl: string): Promise<{ stop: () => boolean }> {
-  const db = await getDatabase();
-  await probeWebSocket(serverUrl);
-  const config: Config = {
-    dbProvider: async () => {
-      const site = await db.getFirstAsync<{ site_id: Uint8Array }>("SELECT crsql_site_id() AS site_id");
-      if (!site) throw new Error("CR-SQLite returned no local site id");
-      return new ExpoReplica(db, site.site_id);
+export async function startSync(
+  serverUrl: string,
+  credentials: RemoteCredentials,
+): Promise<{ stop: () => boolean }> {
+  const primary = await getDatabase();
+  const observer = await getObserverDatabase();
+  const base = normalizedServerUrl(serverUrl);
+  const authorization = basicAuthorization(credentials);
+  await probeWebSocket(serverUrl, credentials);
+
+  function configFor(db: SQLite.SQLiteDatabase): Config {
+    return {
+      dbProvider: async () => {
+        const site = await db.getFirstAsync<{ site_id: Uint8Array }>("SELECT crsql_site_id() AS site_id");
+        if (!site) throw new Error("CR-SQLite returned no local site id");
+        return new ExpoReplica(db, site.site_id);
+      },
+      transportProvider: (options) => defaultConfig.transportProvider({
+        ...options,
+        headers: { Authorization: authorization },
+      }),
+    };
+  }
+
+  const options = { url: websocketUrl(base, "/sync"), room: DATABASE_ROOM };
+  const primarySync = await createSyncedDB(configFor(primary), DATABASE_ROOM, options);
+  const observerSync = await createSyncedDB(configFor(observer), DATABASE_ROOM, options);
+  await primarySync.start();
+  try {
+    await observerSync.start();
+  } catch (error) {
+    primarySync.stop();
+    throw error;
+  }
+  return {
+    stop: () => {
+      const observerStopped = observerSync.stop();
+      const primaryStopped = primarySync.stop();
+      return observerStopped && primaryStopped;
     },
-    transportProvider: defaultConfig.transportProvider,
   };
-  const sync = await createSyncedDB(config, DATABASE_ROOM, {
-    url: `${serverUrl.replace(/^http/, "ws")}/sync`,
-    room: DATABASE_ROOM,
-  });
-  await sync.start();
-  return { stop: () => sync.stop() };
 }
 
 export async function backupRestoreZip(): Promise<{ notes: Note[]; crsqlObjects: number }> {
@@ -276,34 +354,31 @@ export async function backupRestoreZip(): Promise<{ notes: Note[]; crsqlObjects:
 }
 
 export async function waitForConvergence(
-  serverUrl: string,
   androidNoteId: string,
+  observerNoteId: string,
   timeoutMs = 30_000,
 ): Promise<Note[]> {
   const deadline = Date.now() + timeoutMs;
-  const baseUrl = serverUrl.replace(/^ws/, "http");
+  const required = new Set([androidNoteId, observerNoteId]);
   let lastError = "not converged yet";
 
   while (Date.now() < deadline) {
     try {
-      const [localNotes, response] = await Promise.all([
+      const [primaryNotes, observerNotes] = await Promise.all([
         listNotes(),
-        fetch(`${baseUrl}/test/notes`),
+        getObserverDatabase().then((db) => db.getAllAsync<Note>("SELECT id, body FROM notes ORDER BY id")),
       ]);
-      if (!response.ok) throw new Error(`Server state endpoint returned ${response.status}`);
-      const serverNotes = (await response.json()) as Note[];
-      const required = new Set([androidNoteId, "server-offline"]);
-      const localIds = new Set(localNotes.map((note) => note.id));
-      const serverIds = new Set(serverNotes.map((note) => note.id));
-      if ([...required].every((id) => localIds.has(id) && serverIds.has(id))) {
-        return localNotes;
+      const primaryIds = new Set(primaryNotes.map((note) => note.id));
+      const observerIds = new Set(observerNotes.map((note) => note.id));
+      if ([...required].every((id) => primaryIds.has(id) && observerIds.has(id))) {
+        return primaryNotes;
       }
-      lastError = `local=${[...localIds].join(",")} server=${[...serverIds].join(",")}`;
+      lastError = `Android=${[...primaryIds].join(",")} observer=${[...observerIds].join(",")}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  throw new Error(`Timed out waiting for Android/server convergence: ${lastError}`);
+  throw new Error(`Timed out waiting for the two authenticated sync clients to converge: ${lastError}`);
 }
