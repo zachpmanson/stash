@@ -5,11 +5,11 @@ This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server`
 ## Trust boundary
 
 - The listener is fixed to `127.0.0.1`; there is no bind-address override or firewall listener. Naboo Caddy is the only ingress.
-- Caddy requires its existing Basic-auth identity and stamps `X-Auth-User` from the authenticated username, after removing any client-supplied value. The WebSocket upgrade callback accepts only the configured `AUTH_USER` (default `zach`). The same Caddy route covers HTTP and WebSocket requests.
+- Caddy requires its existing Basic-auth identity and overwrites `X-Auth-User` with the configured single-tenant `zach` identity; no client-supplied value is trusted. The WebSocket upgrade callback accepts only the configured `AUTH_USER` (default `zach`). The same Caddy route covers HTTP and WebSocket requests.
 - The service cannot authenticate a direct-origin client that can reach loopback and forge the header. That is why it must remain loopback-only, with Caddy proxying to it on the same host. Never change the bind address or expose this port directly.
 - `ENABLE_TEST_ENDPOINTS=1` exposes disposable offline-write/inspection HTTP hooks. It is disabled by default and must not be set in deployment.
 
-The automated lifecycle test sends a valid WebSocket upgrade without `X-Auth-User` (rejected with HTTP 401), repeats with the stamped identity (accepted), and exercises an active connection during shutdown. It also backs up/restores a CR-SQLite database and verifies persistence after restart.
+Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing through the upstream upgrade handler. The automated lifecycle test verifies that malformed requests do not take down the service, rejects a valid upgrade without `X-Auth-User` (HTTP 401), accepts one with the stamped identity, and exercises an active connection during shutdown. It also backs up/restores a CR-SQLite database and verifies persistence after restart.
 
 ## Runtime configuration
 
@@ -55,7 +55,7 @@ Restore first makes a timestamped rollback backup of the current database, valid
 
 ## Active-client shutdown
 
-The upstream `@vlcn.io/ws-server@0.2.3` installs a SIGINT handler that destroys its DB cache before active WebSocket peers release references. Its outbound stream also leaves retry timers running on close, and its filesystem watcher shutdown did not expose/await the underlying close. A narrow local patch cancels those timers and returns the watcher-close promise. This service removes only the upstream SIGINT listener and uses ordered SIGINT/SIGTERM shutdown: stop accepting connections, destroy active sockets, wait for connection handlers, then destroy the database cache and await the filesystem watcher. The upstream watcher/debounce stack still leaves timer handles after close, so after all data-bearing resources are drained the service flushes its logs and exits explicitly. The automated test sends a real `AnnouncePresence` over an authenticated WebSocket (holding the server DB cache reference), stops under SIGTERM, and verifies persistence/backup/restore/restart.
+The upstream `@vlcn.io/ws-server@0.2.3` installs a SIGINT handler that destroys its DB cache before active WebSocket peers release references. Its upgrade handler also throws on malformed/missing `Sec-WebSocket-Protocol` headers; the local patch turns those into HTTP 400 responses. Its outbound stream also leaves retry timers running on close, and its filesystem watcher shutdown did not expose/await the underlying close. A narrow local patch cancels those timers and returns the watcher-close promise. This service removes only the upstream SIGINT listener and uses ordered SIGINT/SIGTERM shutdown: stop accepting connections, destroy active sockets, wait for connection handlers, then destroy the database cache and await the filesystem watcher. The upstream watcher/debounce stack still leaves timer handles after close, so after all data-bearing resources are drained the service flushes its logs and exits explicitly. The automated test sends a real `AnnouncePresence` over an authenticated WebSocket (holding the server DB cache reference), stops under SIGTERM, and verifies persistence/backup/restore/restart.
 
 ## Dependency/runtime notes
 
