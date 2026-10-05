@@ -1,20 +1,23 @@
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { backupRestoreZip, createAndroidNote, listNotes, startSync, waitForConvergence, type Note } from "./networkSync";
+import { backupRestoreZip, createAndroidNote, createObserverNote, listNotes, startSync, waitForConvergence, type Note } from "./networkSync";
 
-const DEFAULT_SERVER_URL = "http://127.0.0.1:8787";
+const DEFAULT_SERVER_URL = "https://stash.zachmanson.com";
 
 type SyncHandle = { stop: () => boolean };
 
 export default function Index() {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [lines, setLines] = useState<string[]>([
-    "1. Start the Node server and seed its offline row.",
-    "2. Write an Android row while disconnected.",
-    "3. Connect and verify both server and Android hold both rows.",
+    "1. Enter your Caddy Basic-auth credentials (kept in memory only).",
+    "2. Write independent rows to both local replicas while disconnected.",
+    "3. Connect both clients to Naboo and verify remote convergence.",
   ]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [username, setUsername] = useState("zach");
+  const [password, setPassword] = useState("");
   const [androidNoteId, setAndroidNoteId] = useState<string | null>(null);
+  const [observerNoteId, setObserverNoteId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const sync = useRef<SyncHandle | null>(null);
 
@@ -34,8 +37,8 @@ export default function Index() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>CR-SQLite Android ↔ server spike</Text>
       <Text style={styles.caption}>
-        Separate Expo Android and persistent Node peers using @vlcn.io/ws-client / ws-server.
-        Write independently while offline, then reconnect and verify both databases.
+        Two independent CR-SQLite clients sync through the authenticated Naboo server. The password is
+        kept in memory only and sent over HTTPS; no server test endpoints are enabled.
       </Text>
       <TextInput
         accessibilityLabel="Server URL"
@@ -43,49 +46,70 @@ export default function Index() {
         autoCorrect={false}
         onChangeText={setServerUrl}
         value={serverUrl}
+        placeholder="HTTPS server URL"
         style={styles.input}
       />
-      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Seeding server", async () => {
-        const response = await fetch(`${serverUrl.replace(/\/$/, "")}/test/offline-write`, { method: "POST" });
-        if (!response.ok) throw new Error(`Server seed failed: HTTP ${response.status}`);
-        setLines(["Server offline row written. Android is still disconnected."]);
-      })} style={styles.button}>
-        <Text style={styles.buttonText}>Write server row (offline)</Text>
-      </Pressable>
+      <TextInput
+        accessibilityLabel="Caddy username"
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={setUsername}
+        value={username}
+        placeholder="Caddy username"
+        style={styles.input}
+      />
+      <TextInput
+        accessibilityLabel="Caddy password"
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={setPassword}
+        value={password}
+        placeholder="Caddy password (not saved)"
+        secureTextEntry
+        style={styles.input}
+      />
       <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Writing Android row", async () => {
         const note = await createAndroidNote(`android-${Date.now()}`);
         setAndroidNoteId(note.id);
         setNotes(await listNotes());
-        setLines([`Android row written locally: ${note.id}`, "No sync connection was opened."]);
+        setLines([`Android peer wrote ${note.id} while disconnected.`, "Write the observer peer row next."]);
       })} style={styles.button}>
-        <Text style={styles.buttonText}>Write Android row (offline)</Text>
+        <Text style={styles.buttonText}>Write Android peer row (offline)</Text>
       </Pressable>
-      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Connecting peers", async () => {
-        if (!androidNoteId) throw new Error("Write the Android offline row first.");
-        if (!sync.current) sync.current = await startSync(serverUrl);
-        const converged = await waitForConvergence(serverUrl, androidNoteId);
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Writing observer row", async () => {
+        const note = await createObserverNote(`observer-${Date.now()}`);
+        setObserverNoteId(note.id);
+        setLines([`Observer peer wrote ${note.id} while disconnected.`, "Connect both peers to Naboo to verify exchange."]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>Write observer peer row (offline)</Text>
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Connecting authenticated peers", async () => {
+        if (!androidNoteId || !observerNoteId) throw new Error("Write one offline row from each peer first.");
+        sync.current?.stop();
+        sync.current = await startSync(serverUrl, { username, password });
+        const converged = await waitForConvergence(androidNoteId, observerNoteId);
         setNotes(converged);
         setLines([
-          "PASS: independently-written rows converged on Android and server.",
+          "PASS: authenticated Android peers exchanged their offline rows through Naboo.",
           `Android row: ${androidNoteId}`,
-          "Server row: server-offline",
+          `Observer row: ${observerNoteId}`,
           "Disconnect/reconnect and press again to check idempotence/reconnect.",
         ]);
       })} style={styles.button}>
         <Text style={styles.buttonText}>{sync.current ? "Reconnect + verify" : "Connect + verify"}</Text>
       </Pressable>
       <Pressable accessibilityRole="button" disabled={running || !sync.current} onPress={() => run("Backing up/restoring ZIP", async () => {
-        if (!androidNoteId) throw new Error("Write the Android offline row first.");
+        if (!androidNoteId || !observerNoteId) throw new Error("Write one offline row from each peer first.");
         sync.current?.stop();
         sync.current = null;
         const restored = await backupRestoreZip();
-        sync.current = await startSync(serverUrl);
-        const converged = await waitForConvergence(serverUrl, androidNoteId);
+        sync.current = await startSync(serverUrl, { username, password });
+        const converged = await waitForConvergence(androidNoteId, observerNoteId);
         setNotes(converged);
         setLines([
-          "PASS: Stash-style database ZIP backup/restore retained CR-SQLite metadata.",
+          "PASS: Stash-style backup/restore retained CR-SQLite metadata.",
           `Rows after restore: ${restored.notes.length}; CR-SQLite schema objects: ${restored.crsqlObjects}.`,
-          "PASS: restored Android database resumed WebSocket exchange without duplicate rows.",
+          "PASS: restored Android peer resumed authenticated exchange with its observer.",
         ]);
       })} style={styles.button}>
         <Text style={styles.buttonText}>Backup ZIP → restore → reconnect</Text>

@@ -46,26 +46,13 @@ NODE_ENV=production /home/beltino/beltino/scripts/build-capped.sh \
 
 `prepare-android-crsqlite.sh` fetches the pinned upstream arm64 release library. The x86_64 builder compiles CR-SQLite v0.16.3 from its SHA-256-pinned npm source using its upstream Makefile, Android NDK, Rust nightly, and Nix-provided tools. No compiled binaries are committed. The Expo config plugin packages each prepared ABI under its matching `jniLibs` directory.
 
-## Run against the server
+## Test against Naboo
 
-Start the service in another terminal:
+The app defaults to `https://stash.zachmanson.com`. The server is behind Caddy Basic auth; enter the configured username/password in the app. Credentials are kept in memory only, sent over HTTPS for both health and WebSocket handshakes, and are never bundled or persisted. The app rejects non-local HTTP URLs when credentials are present.
 
-```sh
-cd ~/projects/stash/spikes/crsqlite-expo/server
-nix develop --command pnpm start
-```
+Install the debug APK, then open **CR-SQLite Android ↔ server spike**. Write one offline row for each of the two independent local replicas, then tap **Connect + verify**. Both peers connect to Naboo with Basic auth; the app reports success only after the two rows converge on both local databases through the remote sync service. Disconnect/reconnect and use **Backup ZIP → restore → reconnect** to check backup/restore and continued exchange.
 
-Forward the loopback port to the Android emulator and install the APK:
-
-```sh
-cd ~/projects/stash/spikes/crsqlite-expo/app
-nix develop --command adb reverse tcp:8787 tcp:8787
-nix develop --command adb install -r android/app/build/outputs/apk/release/app-release.apk
-```
-
-Open **CR-SQLite Android ↔ server spike**. Tap **Write server row (offline)**, then **Write Android row (offline)**, then **Connect + verify**. The screen reports convergence only when both peers contain both rows. Disconnect/reconnect, and use **Backup ZIP → restore → reconnect** to check backup/restore and continued exchange.
-
-The app's candidate schema in `schema.ts` must remain identical to `../server/schema.ts`. The server's `/healthz` and opt-in test hooks are not a product API.
+This test needs no server test endpoints: the second local replica is the observer. Naboo remains candidate-schema-only; its `/test/*` routes stay disabled. Use HTTPS for the public host. The app's candidate schema in `schema.ts` must remain identical to `../server/schema.ts`.
 
 ## Host/server SQLite check
 
