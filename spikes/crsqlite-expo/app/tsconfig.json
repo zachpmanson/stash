@@ -7,6 +7,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts"],
-  "exclude": ["spikes/crsqlite-expo/**"]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts"]
 }

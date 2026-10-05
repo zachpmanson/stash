@@ -1,0 +1,6 @@
+diff --git a/nodejs-install-helper.js b/nodejs-install-helper.js
+--- a/nodejs-install-helper.js
++++ b/nodejs-install-helper.js
+@@ -6 +6 @@
+-import pkg from "./package.json" assert { type: "json" };
++import pkg from "./package.json" with { type: "json" };

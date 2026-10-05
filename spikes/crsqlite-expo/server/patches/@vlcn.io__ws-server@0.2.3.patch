@@ -1,0 +1,160 @@
+diff --git a/dist/fs/FSNotify.js b/dist/fs/FSNotify.js
+index 412ebd4231dc44e1b11487d801e96c0322de9039..9d3ad6fca92c518f585af118c330bb794ded23b8 100644
+--- a/dist/fs/FSNotify.js
++++ b/dist/fs/FSNotify.js
+@@ -86,7 +86,8 @@ export default class FSNotify {
+         return this.listeners;
+     }
+     shutdown() {
+-        this.watcher.close();
++        this.fileChanged.cancel();
++        return this.watcher.close();
+     }
+ }
+ //# sourceMappingURL=FSNotify.js.map
+\ No newline at end of file
+diff --git a/dist/fs/collapser.js b/dist/fs/collapser.js
+index f0b097aad66b3db2269f2fd7ba32578f3b3f9ff6..fac9036a9abaa8f88ef9204ededdf81ebc2c4939 100644
+--- a/dist/fs/collapser.js
++++ b/dist/fs/collapser.js
+@@ -11,9 +11,9 @@ export function collect(ms, fn) {
+         noLeading: true,
+         noTrailing: false,
+     });
+-    return (a) => {
++    return Object.assign((a) => {
+         args.push(a);
+         throttled();
+-    };
++    }, { cancel: () => throttled.cancel() });
+ }
+ //# sourceMappingURL=collapser.js.map
+\ No newline at end of file
+diff --git a/dist/streams/OutboundStream.js b/dist/streams/OutboundStream.js
+index 7a89d0f0430478146afed6a157ba34762636f370..2477f31fab78682793008f85bca7cfff29c25246 100644
+--- a/dist/streams/OutboundStream.js
++++ b/dist/streams/OutboundStream.js
+@@ -39,6 +39,8 @@ export default class OutboundStream {
+     // db change notifications are already throttled for us in `DB.ts`
+     // but we also apply some backpressure if the outbound buffer is full.
+     #dbChanged = () => {
++        if (this.#closed)
++            return;
+         logger.info(`OutboundStream got a db change event`);
+         if (this.#timeoutHandle != null) {
+             clearTimeout(this.#timeoutHandle);
+@@ -78,6 +80,10 @@ export default class OutboundStream {
+         if (this.#disposer) {
+             this.#disposer();
+         }
++        if (this.#timeoutHandle !== null) {
++            clearTimeout(this.#timeoutHandle);
++            this.#timeoutHandle = null;
++        }
+         this.#closed = true;
+     }
+ }
+diff --git a/src/fs/FSNotify.ts b/src/fs/FSNotify.ts
+index 7246dc89529c52665479daf6df1757d36d1e5fff..fcb561aa273debe56e321cda2c2ba90e8ccb94d5 100644
+--- a/src/fs/FSNotify.ts
++++ b/src/fs/FSNotify.ts
+@@ -99,6 +99,7 @@ export default class FSNotify {
+   }
+ 
+   shutdown() {
+-    this.watcher.close();
++    this.fileChanged.cancel();
++    return this.watcher.close();
+   }
+ }
+diff --git a/src/fs/collapser.ts b/src/fs/collapser.ts
+index 2bec857612ca0c163e5da5c1b6dd7048df4ecb69..8c08953446e20b6848adb96c7ffa43529794de91 100644
+--- a/src/fs/collapser.ts
++++ b/src/fs/collapser.ts
+@@ -1,7 +1,9 @@
+ // Collapses repeated invocations to a method over some time, gathering all provided args into a single invocation.
+ import { throttle } from "throttle-debounce";
+ 
+-export function collect<T>(ms: number, fn: (a: T[]) => void): (a: T) => void {
++export type Collector<T> = ((a: T) => void) & { cancel: () => void };
++
++export function collect<T>(ms: number, fn: (a: T[]) => void): Collector<T> {
+   let args: T[] = [];
+   const throttled = throttle(
+     ms,
+@@ -16,8 +18,11 @@ export function collect<T>(ms: number, fn: (a: T[]) => void): (a: T) => void {
+       noTrailing: false,
+     }
+   );
+-  return (a: T) => {
+-    args.push(a);
+-    throttled();
+-  };
++  return Object.assign(
++    (a: T) => {
++      args.push(a);
++      throttled();
++    },
++    { cancel: () => throttled.cancel() },
++  );
+ }
+diff --git a/src/streams/OutboundStream.ts b/src/streams/OutboundStream.ts
+index 2ea98aa12a6e33b64024baa8890bd07368439a9a..27ea89b93effa5cab6a858423fb1966f4b218d8a 100644
+--- a/src/streams/OutboundStream.ts
++++ b/src/streams/OutboundStream.ts
+@@ -64,6 +64,7 @@ export default class OutboundStream {
+   // db change notifications are already throttled for us in `DB.ts`
+   // but we also apply some backpressure if the outbound buffer is full.
+   #dbChanged = () => {
++    if (this.#closed) return;
+     logger.info(`OutboundStream got a db change event`);
+     if (this.#timeoutHandle != null) {
+       clearTimeout(this.#timeoutHandle);
+@@ -111,6 +112,10 @@ export default class OutboundStream {
+     if (this.#disposer) {
+       this.#disposer();
+     }
++    if (this.#timeoutHandle != null) {
++      clearTimeout(this.#timeoutHandle);
++      this.#timeoutHandle = null;
++    }
+     this.#closed = true;
+   }
+ }
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -35 +35,14 @@
+-        const options = pullSecHeaders(request);
++        let options;
++        try {
++            options = pullSecHeaders(request);
++        }
++        catch {
++            socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
++            socket.destroy();
++            return;
++        }
++        if (!options.room) {
++            socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
++            socket.destroy();
++            return;
++        }
+diff --git a/src/index.ts b/src/index.ts
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -61 +61,13 @@
+-    const options = pullSecHeaders(request);
++    let options;
++    try {
++      options = pullSecHeaders(request);
++    } catch {
++      socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
++      socket.destroy();
++      return;
++    }
++    if (!options.room) {
++      socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
++      socket.destroy();
++      return;
++    }

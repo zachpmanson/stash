@@ -1,0 +1,9 @@
+packages:
+  - '.'
+
+patchedDependencies:
+  '@vlcn.io/crsqlite@0.16.3': patches/crsqlite-node24-json-import.patch
+  '@vlcn.io/ws-server@0.2.3': patches/@vlcn.io__ws-server@0.2.3.patch
+
+overrides:
+  better-sqlite3: 12.6.2

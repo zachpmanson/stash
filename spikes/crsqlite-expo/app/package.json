@@ -1,0 +1,25 @@
+{
+  "name": "stash-crsqlite-expo-app-spike",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vlcn.io/ws-client": "0.2.0",
+    "@vlcn.io/ws-common": "0.2.0",
+    "expo": "~55.0.18",
+    "expo-file-system": "~55.0.17",
+    "expo-modules-core": "~55.0.26",
+    "expo-sqlite": "~55.0.15",
+    "react": "19.2.0",
+    "react-native": "0.83.4",
+    "react-native-zip-archive": "^9.4.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.14",
+    "typescript": "~5.7.3"
+  }
+}
