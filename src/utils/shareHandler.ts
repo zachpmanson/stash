@@ -7,6 +7,7 @@ import { copyFileToStash, getExtension, isImageMime, isVideoMime } from "./fileU
 import { readExifGps, GpsPoint } from "./exif";
 import { fetchLinkPreview } from "./linkPreview";
 import { fetchArticle } from "./readability";
+import { randomId } from "./randomId";
 
 export function detectItemType(payload: ResolvedSharePayload): ItemType {
   if (payload.shareType === "url") return "url";
@@ -27,7 +28,7 @@ type CoreInput = {
 };
 
 async function saveCore({ type, source, mimeType, captureLocation }: CoreInput, folderIds: string[]): Promise<StashItem> {
-  const id = String(Date.now());
+  const id = randomId();
   const now = Date.now();
 
   let uri = source;
