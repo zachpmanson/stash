@@ -1,6 +1,7 @@
-import { getDb } from "./database";
+import { getDb, withAppDbTransaction, withAppDbWriteLock } from "./database";
 import { Folder, FolderLayout } from "../types";
 import { countGraphemes } from "unicode-segmenter/grapheme";
+import { mirrorLocalFolder } from "./syncReplica";
 
 export async function getFolders(includeArchived = false): Promise<Folder[]> {
   const db = await getDb();
@@ -80,10 +81,13 @@ export async function createFolder(id: string, name: string, icon?: string, layo
   const now = Date.now();
   const resolvedIcon = icon ?? defaultIcon(name);
   const resolvedLayout = layout ?? "grid";
-  await db.runAsync(
-    "INSERT INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",
-    [id, name.trim(), resolvedIcon, now, now, resolvedLayout],
-  );
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync(
+      "INSERT INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",
+      [id, name.trim(), resolvedIcon, now, now, resolvedLayout],
+    );
+    await mirrorLocalFolder(db, id);
+  });
   return {
     id,
     name: name.trim(),
@@ -97,39 +101,60 @@ export async function createFolder(id: string, name: string, icon?: string, layo
 
 export async function updateFolderName(id: string, name: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET name = ? WHERE id = ?", [name.trim(), id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE folders SET name = ? WHERE id = ?", [name.trim(), id]);
+    await mirrorLocalFolder(db, id);
+  });
 }
 
 export async function updateFolderIcon(id: string, icon: string): Promise<void> {
   console.log({ len: countGraphemes(icon), icon });
   if (countGraphemes(icon) !== 1) throw new Error("Icon must be single emoji");
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon, id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE folders SET icon = ? WHERE id = ?", [icon, id]);
+    await mirrorLocalFolder(db, id);
+  });
 }
 
 export async function updateFolderLayout(id: string, layout: FolderLayout): Promise<void> {
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET layout = ? WHERE id = ?", [layout, id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE folders SET layout = ? WHERE id = ?", [layout, id]);
+    await mirrorLocalFolder(db, id);
+  });
 }
 
 export async function touchFolder(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET last_used_at = ? WHERE id = ?", [Date.now(), id]);
+  await withAppDbWriteLock(async () => {
+    await db.runAsync("UPDATE folders SET last_used_at = ? WHERE id = ?", [Date.now(), id]);
+  });
 }
 
 export async function archiveFolder(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET archived_at = ? WHERE id = ?", [Date.now(), id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE folders SET archived_at = ? WHERE id = ?", [Date.now(), id]);
+    await mirrorLocalFolder(db, id);
+  });
 }
 
 export async function unarchiveFolder(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync("UPDATE folders SET archived_at = NULL WHERE id = ?", [id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE folders SET archived_at = NULL WHERE id = ?", [id]);
+    await mirrorLocalFolder(db, id);
+  });
 }
 
 export async function deleteFolder(id: string): Promise<void> {
   const db = await getDb();
-  // Remove item_folder links; items themselves are preserved (orphaned items still exist)
-  await db.runAsync("DELETE FROM item_folders WHERE folder_id = ?", [id]);
-  await db.runAsync("DELETE FROM folders WHERE id = ?", [id]);
+  // Preserve the user-visible local behavior. The replicated copy uses a folder
+  // tombstone and removes only generations observed by this device.
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("DELETE FROM item_folders WHERE folder_id = ?", [id]);
+    await db.runAsync("DELETE FROM folders WHERE id = ?", [id]);
+    await mirrorLocalFolder(db, id);
+  });
 }

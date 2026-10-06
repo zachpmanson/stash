@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -10,9 +10,12 @@ import { useFolderStore } from "../state/folderState";
 import { useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
+import { runSyncReplicaSmoke } from "../db/syncReplicaSmoke";
+import { mirrorAuRecipeSetting, prepareCurrentStashReplica } from "../db/syncReplica";
 import { VoiceMode } from "../utils/readability";
 
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
+const SHOW_SYNC_DEV_TOOLS = Platform.OS === "android" && (__DEV__ || process.env.EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS === "1");
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -27,6 +30,40 @@ export default function SettingsScreen() {
   const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
   const auRecipe = useSettingsStore((s) => s.auRecipe);
   const setAuRecipe = useSettingsStore((s) => s.setAuRecipe);
+
+  const handleAuRecipeChange = (enabled: boolean) => {
+    setAuRecipe(enabled);
+    void mirrorAuRecipeSetting(enabled).catch((error) => console.error("Failed to mirror recipe setting", error));
+  };
+
+  const handleSyncSmoke = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await runSyncReplicaSmoke();
+      showModal({ title: "Sync migration smoke passed", message: JSON.stringify(result, null, 2) });
+    } catch (e) {
+      showModal({ title: "Sync migration smoke failed", message: `${e}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePrepareReplica = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await prepareCurrentStashReplica(auRecipe);
+      showModal({
+        title: result.seeded ? "Local sync replica prepared" : "Local replica already prepared",
+        message: JSON.stringify(result, null, 2),
+      });
+    } catch (e) {
+      showModal({ title: "Local sync replica failed", message: `${e}` });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleBackup = async () => {
     if (busy) return;
@@ -112,8 +149,14 @@ export default function SettingsScreen() {
           icon="emoji-food-beverage"
           label="Australian recipe ingredients"
           value={auRecipe}
-          onValueChange={setAuRecipe}
+          onValueChange={handleAuRecipeChange}
         />
+        {SHOW_SYNC_DEV_TOOLS && (
+          <>
+            <Row icon="sync" label="Prepare this install's local sync replica" onPress={() => handlePrepareReplica()} />
+            <Row icon="science" label="Run isolated sync migration smoke" onPress={() => handleSyncSmoke()} />
+          </>
+        )}
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
       </View>
     </Screen>

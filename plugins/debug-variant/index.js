@@ -46,7 +46,7 @@ module.exports = function withDebugVariant(config) {
     let contents = config.modResults.contents;
     if (!contents.includes('applicationIdSuffix ".debug"')) {
       const updated = contents.replace(
-        /(\s*debug\s*\{[^}]*?)(\})/,
+        /(\s*buildTypes\s*\{\s*debug\s*\{[^}]*?)(\})/,
         (match, head) => {
           // avoid double-application if the block already has it
           if (head.includes("applicationIdSuffix")) return match;
