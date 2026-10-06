@@ -363,21 +363,21 @@ export async function mirrorLocalMembership(
   folderId: string,
 ): Promise<void> {
   if (!(await replicaReady(db))) return;
-  const local = await db.getFirstAsync<{ exists: number }>(
-    `SELECT EXISTS(SELECT 1 FROM item_folders WHERE item_id = ? AND folder_id = ?) AS exists`,
+  const local = await db.getFirstAsync<{ present: number }>(
+    `SELECT EXISTS(SELECT 1 FROM item_folders WHERE item_id = ? AND folder_id = ?) AS present`,
     itemId,
     folderId,
   );
-  if (!local?.exists) {
+  if (!local?.present) {
     await db.runAsync("DELETE FROM sync_item_folders WHERE item_id = ? AND folder_id = ?", itemId, folderId);
     return;
   }
-  const alreadyPresent = await db.getFirstAsync<{ exists: number }>(
-    `SELECT EXISTS(SELECT 1 FROM sync_item_folders WHERE item_id = ? AND folder_id = ?) AS exists`,
+  const alreadyPresent = await db.getFirstAsync<{ present: number }>(
+    `SELECT EXISTS(SELECT 1 FROM sync_item_folders WHERE item_id = ? AND folder_id = ?) AS present`,
     itemId,
     folderId,
   );
-  if (alreadyPresent?.exists) return;
+  if (alreadyPresent?.present) return;
   const row = await db.getFirstAsync<{ added_at: number }>(
     "SELECT added_at FROM item_folders WHERE item_id = ? AND folder_id = ?",
     itemId,

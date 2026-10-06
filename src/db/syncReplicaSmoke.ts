@@ -38,12 +38,13 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
     await db.execAsync(`
       CREATE TABLE folders (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT,
-        created_at INTEGER NOT NULL, archived_at INTEGER, layout TEXT NOT NULL
+        created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL,
+        archived_at INTEGER, layout TEXT NOT NULL
       );
       CREATE TABLE items (
         id TEXT PRIMARY KEY, type TEXT NOT NULL, uri TEXT NOT NULL, title TEXT,
-        description TEXT, favicon_url TEXT, mime_type TEXT, created_at INTEGER NOT NULL,
-        archived_at INTEGER, article_text TEXT, article_html TEXT, recipe_json TEXT,
+        description TEXT, favicon_url TEXT, thumbnail_path TEXT, mime_type TEXT,
+        created_at INTEGER NOT NULL, archived_at INTEGER, article_text TEXT, article_html TEXT, recipe_json TEXT,
         listened_percent INTEGER NOT NULL DEFAULT 0, lat REAL, lng REAL
       );
       CREATE TABLE item_folders (
@@ -54,9 +55,15 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
         id TEXT PRIMARY KEY, find TEXT NOT NULL, replace TEXT NOT NULL,
         case_sensitive INTEGER NOT NULL, created_at INTEGER NOT NULL
       );
-      INSERT INTO folders VALUES ('folder-1', 'Inbox', '📥', 10, NULL, 'list');
-      INSERT INTO items VALUES ('url-1', 'url', 'https://example.invalid', 'Example', NULL, NULL, NULL, 20, NULL, 'article', '<p>article</p>', NULL, 5, -37.8, 144.9);
-      INSERT INTO items VALUES ('image-1', 'image', 'file:///private/stash/image-1.jpg', NULL, NULL, NULL, 'image/jpeg', 30, NULL, NULL, NULL, NULL, 0, NULL, NULL);
+      INSERT INTO folders VALUES ('folder-1', 'Inbox', '📥', 10, 10, NULL, 'list');
+      INSERT INTO items (
+        id, type, uri, title, description, favicon_url, mime_type, created_at, archived_at,
+        article_text, article_html, recipe_json, listened_percent, lat, lng
+      ) VALUES ('url-1', 'url', 'https://example.invalid', 'Example', NULL, NULL, NULL, 20, NULL, 'article', '<p>article</p>', NULL, 5, -37.8, 144.9);
+      INSERT INTO items (
+        id, type, uri, title, description, favicon_url, mime_type, created_at, archived_at,
+        article_text, article_html, recipe_json, listened_percent, lat, lng
+      ) VALUES ('image-1', 'image', 'file:///private/stash/image-1.jpg', NULL, NULL, NULL, 'image/jpeg', 30, NULL, NULL, NULL, NULL, 0, NULL, NULL);
       INSERT INTO item_folders VALUES ('url-1', 'folder-1', 40);
       INSERT INTO text_substitutions VALUES ('sub-1', 'foo', 'bar', 1, 50);
     `);
