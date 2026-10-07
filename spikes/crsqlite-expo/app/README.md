@@ -12,7 +12,7 @@ Disposable Android client for the sibling [`../server`](../server/README.md). Th
 - The Android client serializes its CR-SQLite database into a Stash-style ZIP, restores it, retains CR-SQLite metadata, and resumes syncing.
 - A Node 24 SQLite peer exchanges changes and serializes/restores CRR data.
 
-The full Android flow was runtime-tested on the x86_64 emulator. The client calls `crsql_finalize()` before closing its SQLite handle; omitting it caused a native extension teardown crash during restore. No production migration, iOS/Pixel validation, or app release is included.
+The authenticated Android flow was runtime-tested on both the x86_64 emulator and a Pixel 8 arm64 device against a disposable loopback-only server behind Caddy. On-device convergence exposed two Expo SQLite adapter issues—BigInt values in incoming changes and overlapping apply transactions—which are now normalized/serialized; reconnect and ZIP restore/reconnect also passed. The client calls `crsql_finalize()` before closing its SQLite handle; omitting it caused a native extension teardown crash during restore. This does not validate the production migration, populated Stash database/backup migration, iOS, or an app release.
 
 The Expo app allows cleartext networking only for this disposable test. The service remains bound to `127.0.0.1`; Android emulator port forwarding is used for local testing. The Stash candidate schema smoke button is entirely local: it uses its own fresh database and never opens the Stash app database or contacts the server.
 
@@ -49,7 +49,7 @@ NODE_ENV=production /home/beltino/beltino/scripts/build-capped.sh \
 
 ## Test against Naboo
 
-The app defaults to `https://stash.zachmanson.com`. The candidate service schema is isolated under room `stash-backend.sqlite`; do not connect until the corresponding service build is intentionally installed and `/healthz` reports `stash-sync-v1.sql`. The older Naboo deployment may still serve the notes-spike schema. Once the candidate service is available, Caddy Basic auth credentials are entered in the app, kept in memory only, and sent over HTTPS for health and WebSocket handshakes. The app rejects non-local HTTP URLs when credentials are present.
+The app defaults to `https://stash.zachmanson.com`. The candidate service schema is isolated under the extensionless room `stash-backend` (matching the service's on-disk file); do not connect until the corresponding service build is intentionally installed and `/healthz` reports `stash-sync-v1.sql`. The older Naboo deployment may still serve the notes-spike schema. Once the candidate service is available, Caddy Basic auth credentials are entered in the app, kept in memory only, and sent over HTTPS for health and WebSocket handshakes. The app rejects non-local HTTP URLs when credentials are present.
 
 Install the debug APK, then open **CR-SQLite Android ↔ server spike**. Start with **Smoke-test Stash candidate schema (local only)** to test the candidate schema on-device without server access. For the separate network spike, write one offline row for each of the two independent local replicas, then tap **Connect + verify**. Both peers connect to Naboo with Basic auth; the app reports success only after the two rows converge on both local databases through the remote sync service. Disconnect/reconnect and use **Backup ZIP → restore → reconnect** to check backup/restore and continued exchange.
 

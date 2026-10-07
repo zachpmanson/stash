@@ -7,7 +7,7 @@ import { cryb64 } from "@vlcn.io/ws-common";
 
 const [command, argument] = process.argv.slice(2);
 const dataDir = path.resolve(process.env.DATA_DIR ?? "./data");
-const databasePath = path.join(dataDir, "stash-backend.sqlite");
+const databasePath = path.join(dataDir, "stash-backend");
 const schemaDir = path.resolve(process.env.SCHEMA_DIR ?? "./schemas");
 const schemaName = "stash-sync-v1.sql";
 const expectedVersion = String(cryb64(await readFile(path.join(schemaDir, schemaName), "utf8")));

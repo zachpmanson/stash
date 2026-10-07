@@ -1,6 +1,6 @@
 # Stash CR-SQLite WebSocket service foundation
 
-This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server` with CR-SQLite 0.16.3 and the candidate Stash sync schema (`sync_folders`, `sync_items`, `sync_item_folders`, `sync_text_substitutions`, `sync_user_settings`). It uses the isolated `stash-backend.sqlite` room and is **not connected to Stash's production app lifecycle or production data**. The app/server schema copies are parity-tested; production rollout and media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
+This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server` with CR-SQLite 0.16.3 and the candidate Stash sync schema (`sync_folders`, `sync_items`, `sync_item_folders`, `sync_text_substitutions`, `sync_user_settings`). It uses the isolated `stash-backend` room (stored as an extensionless SQLite file so the upstream change watcher resolves the room name correctly) and is **not connected to Stash's production app lifecycle or production data**. The app/server schema copies are parity-tested; production rollout and media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
 ## Trust boundary
 
@@ -16,7 +16,7 @@ Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing th
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `8787` | TCP port; validated as 1–65535 |
-| `DATA_DIR` | `./data` | Persistent directory containing `stash-backend.sqlite` |
+| `DATA_DIR` | `./data` | Persistent directory containing the `stash-backend` SQLite file |
 | `SCHEMA_DIR` | `./schemas` | Server schema directory (the pinned candidate schema is written at startup) |
 | `AUTH_USER` | `zach` | Exact Caddy-stamped `X-Auth-User` allowed to upgrade |
 | `ENABLE_TEST_ENDPOINTS` | unset | Set to `1` only for local integration tests |

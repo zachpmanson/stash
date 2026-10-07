@@ -73,7 +73,7 @@ function websocketUpgrade(port, authenticated, includeProtocol = true) {
       headers: {
         Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-backend.sqlite").toString("base64").replace(/=+$/, "") } : {}),
+        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "") } : {}),
         ...(authenticated ? { "X-Auth-User": "zach" } : {}),
       },
     });
@@ -98,7 +98,7 @@ async function waitForLog(child, text) {
 }
 
 async function announceSyncPeer(port, schemaVersion) {
-  const protocol = Buffer.from("room=stash-backend.sqlite").toString("base64").replace(/=+$/, "");
+  const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
   const socket = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, {
     headers: { "X-Auth-User": "zach" },
   });
@@ -168,7 +168,7 @@ test("authenticates upgrades and drains an active peer before persistent restart
   accepted.socket.destroy();
 
   syncPeer = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-backend.sqlite");
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
 
   await stop(child);
   child = null;
@@ -177,7 +177,7 @@ test("authenticates upgrades and drains an active peer before persistent restart
   const backup = await runDbAdmin(dataDir, "backup", backupPath);
   assert.equal(backup.schema, "stash-sync-v1.sql");
   assert.ok(backup.version);
-  await rm(path.join(dataDir, "stash-backend.sqlite"));
+  await rm(path.join(dataDir, "stash-backend"));
   const restore = await runDbAdmin(dataDir, "restore", backupPath);
   assert.equal(restore.schema, "stash-sync-v1.sql");
 
@@ -191,7 +191,7 @@ test("authenticates upgrades and drains an active peer before persistent restart
   }]);
 
   active = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-backend.sqlite");
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
   await stop(child);
   child = null;
   active.terminate();

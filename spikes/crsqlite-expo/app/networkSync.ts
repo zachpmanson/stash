@@ -23,6 +23,15 @@ const TRACK_PEER = `INSERT INTO crsql_tracked_peers (site_id, event, version, se
     version = MAX(version, excluded.version),
     seq = CASE version > excluded.version WHEN 1 THEN seq ELSE excluded.seq END`;
 
+function sqliteBindValue(value: unknown): SQLite.SQLiteBindValue {
+  if (typeof value === "bigint") {
+    const number = Number(value);
+    if (!Number.isSafeInteger(number)) throw new Error(`Cannot bind unsafe SQLite integer ${value}`);
+    return number;
+  }
+  return value as SQLite.SQLiteBindValue;
+}
+
 export type SyncItem = { id: string; content: string; title: string };
 
 class ExpoReplica implements DB {
@@ -30,6 +39,7 @@ class ExpoReplica implements DB {
   readonly #database: SQLite.SQLiteDatabase;
   readonly #listeners = new Set<() => void>();
   readonly #subscription: ReturnType<typeof SQLite.addDatabaseChangeListener>;
+  #applyQueue: Promise<void> = Promise.resolve();
 
   constructor(database: SQLite.SQLiteDatabase, siteid: Uint8Array) {
     this.#database = database;
@@ -79,14 +89,14 @@ class ExpoReplica implements DB {
     siteId: Uint8Array,
     end: readonly [bigint, number],
   ): Promise<void> {
-    await this.#database.withTransactionAsync(async () => {
+    const apply = this.#applyQueue.then(() => this.#database.withTransactionAsync(async () => {
       for (const change of changes) {
         await this.#database.runAsync(
           INSERT_CHANGE,
           change[0],
           change[1],
           change[2],
-          change[3] as SQLite.SQLiteBindValue,
+          sqliteBindValue(change[3]),
           Number(change[4]),
           Number(change[5]),
           siteId,
@@ -95,7 +105,9 @@ class ExpoReplica implements DB {
         );
       }
       await this.#database.runAsync(TRACK_PEER, siteId, Number(end[0]), end[1]);
-    });
+    }));
+    this.#applyQueue = apply.catch(() => undefined);
+    await apply;
   }
 
   async getLastSeens(): Promise<[Uint8Array, [bigint, number]][]> {
@@ -126,6 +138,7 @@ class ExpoReplica implements DB {
 
 let database: SQLite.SQLiteDatabase | null = null;
 let observerDatabase: SQLite.SQLiteDatabase | null = null;
+const syncDiagnostics = { androidChanges: 0, observerChanges: 0, applyErrors: [] as string[] };
 
 async function openReplicaDatabase(name: string): Promise<SQLite.SQLiteDatabase> {
   const db = await SQLite.openDatabaseAsync(name, {
@@ -264,23 +277,47 @@ export async function startSync(
   const authorization = basicAuthorization(credentials);
   await probeWebSocket(serverUrl, credentials);
 
-  function configFor(db: SQLite.SQLiteDatabase): Config {
+  syncDiagnostics.androidChanges = 0;
+  syncDiagnostics.observerChanges = 0;
+  syncDiagnostics.applyErrors = [];
+
+  function configFor(db: SQLite.SQLiteDatabase, peer: "android" | "observer"): Config {
     return {
       dbProvider: async () => {
         const site = await db.getFirstAsync<{ site_id: Uint8Array }>("SELECT crsql_site_id() AS site_id");
         if (!site) throw new Error("CR-SQLite returned no local site id");
         return new ExpoReplica(db, site.site_id);
       },
-      transportProvider: (options) => defaultConfig.transportProvider({
-        ...options,
-        headers: { Authorization: authorization },
-      }),
+      transportProvider: (options) => {
+        const transport = defaultConfig.transportProvider({
+          ...options,
+          headers: { Authorization: authorization },
+        });
+        let handler = transport.onChangesReceived;
+        Object.defineProperty(transport, "onChangesReceived", {
+          configurable: true,
+          get: () => handler,
+          set: (callback: typeof handler) => {
+            handler = callback && (async (message) => {
+              if (peer === "android") syncDiagnostics.androidChanges += message.changes.length;
+              else syncDiagnostics.observerChanges += message.changes.length;
+              try {
+                await callback(message);
+              } catch (error) {
+                syncDiagnostics.applyErrors.push(`${peer}: ${error instanceof Error ? error.message : String(error)}`);
+                throw error;
+              }
+            });
+          },
+        });
+        return transport;
+      },
     };
   }
 
   const options = { url: websocketUrl(base, "/sync"), room: DATABASE_ROOM };
-  const primarySync = await createSyncedDB(configFor(primary), DATABASE_ROOM, options);
-  const observerSync = await createSyncedDB(configFor(observer), DATABASE_ROOM, options);
+  const primarySync = await createSyncedDB(configFor(primary, "android"), DATABASE_ROOM, options);
+  const observerSync = await createSyncedDB(configFor(observer, "observer"), DATABASE_ROOM, options);
   await primarySync.start();
   try {
     await observerSync.start();
@@ -393,5 +430,9 @@ export async function waitForConvergence(
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  throw new Error(`Timed out waiting for the two authenticated sync clients to converge: ${lastError}`);
+  throw new Error(
+    `Timed out waiting for the two authenticated sync clients to converge: ${lastError}; ` +
+    `inbound changes android=${syncDiagnostics.androidChanges} observer=${syncDiagnostics.observerChanges}; ` +
+    `apply errors=${JSON.stringify(syncDiagnostics.applyErrors)}`,
+  );
 }

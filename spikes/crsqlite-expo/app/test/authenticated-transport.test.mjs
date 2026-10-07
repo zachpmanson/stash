@@ -34,7 +34,7 @@ test("WebSocket transport supplies Basic auth as a handshake header", () => {
   globalThis.WebSocket = FakeWebSocket;
   const transport = new WebSocketTransport({
     url: "wss://stash.zachmanson.com/sync",
-    room: "stash-backend.sqlite",
+    room: "stash-backend",
     headers: { Authorization: "Basic test-only" },
   });
 

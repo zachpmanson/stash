@@ -77,4 +77,4 @@ CREATE TABLE IF NOT EXISTS stash_sync_metadata (
 `;
 export const SCHEMA_VERSION = cryb64(SCHEMA_SQL);
 // A new room avoids opening or migrating the currently deployed notes spike DB.
-export const DATABASE_ROOM = "stash-backend.sqlite";
+export const DATABASE_ROOM = "stash-backend";
