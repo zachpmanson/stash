@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { backupRestoreZip, createAndroidNote, createObserverNote, listNotes, startSync, waitForConvergence, type Note } from "./networkSync";
+import { backupRestoreZip, createAndroidItem, createObserverItem, listItems, startSync, waitForConvergence, type SyncItem } from "./networkSync";
 import { runCandidateSchemaSmoke } from "./candidateSchemaSmoke";
 
 const DEFAULT_SERVER_URL = "https://stash.zachmanson.com";
@@ -14,11 +14,11 @@ export default function Index() {
     "2. Write independent rows to both local replicas while disconnected.",
     "3. Connect both clients to Naboo and verify remote convergence.",
   ]);
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [items, setItems] = useState<SyncItem[]>([]);
   const [username, setUsername] = useState("zach");
   const [password, setPassword] = useState("");
-  const [androidNoteId, setAndroidNoteId] = useState<string | null>(null);
-  const [observerNoteId, setObserverNoteId] = useState<string | null>(null);
+  const [androidItemId, setAndroidItemId] = useState<string | null>(null);
+  const [observerItemId, setObserverItemId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const sync = useRef<SyncHandle | null>(null);
 
@@ -36,7 +36,7 @@ export default function Index() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>CR-SQLite Android ↔ server spike</Text>
+      <Text style={styles.title}>Stash CR-SQLite Android ↔ server spike</Text>
       <Text style={styles.caption}>
         Two independent CR-SQLite clients sync through the authenticated Naboo server. The password is
         kept in memory only and sent over HTTPS; no server test endpoints are enabled.
@@ -80,46 +80,46 @@ export default function Index() {
         style={styles.input}
       />
       <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Writing Android row", async () => {
-        const note = await createAndroidNote(`android-${Date.now()}`);
-        setAndroidNoteId(note.id);
-        setNotes(await listNotes());
-        setLines([`Android peer wrote ${note.id} while disconnected.`, "Write the observer peer row next."]);
+        const item = await createAndroidItem(`android-${Date.now()}`);
+        setAndroidItemId(item.id);
+        setItems(await listItems());
+        setLines([`Android peer wrote ${item.id} while disconnected.`, "Write the observer peer row next."]);
       })} style={styles.button}>
         <Text style={styles.buttonText}>Write Android peer row (offline)</Text>
       </Pressable>
       <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Writing observer row", async () => {
-        const note = await createObserverNote(`observer-${Date.now()}`);
-        setObserverNoteId(note.id);
-        setLines([`Observer peer wrote ${note.id} while disconnected.`, "Connect both peers to Naboo to verify exchange."]);
+        const item = await createObserverItem(`observer-${Date.now()}`);
+        setObserverItemId(item.id);
+        setLines([`Observer peer wrote ${item.id} while disconnected.`, "Connect both peers to Naboo to verify exchange."]);
       })} style={styles.button}>
         <Text style={styles.buttonText}>Write observer peer row (offline)</Text>
       </Pressable>
       <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Connecting authenticated peers", async () => {
-        if (!androidNoteId || !observerNoteId) throw new Error("Write one offline row from each peer first.");
+        if (!androidItemId || !observerItemId) throw new Error("Write one offline Stash item from each peer first.");
         sync.current?.stop();
         sync.current = await startSync(serverUrl, { username, password });
-        const converged = await waitForConvergence(androidNoteId, observerNoteId);
-        setNotes(converged);
+        const converged = await waitForConvergence(androidItemId, observerItemId);
+        setItems(converged);
         setLines([
-          "PASS: authenticated Android peers exchanged their offline rows through Naboo.",
-          `Android row: ${androidNoteId}`,
-          `Observer row: ${observerNoteId}`,
+          "PASS: authenticated Android peers exchanged Stash sync_items through Naboo.",
+          `Android item: ${androidItemId}`,
+          `Observer item: ${observerItemId}`,
           "Disconnect/reconnect and press again to check idempotence/reconnect.",
         ]);
       })} style={styles.button}>
         <Text style={styles.buttonText}>{sync.current ? "Reconnect + verify" : "Connect + verify"}</Text>
       </Pressable>
       <Pressable accessibilityRole="button" disabled={running || !sync.current} onPress={() => run("Backing up/restoring ZIP", async () => {
-        if (!androidNoteId || !observerNoteId) throw new Error("Write one offline row from each peer first.");
+        if (!androidItemId || !observerItemId) throw new Error("Write one offline Stash item from each peer first.");
         sync.current?.stop();
         sync.current = null;
         const restored = await backupRestoreZip();
         sync.current = await startSync(serverUrl, { username, password });
-        const converged = await waitForConvergence(androidNoteId, observerNoteId);
-        setNotes(converged);
+        const converged = await waitForConvergence(androidItemId, observerItemId);
+        setItems(converged);
         setLines([
           "PASS: Stash-style backup/restore retained CR-SQLite metadata.",
-          `Rows after restore: ${restored.notes.length}; CR-SQLite schema objects: ${restored.crsqlObjects}.`,
+          `Items after restore: ${restored.items.length}; CR-SQLite schema objects: ${restored.crsqlObjects}.`,
           "PASS: restored Android peer resumed authenticated exchange with its observer.",
         ]);
       })} style={styles.button}>
@@ -133,15 +133,15 @@ export default function Index() {
         <Text style={styles.buttonText}>Disconnect</Text>
       </Pressable>
       <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Reading local database", async () => {
-        const current = await listNotes();
-        setNotes(current);
-        setLines([`Local database: ${current.length} note(s).`]);
+        const current = await listItems();
+        setItems(current);
+        setLines([`Local Stash replica: ${current.length} item(s).`]);
       })} style={[styles.button, styles.secondary]}>
         <Text style={styles.buttonText}>Refresh local rows</Text>
       </Pressable>
       <View style={styles.output}>
         {lines.map((line, index) => <Text key={`${index}-${line}`} style={styles.line}>{line}</Text>)}
-        {notes.map((note) => <Text key={note.id} style={styles.note}>{note.id}: {note.body}</Text>)}
+        {items.map((item) => <Text key={item.id} style={styles.note}>{item.id}: {item.title} — {item.content}</Text>)}
       </View>
     </ScrollView>
   );

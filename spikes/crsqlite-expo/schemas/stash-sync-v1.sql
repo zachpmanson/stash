@@ -1,6 +1,5 @@
--- DESIGN CANDIDATE ONLY. Not loaded by the Expo app or Naboo service.
--- CR-SQLite 0.16.3 candidate schema for Stash single-tenant sync.
--- Keep this in lock-step with app/server schemas if/when promoted.
+-- CANDIDATE ONLY. Used by the local backend integration harness, not production rollout.
+-- CR-SQLite 0.16.3 schema for Stash single-tenant sync.
 -- No FOREIGN KEY or CHECK constraints: enforce those invariants in application
 -- reconciliation/validation because replication applies individual row changes.
 
@@ -65,3 +64,8 @@ SELECT crsql_as_crr('sync_items');
 SELECT crsql_as_crr('sync_item_folders');
 SELECT crsql_as_crr('sync_text_substitutions');
 SELECT crsql_as_crr('sync_user_settings');
+
+CREATE TABLE IF NOT EXISTS stash_sync_metadata (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL
+);

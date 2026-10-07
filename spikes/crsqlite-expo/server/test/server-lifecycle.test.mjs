@@ -39,7 +39,14 @@ async function waitForHealth(port, child) {
 function launch(port, dataDir) {
   const child = spawn(process.execPath, [path.join(root, "node_modules/tsx/dist/cli.mjs"), "src/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, ENABLE_TEST_ENDPOINTS: "1", AUTH_USER: "zach" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      SCHEMA_DIR: path.join(dataDir, "schemas"),
+      ENABLE_TEST_ENDPOINTS: "1",
+      AUTH_USER: "zach",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.output = "";
@@ -66,7 +73,7 @@ function websocketUpgrade(port, authenticated, includeProtocol = true) {
       headers: {
         Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-spike.sqlite").toString("base64").replace(/=+$/, "") } : {}),
+        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-backend.sqlite").toString("base64").replace(/=+$/, "") } : {}),
         ...(authenticated ? { "X-Auth-User": "zach" } : {}),
       },
     });
@@ -91,7 +98,7 @@ async function waitForLog(child, text) {
 }
 
 async function announceSyncPeer(port, schemaVersion) {
-  const protocol = Buffer.from("room=stash-spike.sqlite").toString("base64").replace(/=+$/, "");
+  const protocol = Buffer.from("room=stash-backend.sqlite").toString("base64").replace(/=+$/, "");
   const socket = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, {
     headers: { "X-Auth-User": "zach" },
   });
@@ -100,7 +107,7 @@ async function announceSyncPeer(port, schemaVersion) {
     _tag: tags.AnnouncePresence,
     sender: new Uint8Array(randomBytes(16)),
     lastSeens: [],
-    schemaName: "stash-spike.sql",
+    schemaName: "stash-sync-v1.sql",
     schemaVersion: BigInt(schemaVersion),
   }));
   return socket;
@@ -114,7 +121,7 @@ async function postOfflineWrite(port) {
 async function runDbAdmin(dataDir, ...args) {
   const child = spawn(process.execPath, [path.join(root, "scripts/db-admin.mjs"), ...args], {
     cwd: root,
-    env: { ...process.env, DATA_DIR: dataDir },
+    env: { ...process.env, DATA_DIR: dataDir, SCHEMA_DIR: path.join(dataDir, "schemas") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -125,8 +132,8 @@ async function runDbAdmin(dataDir, ...args) {
   return JSON.parse(output.trim());
 }
 
-async function notes(port) {
-  const response = await fetch(`http://127.0.0.1:${port}/test/notes`);
+async function items(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/test/items`);
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -146,7 +153,7 @@ test("authenticates upgrades and drains an active peer before persistent restart
   const health = await waitForHealth(port, child);
   assert.equal(health.ok, true);
   assert.equal(health.bind, "127.0.0.1");
-  assert.equal(health.schema, "stash-spike.sql");
+  assert.equal(health.schema, "stash-sync-v1.sql");
   await postOfflineWrite(port);
 
   const malformed = await websocketUpgrade(port, false, false);
@@ -161,25 +168,30 @@ test("authenticates upgrades and drains an active peer before persistent restart
   accepted.socket.destroy();
 
   syncPeer = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-spike.sqlite");
+  await waitForLog(child, "AnnouncePresence for: stash-backend.sqlite");
 
   await stop(child);
   child = null;
   syncPeer.terminate();
 
   const backup = await runDbAdmin(dataDir, "backup", backupPath);
-  assert.equal(backup.schema, "stash-spike.sql");
+  assert.equal(backup.schema, "stash-sync-v1.sql");
   assert.ok(backup.version);
-  await rm(path.join(dataDir, "stash-spike.sqlite"));
+  await rm(path.join(dataDir, "stash-backend.sqlite"));
   const restore = await runDbAdmin(dataDir, "restore", backupPath);
-  assert.equal(restore.schema, "stash-spike.sql");
+  assert.equal(restore.schema, "stash-sync-v1.sql");
 
   child = launch(port, dataDir);
   await waitForHealth(port, child);
-  assert.deepEqual(await notes(port), [{ id: "server-offline", body: "written on the server while Android was offline" }]);
+  assert.deepEqual(await items(port), [{
+    id: "server-offline-item",
+    type: "text",
+    content: "written on the server while the app was offline",
+    title: "Server offline item",
+  }]);
 
   active = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-spike.sqlite");
+  await waitForLog(child, "AnnouncePresence for: stash-backend.sqlite");
   await stop(child);
   child = null;
   active.terminate();

@@ -1,4 +1,5 @@
 import type * as SQLite from "expo-sqlite";
+import { cryb64 } from "@vlcn.io/ws-common";
 import { CRSQLITE_SUPPORTED, ensureCrsqliteLoaded, getDb, withAppDbWriteLock } from "./database";
 import { randomId } from "../utils/randomId";
 
@@ -12,7 +13,11 @@ export const SYNC_PROJECTION_READY_KEY = "stash_sync_projection_ready";
  * with spikes/crsqlite-expo/schemas/stash-sync-v1.sql and the server schema.
  * Local filesystem paths and last-used timestamps deliberately stay local.
  */
-export const SYNC_SCHEMA_SQL = String.raw`
+export const SYNC_SCHEMA_SQL = String.raw`-- CANDIDATE ONLY. Used by the local backend integration harness, not production rollout.
+-- CR-SQLite 0.16.3 schema for Stash single-tenant sync.
+-- No FOREIGN KEY or CHECK constraints: enforce those invariants in application
+-- reconciliation/validation because replication applies individual row changes.
+
 CREATE TABLE IF NOT EXISTS sync_folders (
   id TEXT NOT NULL PRIMARY KEY DEFAULT '',
   name TEXT NOT NULL DEFAULT '',
@@ -22,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sync_folders (
   layout TEXT NOT NULL DEFAULT 'grid',
   deleted INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE IF NOT EXISTS sync_items (
   id TEXT NOT NULL PRIMARY KEY DEFAULT '',
   type TEXT NOT NULL DEFAULT 'text',
@@ -40,12 +46,17 @@ CREATE TABLE IF NOT EXISTS sync_items (
   lat REAL DEFAULT NULL,
   lng REAL DEFAULT NULL
 );
+
+-- One row per add-generation, not one mutable row per item/folder pair.
+-- Re-adding a removed pair creates a fresh membership_id. The client projects
+-- active generations to one logical local item_folders row per pair.
 CREATE TABLE IF NOT EXISTS sync_item_folders (
   membership_id TEXT NOT NULL PRIMARY KEY DEFAULT '',
   item_id TEXT NOT NULL DEFAULT '',
   folder_id TEXT NOT NULL DEFAULT '',
   added_at INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE IF NOT EXISTS sync_text_substitutions (
   id TEXT NOT NULL PRIMARY KEY DEFAULT '',
   find TEXT NOT NULL DEFAULT '',
@@ -53,23 +64,29 @@ CREATE TABLE IF NOT EXISTS sync_text_substitutions (
   case_sensitive INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE TABLE IF NOT EXISTS sync_user_settings (
   id TEXT NOT NULL PRIMARY KEY DEFAULT '',
   au_recipe INTEGER NOT NULL DEFAULT 0
 );
+
 CREATE INDEX IF NOT EXISTS idx_sync_memberships_item ON sync_item_folders(item_id);
 CREATE INDEX IF NOT EXISTS idx_sync_memberships_folder ON sync_item_folders(folder_id);
 CREATE INDEX IF NOT EXISTS idx_sync_items_created ON sync_items(created_at DESC);
+
 SELECT crsql_as_crr('sync_folders');
 SELECT crsql_as_crr('sync_items');
 SELECT crsql_as_crr('sync_item_folders');
 SELECT crsql_as_crr('sync_text_substitutions');
 SELECT crsql_as_crr('sync_user_settings');
+
 CREATE TABLE IF NOT EXISTS stash_sync_metadata (
   key TEXT NOT NULL PRIMARY KEY,
   value TEXT NOT NULL
 );
 `;
+export const SYNC_CRR_SCHEMA_NAME = "stash-sync-v1.sql";
+export const SYNC_CRR_SCHEMA_VERSION = cryb64(SYNC_SCHEMA_SQL);
 
 type LocalFolder = {
   id: string | null;
@@ -152,6 +169,13 @@ async function seedSyncReplicaLocked(
 ): Promise<SyncSeedCounts | null> {
   if (!CRSQLITE_SUPPORTED) throw new Error("CR-SQLite is currently packaged only for Android.");
   await db.execAsync(SYNC_SCHEMA_SQL);
+  await db.runAsync(
+    "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_name', ?)",
+    SYNC_CRR_SCHEMA_NAME,
+  );
+  await db.execAsync(
+    `INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_version', ${SYNC_CRR_SCHEMA_VERSION})`,
+  );
 
   const prior = await db.getFirstAsync<{ value: string }>(
     "SELECT value FROM stash_sync_metadata WHERE key = ?",
@@ -267,12 +291,6 @@ async function seedSyncReplicaLocked(
       "INSERT INTO stash_sync_metadata (key, value) VALUES (?, ?)",
       SYNC_INITIALIZED_KEY,
       String(SYNC_SCHEMA_VERSION),
-    );
-    await db.runAsync(
-      "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_name', 'stash-sync-v1')",
-    );
-    await db.execAsync(
-      "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_version', 1)",
     );
   });
 

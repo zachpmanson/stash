@@ -71,20 +71,23 @@ if (TEST_ENDPOINTS) {
   app.post("/test/offline-write", async (_request, response, next) => {
     try {
       await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
-        peer.getDB().prepare("INSERT OR IGNORE INTO notes (id, body) VALUES (?, ?)")
-          .run("server-offline", "written on the server while Android was offline");
+        peer.getDB().prepare(`INSERT OR IGNORE INTO sync_items (id, type, content, title, created_at)
+          VALUES (?, 'text', ?, ?, 1)`)
+          .run("server-offline-item", "written on the server while the app was offline", "Server offline item");
       });
       response.json({ ok: true });
     } catch (error) { next(error); }
   });
 
-  app.get("/test/notes", async (_request, response, next) => {
+  app.get("/test/items", async (_request, response, next) => {
     try {
-      let notes: unknown[] = [];
+      let items: unknown[] = [];
       await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
-        notes = peer.getDB().prepare("SELECT id, body FROM notes ORDER BY id").all();
+        items = peer.getDB().prepare(
+          "SELECT id, type, content, title FROM sync_items ORDER BY id",
+        ).all();
       });
-      response.json(notes);
+      response.json(items);
     } catch (error) { next(error); }
   });
 }
@@ -98,8 +101,27 @@ await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
   const db = peer.getDB();
   const integrity = db.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);
-  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes'").get();
-  if (!table) throw new Error("Persistent database is missing the candidate notes table");
+  const tables = db.prepare(`SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name IN (
+      'sync_folders', 'sync_items', 'sync_item_folders',
+      'sync_text_substitutions', 'sync_user_settings'
+    )`).all() as { name: string }[];
+  const requiredTables = new Set([
+    "sync_folders", "sync_items", "sync_item_folders",
+    "sync_text_substitutions", "sync_user_settings",
+  ]);
+  for (const { name } of tables) requiredTables.delete(name);
+  if (requiredTables.size) {
+    throw new Error(`Persistent database is missing candidate CRR tables: ${[...requiredTables].join(", ")}`);
+  }
+  const clocks = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (
+    'sync_folders__crsql_clock', 'sync_items__crsql_clock',
+    'sync_item_folders__crsql_clock', 'sync_text_substitutions__crsql_clock',
+    'sync_user_settings__crsql_clock'
+  )`).all() as { name: string }[];
+  if (clocks.length !== 5) {
+    throw new Error(`Persistent database is missing one or more CRR clocks (${clocks.length}/5)`);
+  }
 });
 
 const listening = new Promise<void>((resolve, reject) => {

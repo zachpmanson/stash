@@ -1,9 +1,8 @@
-// This disposable candidate schema must match server/schema.ts exactly.
 import { cryb64 } from "@vlcn.io/ws-common";
+import { STASH_SCHEMA_SQL } from "./stashSchema";
 
-export const SCHEMA_NAME = "stash-spike.sql";
-export const SCHEMA_SQL =
-  "CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL DEFAULT '');\n" +
-  "SELECT crsql_as_crr('notes');\n";
+export const SCHEMA_NAME = "stash-sync-v1.sql";
+export const SCHEMA_SQL = STASH_SCHEMA_SQL;
 export const SCHEMA_VERSION = cryb64(SCHEMA_SQL);
-export const DATABASE_ROOM = "stash-spike.sqlite";
+// New room keeps this disposable schema/database separate from the older notes spike.
+export const DATABASE_ROOM = "stash-backend.sqlite";
