@@ -13,6 +13,7 @@ import FolderGrid from "src/components/FolderGrid";
 import { isShareLaunch } from "src/utils/nativeShareIntent";
 import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
 import AddItemModal from "src/components/AddItemModal";
+import { randomId } from "src/utils/randomId";
 
 export default function HomeScreen() {
   if (isShareLaunch()) {
@@ -43,7 +44,7 @@ export default function HomeScreen() {
   const handleNewFolderSubmit = useCallback(async () => {
     const name = newFolderName.trim();
     if (name) {
-      await createFolder(String(Date.now()), name);
+      await createFolder(randomId(), name);
       refresh();
     }
     setNewFolderVisible(false);

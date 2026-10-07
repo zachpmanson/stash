@@ -1,14 +1,50 @@
 import * as SQLite from "expo-sqlite";
+import { Platform } from "react-native";
 
 let db: SQLite.SQLiteDatabase | null = null;
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+const loadedCrsqliteDatabases = new WeakSet<object>();
+let dbWriteTail: Promise<void> = Promise.resolve();
+
+/** Serialize app writes with replica seeding and remote projection. */
+export async function withAppDbWriteLock<T>(task: () => Promise<T>): Promise<T> {
+  const previous = dbWriteTail;
+  let release!: () => void;
+  dbWriteTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+export async function withAppDbTransaction(
+  database: SQLite.SQLiteDatabase,
+  task: () => Promise<void>,
+): Promise<void> {
+  await withAppDbWriteLock(() => database.withTransactionAsync(task));
+}
+
+export const CRSQLITE_SUPPORTED = Platform.OS === "android";
+
+export async function ensureCrsqliteLoaded(database: SQLite.SQLiteDatabase): Promise<void> {
+  if (!CRSQLITE_SUPPORTED) throw new Error("CR-SQLite is currently packaged only for Android.");
+  if (loadedCrsqliteDatabases.has(database)) return;
+  await database.loadExtensionAsync("libcrsqlite.so", "sqlite3_crsqlite_init");
+  loadedCrsqliteDatabases.add(database);
+}
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (db) return Promise.resolve(db);
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync("stash.db")
+    dbPromise = SQLite.openDatabaseAsync("stash.db", { enableChangeListener: true })
       .then(async (database) => {
         await initSchema(database);
+        const replicaMarker = await database.getFirstAsync<{ value: string }>(
+          "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
+        ).catch(() => null);
+        if (replicaMarker && CRSQLITE_SUPPORTED) await ensureCrsqliteLoaded(database);
         db = database;
         return db;
       })
@@ -27,16 +63,18 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
  * fresh database file.
  */
 export async function closeDb(): Promise<void> {
-  const current = db;
-  db = null;
-  dbPromise = null;
-  if (current) {
-    try {
-      await current.closeAsync();
-    } catch {
-      // ignore close errors; the singleton is already reset
+  await withAppDbWriteLock(async () => {
+    const current = db;
+    db = null;
+    dbPromise = null;
+    if (current) {
+      try {
+        await current.closeAsync();
+      } catch {
+        // ignore close errors; the singleton is already reset
+      }
     }
-  }
+  });
 }
 
 /**
@@ -135,11 +173,15 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync("ALTER TABLE folders ADD COLUMN layout TEXT NOT NULL DEFAULT 'grid'");
   }
 
-  // Seed default Inbox folder if empty
+  // Seed default Inbox only for local-only databases. A synced account may
+  // intentionally have no live folders after tombstone reconciliation.
   const row = await db.getFirstAsync<{ count: number }>(
     "SELECT COUNT(*) as count FROM folders WHERE archived_at IS NULL",
   );
-  if (!row || row.count === 0) {
+  const syncMarker = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
+  ).catch(() => null);
+  if ((!row || row.count === 0) && !syncMarker) {
     const now = Date.now();
     await db.runAsync(
       "INSERT OR IGNORE INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",

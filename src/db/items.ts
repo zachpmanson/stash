@@ -1,6 +1,7 @@
-import { getDb } from './database';
+import { getDb, withAppDbTransaction } from './database';
 import { StashItem } from '../types';
 import { touchFolder } from './folders';
+import { mirrorLocalItem, mirrorLocalMembership } from './syncReplica';
 
 interface RawItem {
   id: string;
@@ -57,79 +58,110 @@ export async function getItemById(id: string): Promise<StashItem | null> {
 export async function saveItem(item: Omit<StashItem, 'archived_at'>, folderIds: string[]): Promise<void> {
   const db = await getDb();
   const now = Date.now();
-  await db.runAsync(
-    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json, lat, lng)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
-     item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
-     item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null,
-     item.lat ?? null, item.lng ?? null]
-  );
-  for (const folderId of folderIds) {
+  await withAppDbTransaction(db, async () => {
     await db.runAsync(
-      'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
-      [item.id, folderId, now]
+      `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json, lat, lng)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
+       item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
+       item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null,
+       item.lat ?? null, item.lng ?? null]
     );
-    await touchFolder(folderId);
-  }
+    for (const folderId of folderIds) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
+        [item.id, folderId, now]
+      );
+      await mirrorLocalMembership(db, item.id, folderId);
+    }
+    await mirrorLocalItem(db, item.id);
+  });
+  for (const folderId of folderIds) await touchFolder(folderId);
 }
 
 export async function addItemToFolder(itemId: string, folderId: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
-    'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
-    [itemId, folderId, Date.now()]
-  );
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync(
+      'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
+      [itemId, folderId, Date.now()]
+    );
+    await mirrorLocalMembership(db, itemId, folderId);
+  });
   await touchFolder(folderId);
 }
 
 export async function removeItemFromFolder(itemId: string, folderId: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
-    'DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?',
-    [itemId, folderId]
-  );
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync(
+      'DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?',
+      [itemId, folderId]
+    );
+    await mirrorLocalMembership(db, itemId, folderId);
+  });
 }
 
 export async function archiveItem(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET archived_at = ? WHERE id = ?', [Date.now(), id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('UPDATE items SET archived_at = ? WHERE id = ?', [Date.now(), id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function unarchiveItem(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function updateItemTitle(id: string, title: string | null): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET title = ? WHERE id = ?', [title, id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('UPDATE items SET title = ? WHERE id = ?', [title, id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function updateItemListenedPercent(id: string, percent: number): Promise<void> {
   const db = await getDb();
   const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-  await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function updateItemRecipeJson(id: string, recipeJson: string | null): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE items SET recipe_json = ? WHERE id = ?', [recipeJson, id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('UPDATE items SET recipe_json = ? WHERE id = ?', [recipeJson, id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function updateItemArticleHtml(id: string, html: string | null, text?: string | null): Promise<void> {
   const db = await getDb();
-  if (text !== undefined) {
-    await db.runAsync('UPDATE items SET article_html = ?, article_text = ? WHERE id = ?', [html, text, id]);
-  } else {
-    await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
-  }
+  await withAppDbTransaction(db, async () => {
+    if (text !== undefined) {
+      await db.runAsync('UPDATE items SET article_html = ?, article_text = ? WHERE id = ?', [html, text, id]);
+    } else {
+      await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
+    }
+    await mirrorLocalItem(db, id);
+  });
 }
 
 export async function deleteItem(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('DELETE FROM item_folders WHERE item_id = ?', [id]);
-  await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync('DELETE FROM item_folders WHERE item_id = ?', [id]);
+    await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+    await mirrorLocalItem(db, id);
+  });
 }
 
 function attachFolderIds(row: RawItem): StashItem {

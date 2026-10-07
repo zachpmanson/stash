@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { backupRestoreZip, createAndroidNote, createObserverNote, listNotes, startSync, waitForConvergence, type Note } from "./networkSync";
+import { runCandidateSchemaSmoke } from "./candidateSchemaSmoke";
 
 const DEFAULT_SERVER_URL = "https://stash.zachmanson.com";
 
@@ -40,6 +41,16 @@ export default function Index() {
         Two independent CR-SQLite clients sync through the authenticated Naboo server. The password is
         kept in memory only and sent over HTTPS; no server test endpoints are enabled.
       </Text>
+      <Pressable accessibilityRole="button" disabled={running} onPress={() => run("Testing candidate Stash schema locally", async () => {
+        const result = await runCandidateSchemaSmoke();
+        setLines([
+          "PASS: candidate Stash schema opened with the Android CR-SQLite extension.",
+          `CRR clock tables: ${result.crSqliteTables}; initial changes: ${result.changeRows}; delete tombstones: ${result.deleteTombstones}.`,
+          `SQLite integrity_check: ${result.integrity}. No server or Stash production database was opened.`,
+        ]);
+      })} style={styles.button}>
+        <Text style={styles.buttonText}>Smoke-test Stash candidate schema (local only)</Text>
+      </Pressable>
       <TextInput
         accessibilityLabel="Server URL"
         autoCapitalize="none"

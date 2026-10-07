@@ -24,6 +24,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/with-crsqlite-android",
       "expo-sqlite",
       "expo-file-system",
       [

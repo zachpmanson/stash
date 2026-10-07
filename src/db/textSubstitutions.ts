@@ -1,6 +1,7 @@
 import { TextSubstitution } from "../types";
 import { randomId } from "../utils/randomId";
-import { getDb } from "./database";
+import { getDb, withAppDbTransaction } from "./database";
+import { mirrorLocalSubstitution } from "./syncReplica";
 
 export async function getTextSubstitutions(): Promise<TextSubstitution[]> {
   const db = await getDb();
@@ -18,10 +19,13 @@ export async function createTextSubstitution(
   const id = randomId();
   const now = Date.now();
   const cs: 0 | 1 = caseSensitive ? 1 : 0;
-  await db.runAsync(
-    "INSERT INTO text_substitutions (id, find, replace, case_sensitive, created_at) VALUES (?, ?, ?, ?, ?)",
-    [id, find, replace, cs, now],
-  );
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync(
+      "INSERT INTO text_substitutions (id, find, replace, case_sensitive, created_at) VALUES (?, ?, ?, ?, ?)",
+      [id, find, replace, cs, now],
+    );
+    await mirrorLocalSubstitution(db, id);
+  });
   return { id, find, replace, case_sensitive: cs, created_at: now };
 }
 
@@ -33,15 +37,21 @@ export async function updateTextSubstitution(
 ): Promise<void> {
   const db = await getDb();
   const cs: 0 | 1 = caseSensitive ? 1 : 0;
-  await db.runAsync("UPDATE text_substitutions SET find = ?, replace = ?, case_sensitive = ? WHERE id = ?", [
-    find,
-    replace,
-    cs,
-    id,
-  ]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("UPDATE text_substitutions SET find = ?, replace = ?, case_sensitive = ? WHERE id = ?", [
+      find,
+      replace,
+      cs,
+      id,
+    ]);
+    await mirrorLocalSubstitution(db, id);
+  });
 }
 
 export async function deleteTextSubstitution(id: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync("DELETE FROM text_substitutions WHERE id = ?", [id]);
+  await withAppDbTransaction(db, async () => {
+    await db.runAsync("DELETE FROM text_substitutions WHERE id = ?", [id]);
+    await mirrorLocalSubstitution(db, id);
+  });
 }

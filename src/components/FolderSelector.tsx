@@ -5,6 +5,7 @@ import { Colors, Radius, Spacing, Typography } from "../theme";
 import { Folder } from "../types";
 import FolderGrid from "./FolderGrid";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { randomId } from "../utils/randomId";
 
 interface Props {
   folders: Folder[];
@@ -23,7 +24,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
     if (!name) return;
     setCreating(true);
     try {
-      const folder = await createFolder(String(Date.now()), name);
+      const folder = await createFolder(randomId(), name);
       onFolderCreated(folder);
       setNewName("");
     } finally {
