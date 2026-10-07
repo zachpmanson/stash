@@ -1,5 +1,6 @@
 import * as Sharing from "expo-sharing";
 import { Directory, File, Paths } from "expo-file-system";
+import { copyAsync } from "expo-file-system/legacy";
 import { zip, unzip } from "react-native-zip-archive";
 import { checkpointDb, closeDb, getDb } from "../db/database";
 import { Folder, StashItem } from "../types";
@@ -140,7 +141,10 @@ export async function pickBackupFile(): Promise<string> {
   // content:// URIs aren't directly readable by the zip native module; copy to cache.
   if (!src.uri.startsWith("file://")) {
     const dest = new File(Paths.cache, `picked-backup-${makeStagingId()}.zip`);
-    copyFileContents(src, dest);
+    // SAF/content URIs may point to large media-heavy backups. The sync bytesSync()
+    // path buffers the entire archive in JS and can OOM on Android; native copyAsync
+    // streams the provider content directly to the cache file.
+    await copyAsync({ from: src.uri, to: dest.uri });
     return dest.uri;
   }
   return src.uri;
