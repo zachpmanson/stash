@@ -34,6 +34,51 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "16kb" }));
 app.get("/healthz", (_request, response) => response.json({ ok: true, bind: HOST, port: PORT, schema: SCHEMA_NAME, schemaVersion: SCHEMA_VERSION.toString() }));
+app.get("/sync/status", async (request, response, next) => {
+  if (request.header("X-Auth-User") !== AUTH_USER) {
+    response.sendStatus(401);
+    return;
+  }
+
+  const clientSiteId = request.query.clientSiteId;
+  if (typeof clientSiteId !== "string" || !/^[0-9a-f]{32}$/i.test(clientSiteId)) {
+    response.status(400).json({ error: "clientSiteId must be a 16-byte hex site ID" });
+    return;
+  }
+
+  try {
+    let result: unknown;
+    await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
+      const db = peer.getDB();
+      const local = db.prepare("SELECT hex(crsql_site_id()) AS siteId").get() as { siteId: string };
+      const clientBytes = Buffer.from(clientSiteId, "hex");
+      const serverVersion = db.prepare(`SELECT COALESCE(MAX(db_version), 0) AS version
+        FROM crsql_changes WHERE site_id IS NOT ?`).get(clientBytes) as { version: number };
+      const client = db.prepare(`SELECT version FROM crsql_tracked_peers
+        WHERE site_id = ? AND event = 0 AND tag = 0 ORDER BY version DESC LIMIT 1`).get(
+        clientBytes,
+      ) as { version: number } | undefined;
+      const counts = db.prepare(`SELECT
+        (SELECT COUNT(*) FROM sync_folders) AS folders,
+        (SELECT COUNT(*) FROM sync_items) AS items,
+        (SELECT COUNT(*) FROM sync_item_folders) AS memberships,
+        (SELECT COUNT(*) FROM sync_text_substitutions) AS substitutions,
+        (SELECT COUNT(*) FROM sync_user_settings) AS settings`).get();
+      result = {
+        schema: SCHEMA_NAME,
+        schemaVersion: SCHEMA_VERSION.toString(),
+        serverSiteId: local.siteId.toLowerCase(),
+        serverVersion: String(serverVersion.version),
+        clientSiteId: clientSiteId.toLowerCase(),
+        clientSeenVersion: String(client?.version ?? 0),
+        counts,
+      };
+    });
+    response.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
 
 const server = createServer(app);
 const sockets = new Set<Socket>();

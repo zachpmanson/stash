@@ -1,6 +1,6 @@
 # Stash CR-SQLite WebSocket service foundation
 
-This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server` with CR-SQLite 0.16.3 and the candidate Stash sync schema (`sync_folders`, `sync_items`, `sync_item_folders`, `sync_text_substitutions`, `sync_user_settings`). It uses the isolated `stash-backend` room (stored as an extensionless SQLite file so the upstream change watcher resolves the room name correctly) and is **not connected to Stash's production app lifecycle or production data**. The app/server schema copies are parity-tested; production rollout and media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
+This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server` with CR-SQLite 0.16.3 and the candidate Stash sync schema (`sync_folders`, `sync_items`, `sync_item_folders`, `sync_text_substitutions`, `sync_user_settings`). It uses the isolated `stash-backend` room (stored as an extensionless SQLite file so the upstream change watcher resolves the room name correctly). The actual Stash app now has a development-only, manually opted-in client path; this service is still not deployed as the Stash production sync target, and production data is not connected. App/server schema copies are parity-tested; production rollout and media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
 ## Trust boundary
 
@@ -21,7 +21,7 @@ Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing th
 | `AUTH_USER` | `zach` | Exact Caddy-stamped `X-Auth-User` allowed to upgrade |
 | `ENABLE_TEST_ENDPOINTS` | unset | Set to `1` only for local integration tests |
 
-Startup creates/validates the database before opening the listener: schema name/version, all five candidate CRR tables, and SQLite `integrity_check`. `/healthz` reports readiness and the schema version. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
+Startup creates/validates the database before opening the listener: schema name/version, all five candidate CRR tables, and SQLite `integrity_check`. `/healthz` reports readiness and the schema version. `/sync/status?clientSiteId=<hex>` requires the Caddy-stamped identity and reports the highest outbound version available to that client (excluding changes the client already originated), plus the highest version received from it and aggregate table counts. The app also compares its tracked version for the server site ID. Together these checks form the two-way completion barrier before destructive projection into Stash's local tables. The high-water marks follow ws-client 0.2.0's `(db_version, 0)` whole-version-group convention. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
 
 ## Local development and tests
 
@@ -45,7 +45,7 @@ nix develop --command pnpm typecheck
 nix develop --command pnpm test
 ```
 
-For the end-to-end Android flow, see [`../app/README.md`](../app/README.md). The normal test endpoints remain disabled unless explicitly opted in; do not use them as a product API.
+For the end-to-end Android flow, see [`../app/README.md`](../app/README.md). The disposable `/test/*` hooks remain disabled unless explicitly opted in; do not use them as a product API. `/sync/status` is part of the candidate authenticated app protocol, not a replacement for the WebSocket data channel.
 
 ## Backup, restore, and reset
 

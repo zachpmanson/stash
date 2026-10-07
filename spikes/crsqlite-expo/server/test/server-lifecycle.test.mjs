@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -10,6 +11,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { request } from "node:http";
 import WebSocket from "ws";
+import Database from "better-sqlite3";
+import { extensionPath } from "@vlcn.io/crsqlite";
 import { encode, tags } from "@vlcn.io/ws-common";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -97,7 +100,7 @@ async function waitForLog(child, text) {
   throw new Error(`timed out waiting for server log ${text}: ${child.output}`);
 }
 
-async function announceSyncPeer(port, schemaVersion) {
+async function announceSyncPeer(port, schemaVersion, sender = new Uint8Array(randomBytes(16))) {
   const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
   const socket = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, {
     headers: { "X-Auth-User": "zach" },
@@ -105,7 +108,7 @@ async function announceSyncPeer(port, schemaVersion) {
   await once(socket, "open");
   socket.send(encode({
     _tag: tags.AnnouncePresence,
-    sender: new Uint8Array(randomBytes(16)),
+    sender,
     lastSeens: [],
     schemaName: "stash-sync-v1.sql",
     schemaVersion: BigInt(schemaVersion),
@@ -116,6 +119,36 @@ async function announceSyncPeer(port, schemaVersion) {
 async function postOfflineWrite(port) {
   const response = await fetch(`http://127.0.0.1:${port}/test/offline-write`, { method: "POST" });
   assert.equal(response.status, 200);
+}
+
+function openClientReplica() {
+  const db = new Database(":memory:");
+  db.loadExtension(extensionPath);
+  db.exec(readFileSync(path.join(root, "../schemas/stash-sync-v1.sql"), "utf8"));
+  const { siteId } = db.prepare("SELECT crsql_site_id() AS siteId").get();
+  return { db, siteId };
+}
+
+function clientChanges(db, sinceVersion) {
+  return db.prepare(`SELECT "table", pk, cid, val, col_version, db_version, cl, seq
+    FROM crsql_changes WHERE db_version > ? ORDER BY db_version, seq`).all(sinceVersion).map((row) => [
+    row.table, row.pk, row.cid, row.val, BigInt(row.col_version), BigInt(row.db_version), null,
+    BigInt(row.cl), row.seq,
+  ]);
+}
+
+async function waitForPeerVersion(port, clientSiteId, expectedVersion) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId.toString("hex")}`, {
+      headers: { "X-Auth-User": "zach" },
+    });
+    assert.equal(response.status, 200);
+    const status = await response.json();
+    if (BigInt(status.clientSeenVersion) >= BigInt(expectedVersion)) return status;
+    await delay(50);
+  }
+  throw new Error(`server did not observe client version ${expectedVersion}`);
 }
 
 async function runDbAdmin(dataDir, ...args) {
@@ -154,7 +187,35 @@ test("authenticates upgrades and drains an active peer before persistent restart
   assert.equal(health.ok, true);
   assert.equal(health.bind, "127.0.0.1");
   assert.equal(health.schema, "stash-sync-v1.sql");
+  const clientSiteId = randomBytes(16).toString("hex");
+  const unauthenticatedStatus = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`);
+  assert.equal(unauthenticatedStatus.status, 401, "sync status must require Caddy-stamped identity");
+  const wrongIdentityStatus = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "attacker" },
+  });
+  assert.equal(wrongIdentityStatus.status, 401, "sync status must reject an unexpected identity");
+  const malformedSiteStatus = await fetch("http://127.0.0.1:" + port + "/sync/status?clientSiteId=xyz", {
+    headers: { "X-Auth-User": "zach" },
+  });
+  assert.equal(malformedSiteStatus.status, 400, "sync status must reject malformed site IDs");
+  const statusResponse = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "zach" },
+  });
+  assert.equal(statusResponse.status, 200);
+  const status = await statusResponse.json();
+  assert.equal(status.schema, "stash-sync-v1.sql");
+  assert.equal(status.clientSiteId, clientSiteId);
+  assert.equal(status.clientSeenVersion, "0");
+  assert.equal(status.serverVersion, "0");
+  assert.ok(status.serverSiteId);
+  assert.deepEqual(status.counts, { folders: 0, items: 0, memberships: 0, substitutions: 0, settings: 0 });
   await postOfflineWrite(port);
+  const changedStatusResponse = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "zach" },
+  });
+  const changedStatus = await changedStatusResponse.json();
+  assert.equal(changedStatus.counts.items, 1);
+  assert.ok(BigInt(changedStatus.serverVersion) > 0n);
 
   const malformed = await websocketUpgrade(port, false, false);
   assert.equal(malformed.status, 400, "malformed upgrades must be rejected without crashing the service");
@@ -167,8 +228,34 @@ test("authenticates upgrades and drains an active peer before persistent restart
   assert.ok(accepted.socket);
   accepted.socket.destroy();
 
-  syncPeer = await announceSyncPeer(port, health.schemaVersion);
+  const client = openClientReplica();
+  t.after(() => client.db.close());
+  client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, ?)")
+    .run("client-status-item", "offline from the client", 1);
+  const initialClientVersion = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+  syncPeer = await announceSyncPeer(port, health.schemaVersion, client.siteId);
   await waitForLog(child, "AnnouncePresence for: stash-backend");
+  syncPeer.send(encode({
+    _tag: tags.Changes,
+    sender: client.siteId,
+    since: [0n, 0],
+    changes: clientChanges(client.db, 0),
+  }));
+  const receivedInitial = await waitForPeerVersion(port, client.siteId, initialClientVersion);
+  assert.equal(receivedInitial.counts.items, 2);
+  assert.equal(receivedInitial.serverVersion, changedStatus.serverVersion,
+    "client-authored changes should not advance that client's outbound server watermark");
+
+  client.db.prepare("DELETE FROM sync_items WHERE id = ?").run("client-status-item");
+  const afterDeleteVersion = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+  syncPeer.send(encode({
+    _tag: tags.Changes,
+    sender: client.siteId,
+    since: [BigInt(initialClientVersion), 0],
+    changes: clientChanges(client.db, initialClientVersion),
+  }));
+  const receivedDelete = await waitForPeerVersion(port, client.siteId, afterDeleteVersion);
+  assert.equal(receivedDelete.counts.items, 1, "client tombstone must remove the remote candidate row");
 
   await stop(child);
   child = null;

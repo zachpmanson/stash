@@ -2,17 +2,19 @@
 
 ## CR-SQLite integration work in progress
 
-The production app currently remains local-only. A development-only Settings action
-can seed an isolated CR-SQLite mirror of the existing local SQLite data; it does
-not connect to a server or change the app's ordinary read/write path. Do not enable
-production sync or run the seed against an irreplaceable database. CR-SQLite is
-currently packaged on Android only; iOS hides the sync developer actions and
-continues local-only even when opening a database that contains replica tables.
-Migration and local writes share an in-process write gate. Applying replica data back to app
-tables is additionally refused unless a sync driver invalidates the projection
-gate before receiving changes and marks a complete exchange only after all batches
-land; that marker is consumed after projection to prevent partial snapshots
-deleting local-only rows.
+The production app remains local-only by default. Android development builds expose
+Settings actions to seed a CR-SQLite mirror and manually connect to a matching Stash
+sync server; the sync client is opt-in, checks the server schema before sending data,
+and waits for an authenticated two-way sync-version barrier before projecting remote
+state into app tables. Basic-auth credentials remain in memory and are not saved.
+Do not point this at the existing Naboo `notes` service or run replica seeding against
+an irreplaceable database. CR-SQLite is packaged on Android only; iOS hides the sync
+developer actions and continues local-only even when opening a database with replica
+tables. Migration, local writes, and incoming replication share an in-process write
+gate. Projection is refused unless the sync driver marks a complete exchange, and the
+marker is consumed after projection to prevent partial snapshots deleting local rows.
+The Stash-schema server and populated-backup/device integration still require validation;
+production sync remains disabled.
 
 Android CR-SQLite libraries are pinned to v0.16.3. Recreate them with
 `nix develop --command ./scripts/prepare-crsqlite-android.sh`; arm64 is fetched

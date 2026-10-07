@@ -9,6 +9,8 @@ import { Colors } from "../src/theme";
 import { SnackbarHost } from "../src/components/SnackbarHost";
 import { ModalHost } from "../src/components/ModalHost";
 import { isShareLaunch } from "../src/utils/nativeShareIntent";
+import { subscribeStashSyncProjection } from "../src/db/syncClient";
+import { useFolderStore } from "../src/state/folderState";
 
 const SHARE_LAUNCH = isShareLaunch();
 
@@ -42,6 +44,10 @@ function RootLayout() {
   const router = useRouter();
   const { resolvedSharedPayloads } = useIncomingShare();
   const handledSigRef = useRef<string | null>(null);
+
+  useEffect(() => subscribeStashSyncProjection(() => {
+    void useFolderStore.getState().refresh();
+  }), []);
 
   useEffect(() => {
     if (resolvedSharedPayloads.length === 0) return;

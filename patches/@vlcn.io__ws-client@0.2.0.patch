@@ -1,0 +1,72 @@
+diff --git a/dist/transport/Transport.d.ts b/dist/transport/Transport.d.ts
+index 5679cdcaafdd64755c7266450536c5b1b6f2205c..fab5dc72e5dd81f64f66f6412219f6d62124a1ac 100644
+--- a/dist/transport/Transport.d.ts
++++ b/dist/transport/Transport.d.ts
+@@ -3,6 +3,7 @@ export type TransporOptions = {
+     url: string;
+     room: string;
+     authToken?: string;
++    headers?: Record<string, string>;
+ };
+ export interface Transport {
+     start(onReady: () => void): void;
+diff --git a/dist/transport/WebSocketTransport.js b/dist/transport/WebSocketTransport.js
+index 027be1f41b7d27f7344b4f3306ab504da84ba5b8..acbff0692515b9dd2f41e186914b114b4e8e3c06 100644
+--- a/dist/transport/WebSocketTransport.js
++++ b/dist/transport/WebSocketTransport.js
+@@ -24,9 +24,13 @@ export default class WebSocketTransport {
+                 }
+             }, Math.random() * 2000 + 1000);
+         }
+-        const socket = new WebSocket(options.url, [
++        const protocols = [
+             btoa(`${options.authToken != null ? `auth=${options.authToken},` : ""}room=${options.room}`).replaceAll("=", ""),
+-        ]);
++        ];
++        // React Native's WebSocket accepts handshake headers as a third argument.
++        const socket = options.headers
++            ? Reflect.construct(WebSocket, [options.url, protocols, { headers: options.headers }])
++            : new WebSocket(options.url, protocols);
+         socket.binaryType = "arraybuffer";
+         socket.addEventListener("message", (e) => {
+             this.#processEvent(new Uint8Array(e.data));
+diff --git a/src/transport/Transport.ts b/src/transport/Transport.ts
+index 99745feade55cb448c57e955f306b4032aaa12fa..7ac3ffc661c6569001d4af739ca70074baef6e42 100644
+--- a/src/transport/Transport.ts
++++ b/src/transport/Transport.ts
+@@ -9,6 +9,7 @@ export type TransporOptions = {
+   url: string;
+   room: string;
+   authToken?: string;
++  headers?: Record<string, string>;
+ };
+-
++
+ export interface Transport {
+diff --git a/src/transport/WebSocketTransport.ts b/src/transport/WebSocketTransport.ts
+index 3717d137e1f81758724fe05944da5d9e1a0e6083..68bfbc4fadef534d259fee9c587ed24ad3268102 100644
+--- a/src/transport/WebSocketTransport.ts
++++ b/src/transport/WebSocketTransport.ts
+@@ -39,13 +39,18 @@ export default class WebSocketTransport implements Transport {
+       }, Math.random() * 2000 + 1000);
+     }
+-
++
+-    const socket = new WebSocket(options.url, [
++    const protocols = [
+       btoa(
+         `${options.authToken != null ? `auth=${options.authToken},` : ""}room=${
+           options.room
+         }`
+       ).replaceAll("=", ""),
+-    ]);
++    ];
++    // React Native's WebSocket implementation accepts custom handshake headers
++    // as a third constructor argument; browser WebSocket does not.
++    const socket = options.headers
++      ? (Reflect.construct(WebSocket, [options.url, protocols, { headers: options.headers }]) as WebSocket)
++      : new WebSocket(options.url, protocols);
+     socket.binaryType = "arraybuffer";
+-
++
+     socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => {
