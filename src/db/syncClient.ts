@@ -9,6 +9,7 @@ import type { Change } from "@vlcn.io/ws-common";
 import {
   ensureCrsqliteLoaded,
   getDb,
+  withAppDbLock,
   withAppDbWriteLock,
 } from "./database";
 import {
@@ -158,7 +159,9 @@ class StashReplica implements DB {
     const excluded = excludeSites.length > 0
       ? ` AND site_id NOT IN (${excludeSites.map(() => "?").join(", ")})`
       : "";
-    const rows = await this.#database.getAllAsync<{
+    // Serialize CR-SQLite statements with peer-watermark reads and app writes;
+    // overlapping async statements can fail during Expo SQLite finalization on Android.
+    const rows = await withAppDbLock(() => this.#database.getAllAsync<{
       table: string;
       pk: Uint8Array;
       cid: string;
@@ -171,7 +174,7 @@ class StashReplica implements DB {
       `SELECT ${CHANGE_COLUMNS} FROM crsql_changes WHERE db_version > ?${excluded}`,
       sqliteInteger(since[0]),
       ...excludeSites,
-    );
+    ));
 
     return rows.map((row) => [
       row.table,
@@ -215,11 +218,11 @@ class StashReplica implements DB {
   }
 
   async getLastSeens(): Promise<[Uint8Array, [bigint, number]][]> {
-    const rows = await this.#database.getAllAsync<{
+    const rows = await withAppDbLock(() => this.#database.getAllAsync<{
       site_id: Uint8Array;
       version: number;
       seq: number;
-    }>("SELECT site_id, version, seq FROM crsql_tracked_peers WHERE event = 0 AND tag = 0");
+    }>("SELECT site_id, version, seq FROM crsql_tracked_peers WHERE event = 0 AND tag = 0"));
     return rows.map((row) => [row.site_id, [BigInt(row.version), row.seq]]);
   }
 
@@ -277,10 +280,10 @@ async function localOutboundVersion(
   database: SQLite.SQLiteDatabase,
   serverSiteId: string,
 ): Promise<bigint> {
-  const row = await database.getFirstAsync<{ version: number | bigint }>(`SELECT
+  const row = await withAppDbLock(() => database.getFirstAsync<{ version: number | bigint }>(`SELECT
     COALESCE(MAX(db_version), 0) AS version FROM crsql_changes WHERE site_id IS NOT ?`,
     siteIdBytes(serverSiteId),
-  );
+  ));
   // Match ws-client 0.2.0's outbound query: the server excludes its own site ID
   // and the stream cursor is the maximum db_version for all remaining rows.
   return sqliteVersion(row?.version ?? 0);

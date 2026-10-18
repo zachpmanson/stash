@@ -4,19 +4,24 @@ import { Platform } from "react-native";
 let db: SQLite.SQLiteDatabase | null = null;
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 const loadedCrsqliteDatabases = new WeakSet<object>();
-let dbWriteTail: Promise<void> = Promise.resolve();
+let dbAccessTail: Promise<void> = Promise.resolve();
 
-/** Serialize app writes with replica seeding and remote projection. */
-export async function withAppDbWriteLock<T>(task: () => Promise<T>): Promise<T> {
-  const previous = dbWriteTail;
+/** Serialize database access that must not overlap with app writes or sync reads. */
+export async function withAppDbLock<T>(task: () => Promise<T>): Promise<T> {
+  const previous = dbAccessTail;
   let release!: () => void;
-  dbWriteTail = new Promise<void>((resolve) => { release = resolve; });
+  dbAccessTail = new Promise<void>((resolve) => { release = resolve; });
   await previous;
   try {
     return await task();
   } finally {
     release();
   }
+}
+
+/** Serialize app writes with replica seeding and remote projection. */
+export function withAppDbWriteLock<T>(task: () => Promise<T>): Promise<T> {
+  return withAppDbLock(task);
 }
 
 export async function withAppDbTransaction(
