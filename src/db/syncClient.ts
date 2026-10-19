@@ -57,7 +57,16 @@ type ReactNativeWebSocket = new (
 const statusListeners = new Set<SyncListener>();
 const projectionListeners = new Set<() => void>();
 let currentStatus: StashSyncStatus = { phase: "stopped" };
-let activeSession: { stop: () => boolean } | null = null;
+type SyncSession = { stop: () => boolean; done: Promise<void> };
+type SyncConnectionAttempt = {
+  cancelled: boolean;
+  controller: AbortController;
+  done: Promise<void>;
+  cancel: () => void;
+};
+let activeSession: SyncSession | null = null;
+let connectionAttempt: SyncConnectionAttempt | null = null;
+let syncRestoreInProgress = false;
 
 function publishStatus(status: StashSyncStatus): void {
   currentStatus = status;
@@ -240,6 +249,10 @@ class StashReplica implements DB {
     this.#subscription.remove();
     this.#listeners.clear();
   }
+
+  async waitForPendingChanges(): Promise<void> {
+    await this.#applyQueue;
+  }
 }
 
 async function readSiteId(database: SQLite.SQLiteDatabase): Promise<Uint8Array> {
@@ -248,8 +261,15 @@ async function readSiteId(database: SQLite.SQLiteDatabase): Promise<Uint8Array> 
   return result.site_id;
 }
 
-async function authenticatedHealthCheck(base: URL, authorization: string): Promise<void> {
-  const response = await fetch(new URL("healthz", base), { headers: { Authorization: authorization } });
+async function authenticatedHealthCheck(
+  base: URL,
+  authorization: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(new URL("healthz", base), {
+    headers: { Authorization: authorization },
+    signal,
+  });
   if (!response.ok) throw new Error(`Authenticated sync-server health check returned HTTP ${response.status}`);
   const health = await response.json() as { schema?: string; schemaVersion?: string };
   if (health.schema !== SYNC_CRR_SCHEMA_NAME || health.schemaVersion !== SYNC_CRR_SCHEMA_VERSION.toString()) {
@@ -264,10 +284,11 @@ async function readServerStatus(
   base: URL,
   authorization: string,
   clientSiteId: string,
+  signal?: AbortSignal,
 ): Promise<ServerSyncStatus> {
   const url = new URL("sync/status", base);
   url.searchParams.set("clientSiteId", clientSiteId);
-  const response = await fetch(url, { headers: { Authorization: authorization } });
+  const response = await fetch(url, { headers: { Authorization: authorization }, signal });
   if (!response.ok) throw new Error(`Sync-server status returned HTTP ${response.status}`);
   const status = await response.json() as ServerSyncStatus;
   if (status.schema !== SYNC_CRR_SCHEMA_NAME || status.schemaVersion !== SYNC_CRR_SCHEMA_VERSION.toString()) {
@@ -323,12 +344,19 @@ async function isExchanged(
   };
 }
 
-function networkConfig(authorization: string): Config {
+function networkConfig(
+  authorization: string,
+  database: SQLite.SQLiteDatabase,
+  siteId: Uint8Array,
+  onReplica?: (replica: StashReplica) => void,
+): Config {
   return {
+    // createSyncedDB awaits dbProvider before it can be stopped. Use the already
+    // opened DB/site ID so setup has no second, potentially unbounded DB open/read.
     dbProvider: async () => {
-      const database = await getDb();
-      const siteId = await readSiteId(database);
-      return new StashReplica(database, siteId);
+      const replica = new StashReplica(database, siteId);
+      onReplica?.(replica);
+      return replica;
     },
     transportProvider: (options) => defaultConfig.transportProvider({
       ...options,
@@ -342,13 +370,30 @@ export async function connectStashSync(
   credentials: Credentials,
   onStatus: SyncListener = publishStatus,
 ): Promise<{ stop: () => boolean }> {
-  if (activeSession) throw new Error("Stash sync is already connected on this install.");
+  if (syncRestoreInProgress) throw new Error("Stash sync cannot connect while a backup restore is in progress.");
+  if (activeSession || connectionAttempt) throw new Error("Stash sync is already connected or connecting on this install.");
   onStatus({ phase: "connecting", message: "Checking authenticated Stash sync server…" });
-  const prepared = await (async () => {
+
+  const attempt: SyncConnectionAttempt = {
+    cancelled: false,
+    controller: new AbortController(),
+    done: Promise.resolve(),
+    cancel: () => {
+      attempt.cancelled = true;
+      attempt.controller.abort();
+    },
+  };
+  connectionAttempt = attempt;
+  let setupError: unknown;
+  let setupFailed = false;
+  let result: { stop: () => boolean } = { stop: () => false };
+
+  attempt.done = (async () => {
     try {
       const base = normalizedBaseUrl(serverUrl);
       const authorization = basicAuthorization(credentials);
       const database = await getDb();
+      if (attempt.cancelled) return;
       await ensureCrsqliteLoaded(database);
 
       const marker = await database.getFirstAsync<{ value: string }>(
@@ -356,72 +401,140 @@ export async function connectStashSync(
         SYNC_INITIALIZED_KEY,
       );
       if (!marker) throw new Error("Prepare this install's local sync replica before connecting.");
+      if (attempt.cancelled) return;
 
-      await authenticatedHealthCheck(base, authorization);
+      await authenticatedHealthCheck(base, authorization, attempt.controller.signal);
+      if (attempt.cancelled) return;
       const siteId = await readSiteId(database);
       const clientSiteId = siteIdHex(siteId);
+      const syncReplicaRef: { current: StashReplica | null } = { current: null };
       const options = { url: websocketUrl(base), room: DATABASE_ROOM };
-      const syncedDb = await createSyncedDB(networkConfig(authorization), DATABASE_ROOM, options);
+      const syncedDb = await createSyncedDB(
+        networkConfig(authorization, database, siteId, (replica) => { syncReplicaRef.current = replica; }),
+        DATABASE_ROOM,
+        options,
+      );
       try {
+        if (attempt.cancelled) {
+          syncedDb.stop();
+          await syncReplicaRef.current?.waitForPendingChanges();
+          return;
+        }
         await beginSyncCycle(database);
         await syncedDb.start();
-      } catch (error) {
-        syncedDb.stop();
-        throw error;
-      }
-      return { base, authorization, database, siteId, clientSiteId, syncedDb };
-    } catch (error) {
-      onStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  })();
-  const { base, authorization, database, siteId, clientSiteId, syncedDb } = prepared;
-  let running = true;
-  let projectedSignature = "";
-  const replica = new StashReplica(database, siteId);
-  // This adapter is only used for status reads; release its listener immediately.
-  replica.close(false);
-  const session = {
-    stop: () => {
-      if (!running) return false;
-      running = false;
-      syncedDb.stop();
-      if (activeSession === session) activeSession = null;
-      onStatus({ phase: "stopped", message: "Sync disconnected." });
-      return true;
-    },
-  };
-  activeSession = session;
-  onStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
-
-  void (async () => {
-    while (running) {
-      try {
-        const status = await readServerStatus(base, authorization, clientSiteId);
-        const exchange = await isExchanged(database, replica, clientSiteId, status);
-        if (exchange.complete && exchange.signature !== projectedSignature) {
-          await beginSyncCycle(database);
-          await markSyncSnapshotComplete(database);
-          await projectSyncReplicaToLocal(database);
-          projectedSignature = exchange.signature;
-          const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: Date.now() };
-          onStatus(state);
-          publishProjection();
-        } else if (!exchange.complete) {
-          onStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
+        if (attempt.cancelled) {
+          syncedDb.stop();
+          await syncReplicaRef.current?.waitForPendingChanges();
+          return;
         }
       } catch (error) {
+        syncedDb.stop();
+        await syncReplicaRef.current?.waitForPendingChanges();
+        throw error;
+      }
+
+      let running = true;
+      let projectedSignature = "";
+      const replica = new StashReplica(database, siteId);
+      // This adapter is only used for status reads; release its listener immediately.
+      replica.close(false);
+      const session: SyncSession = {
+        done: Promise.resolve(),
+        stop: () => {
+          if (!running) return false;
+          running = false;
+          attempt.controller.abort();
+          syncedDb.stop();
+          onStatus({ phase: "stopped", message: "Sync disconnected." });
+          return true;
+        },
+      };
+      activeSession = session;
+      result = session;
+      onStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
+
+      const pollTask = (async () => {
+        while (running) {
+          try {
+            const status = await readServerStatus(base, authorization, clientSiteId, attempt.controller.signal);
+            const exchange = await isExchanged(database, replica, clientSiteId, status);
+            if (!running) break;
+            if (exchange.complete && exchange.signature !== projectedSignature) {
+              await beginSyncCycle(database);
+              await markSyncSnapshotComplete(database);
+              await projectSyncReplicaToLocal(database);
+              if (!running) break;
+              projectedSignature = exchange.signature;
+              const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: Date.now() };
+              onStatus(state);
+              publishProjection();
+            } else if (!exchange.complete) {
+              onStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
+            }
+          } catch (error) {
+            if (!running) break;
+            onStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+          }
+          if (running) await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_MS));
+        }
+      })();
+      session.done = pollTask.then(async () => {
+        await Promise.resolve();
+        await syncReplicaRef.current?.waitForPendingChanges();
+        await Promise.resolve();
+        await syncReplicaRef.current?.waitForPendingChanges();
+      });
+      void session.done.finally(() => {
+        if (activeSession === session) activeSession = null;
+      });
+    } catch (error) {
+      if (!attempt.cancelled) {
+        setupFailed = true;
+        setupError = error;
         onStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
       }
-      await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_MS));
+    } finally {
+      if (connectionAttempt === attempt) connectionAttempt = null;
     }
   })();
 
-  return session;
+  await attempt.done;
+  if (setupFailed) throw setupError;
+  return result;
 }
 
 export function disconnectStashSync(): boolean {
+  const cancelledAttempt = connectionAttempt;
+  if (cancelledAttempt) cancelledAttempt.cancel();
   if (activeSession) return activeSession.stop();
   publishStatus({ phase: "stopped", message: "Sync disconnected." });
-  return false;
+  return cancelledAttempt !== null;
+}
+
+/** Cancel connection setup or stop sync, then wait for all DB reads/projections to finish. */
+export async function disconnectStashSyncAndWait(): Promise<void> {
+  const attempt = connectionAttempt;
+  if (attempt) {
+    attempt.cancel();
+    await attempt.done;
+  }
+  const session = activeSession;
+  if (!session) {
+    disconnectStashSync();
+    return;
+  }
+  session.stop();
+  await session.done;
+}
+
+/** Exclude new sync connection attempts while a backup replaces the local DB. */
+export async function withStashSyncRestoreLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (syncRestoreInProgress) throw new Error("A backup restore is already in progress.");
+  syncRestoreInProgress = true;
+  try {
+    await disconnectStashSyncAndWait();
+    return await operation();
+  } finally {
+    syncRestoreInProgress = false;
+  }
 }

@@ -70,6 +70,10 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
 export async function closeDb(): Promise<void> {
   await withAppDbWriteLock(async () => {
     const current = db;
+    if (current && loadedCrsqliteDatabases.has(current)) {
+      await current.execAsync("SELECT crsql_finalize()");
+      loadedCrsqliteDatabases.delete(current);
+    }
     db = null;
     dbPromise = null;
     if (current) {

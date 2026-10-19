@@ -3,6 +3,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { copyAsync } from "expo-file-system/legacy";
 import { zip, unzip } from "react-native-zip-archive";
 import { checkpointDb, closeDb, getDb } from "../db/database";
+import { withStashSyncRestoreLock } from "../db/syncClient";
 import { Folder, StashItem } from "../types";
 
 const DB_FILENAME = "stash.db";
@@ -106,20 +107,22 @@ export async function restoreBackup(fileUri: string): Promise<BackupManifest> {
       throw new Error("Unsupported or invalid Stash backup.");
     }
 
-    // 3. Close the DB, then swap in the restored database + files.
-    await closeDb();
+    return await withStashSyncRestoreLock(async () => {
+      // 3. Stop sync and close/finalize the DB before swapping in restored files.
+      await closeDb();
 
-    await replaceDatabase(new Directory(stagingRoot));
-    await replaceFilesDir(new Directory(stagingRoot, FILES_DIR_NAME));
+      await replaceDatabase(new Directory(stagingRoot));
+      await replaceFilesDir(new Directory(stagingRoot, FILES_DIR_NAME));
 
-    // 4. Rewrite stored media URIs. `copyFileToStash` saves ABSOLUTE paths
-    //    (file:///data/user/0/<package>/files/stash/<file>), so a backup made
-    //    in one app (e.g. release) restored into another (e.g. debug) still
-    //    points at the old package's private dir. Re-target any such URI at
-    //    this app's own document stash dir.
-    await rewriteStoredUris();
+      // 4. Rewrite stored media URIs. `copyFileToStash` saves ABSOLUTE paths
+      //    (file:///data/user/0/<package>/files/stash/<file>), so a backup made
+      //    in one app (e.g. release) restored into another (e.g. debug) still
+      //    points at the old package's private dir. Re-target any such URI at
+      //    this app's own document stash dir.
+      await rewriteStoredUris();
 
-    return manifest;
+      return manifest;
+    });
   } finally {
     try {
       stagingRoot.delete();
