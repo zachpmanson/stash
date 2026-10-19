@@ -1,14 +1,14 @@
 import * as SQLite from "expo-sqlite";
 import {
-  inspectSyncIntegrity,
-  loadCrsqliteExtension,
-  mirrorLocalItem,
-  mirrorLocalMembership,
-  mirrorLocalSubstitution,
-  markSyncSnapshotComplete,
-  projectSyncReplicaToLocal,
-  reconcileSyncRelationships,
-  seedSyncReplica,
+  inspectSyncIntegrityOwned,
+  loadCrsqliteExtensionOwned,
+  mirrorLocalItemOwned,
+  mirrorLocalMembershipOwned,
+  mirrorLocalSubstitutionOwned,
+  markSyncSnapshotCompleteOwned,
+  projectSyncReplicaToLocalOwned,
+  reconcileSyncRelationshipsOwned,
+  seedSyncReplicaOwned,
   SYNC_SCHEMA_SQL,
 } from "./syncReplica";
 
@@ -34,7 +34,7 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
   let finalized = false;
 
   try {
-    await loadCrsqliteExtension(db);
+    await loadCrsqliteExtensionOwned(db);
     await db.execAsync(`
       CREATE TABLE folders (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT,
@@ -73,7 +73,7 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
       WHEN NEW.id = 'url-1' BEGIN SELECT RAISE(ABORT, 'injected seed failure'); END`);
     let seedFailureObserved = false;
     try {
-      await seedSyncReplica(db, true);
+      await seedSyncReplicaOwned(db, true);
     } catch (error) {
       seedFailureObserved = error instanceof Error && error.message.includes("injected seed failure");
     }
@@ -85,27 +85,27 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
       throw new Error("An interrupted seed left partial replica data or a false completion marker.");
     }
     await db.execAsync("DROP TRIGGER fail_sync_seed");
-    const seedCounts = await seedSyncReplica(db, true);
+    const seedCounts = await seedSyncReplicaOwned(db, true);
     if (!seedCounts || seedCounts.folders !== 1 || seedCounts.items !== 2 || seedCounts.memberships !== 1 || seedCounts.substitutions !== 1) {
       throw new Error(`Unexpected fixture seed counts: ${JSON.stringify(seedCounts)}`);
     }
-    const secondSeed = await seedSyncReplica(db, true);
+    const secondSeed = await seedSyncReplicaOwned(db, true);
     if (secondSeed !== null) throw new Error("Repeat seed was not idempotent.");
     let partialProjectionRefused = false;
     try {
-      await projectSyncReplicaToLocal(db);
+      await projectSyncReplicaToLocalOwned(db);
     } catch (error) {
       partialProjectionRefused = error instanceof Error && error.message.includes("completed sync snapshot");
     }
     if (!partialProjectionRefused) throw new Error("Projection did not refuse an incomplete sync snapshot.");
     let partialReconciliationRefused = false;
     try {
-      await reconcileSyncRelationships(db);
+      await reconcileSyncRelationshipsOwned(db);
     } catch (error) {
       partialReconciliationRefused = error instanceof Error && error.message.includes("completed sync snapshot");
     }
     if (!partialReconciliationRefused) throw new Error("Reconciliation did not refuse an incomplete sync snapshot.");
-    await markSyncSnapshotComplete(db);
+    await markSyncSnapshotCompleteOwned(db);
 
     const content = await db.getFirstAsync<{ content: string | null }>(
       "SELECT content FROM sync_items WHERE id = 'url-1'",
@@ -121,7 +121,7 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
       "INSERT INTO sync_item_folders (membership_id, item_id, folder_id, added_at) VALUES ('new-generation', 'url-1', 'folder-1', 60)",
     );
     void activeFolderLink;
-    await reconcileSyncRelationships(db);
+    await reconcileSyncRelationshipsOwned(db);
     const revived = await db.getFirstAsync<{ deleted: number }>(
       "SELECT deleted FROM sync_folders WHERE id = 'folder-1'",
     );
@@ -130,7 +130,7 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
     await db.runAsync(
       "INSERT INTO sync_folders (id, name, icon, created_at, deleted) VALUES ('folder-deleted', 'Removed', '📁', 10, 1)",
     );
-    await reconcileSyncRelationships(db);
+    await reconcileSyncRelationshipsOwned(db);
     const retainedTombstone = await db.getFirstAsync<{ deleted: number }>(
       "SELECT deleted FROM sync_folders WHERE id = 'folder-deleted'",
     );
@@ -139,14 +139,14 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
     await db.runAsync(
       "INSERT INTO sync_item_folders (membership_id, item_id, folder_id, added_at) VALUES ('orphan', 'missing-item', 'folder-1', 70)",
     );
-    await reconcileSyncRelationships(db);
+    await reconcileSyncRelationshipsOwned(db);
     const orphan = await db.getFirstAsync<{ count: number }>(
       "SELECT COUNT(*) AS count FROM sync_item_folders WHERE membership_id = 'orphan'",
     );
     if (orphan?.count !== 0) throw new Error("Reconciliation left an orphan link active.");
 
     await db.runAsync("UPDATE sync_items SET title = 'remote edit' WHERE id = 'url-1'");
-    await projectSyncReplicaToLocal(db);
+    await projectSyncReplicaToLocalOwned(db);
     const projectedTitle = await db.getFirstAsync<{ title: string }>(
       "SELECT title FROM items WHERE id = 'url-1'",
     );
@@ -156,11 +156,11 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
       "SELECT membership_id FROM sync_item_folders WHERE item_id = 'url-1' AND folder_id = 'folder-1'",
     );
     await db.runAsync("DELETE FROM item_folders WHERE item_id = 'url-1' AND folder_id = 'folder-1'");
-    await mirrorLocalMembership(db, "url-1", "folder-1");
+    await mirrorLocalMembershipOwned(db, "url-1", "folder-1");
     await db.runAsync(
       "INSERT INTO item_folders (item_id, folder_id, added_at) VALUES ('url-1', 'folder-1', 80)",
     );
-    await mirrorLocalMembership(db, "url-1", "folder-1");
+    await mirrorLocalMembershipOwned(db, "url-1", "folder-1");
     const newGeneration = await db.getFirstAsync<{ membership_id: string }>(
       "SELECT membership_id FROM sync_item_folders WHERE item_id = 'url-1' AND folder_id = 'folder-1'",
     );
@@ -169,20 +169,20 @@ export async function runSyncReplicaSmoke(): Promise<SyncReplicaSmokeResult> {
     }
 
     await db.runAsync("UPDATE text_substitutions SET replace = 'baz' WHERE id = 'sub-1'");
-    await mirrorLocalSubstitution(db, "sub-1");
+    await mirrorLocalSubstitutionOwned(db, "sub-1");
     const mirroredSubstitution = await db.getFirstAsync<{ replace: string }>(
       "SELECT replace FROM sync_text_substitutions WHERE id = 'sub-1'",
     );
     if (mirroredSubstitution?.replace !== "baz") throw new Error("Local text substitution edits were not mirrored.");
 
     await db.runAsync("UPDATE items SET title = 'local edit' WHERE id = 'url-1'");
-    await mirrorLocalItem(db, "url-1");
+    await mirrorLocalItemOwned(db, "url-1");
     const mirroredTitle = await db.getFirstAsync<{ title: string }>(
       "SELECT title FROM sync_items WHERE id = 'url-1'",
     );
     if (mirroredTitle?.title !== "local edit") throw new Error("Local item edits were not mirrored.");
 
-    const report = await inspectSyncIntegrity(db);
+    const report = await inspectSyncIntegrityOwned(db);
     if (report.invalidItemTypes || report.orphanMemberships || report.activeLinksToDeletedFolders || report.emptyIds) {
       throw new Error(`Sync integrity failed: ${JSON.stringify(report)}`);
     }

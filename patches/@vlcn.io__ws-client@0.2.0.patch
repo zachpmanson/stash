@@ -1,3 +1,132 @@
+diff --git a/dist/SyncedDB.js b/dist/SyncedDB.js
+index 8ae846106183d6103feaa64f6856c7f0673dd90c..770a3a59d2f6fc64524e0982bb40c5bc51b0ab6a 100644
+--- a/dist/SyncedDB.js
++++ b/dist/SyncedDB.js
+@@ -6,6 +6,7 @@ class SyncedDB {
+     #inboundStream;
+     #outboundStream;
+     #db;
++    #stopped = false;
+     constructor(db, transport) {
+         this.#db = db;
+         this.#transport = transport;
+@@ -20,11 +21,19 @@ class SyncedDB {
+     // so we only have a single tab syncing the same db at the same time.
+     // or single worker.
+     async start() {
++        if (this.#stopped)
++            return;
+         const lastSeens = await this.#db.getLastSeens();
++        if (this.#stopped)
++            return;
+         const [schemaName, schemaVersion] = await this.#db.getSchemaNameAndVersion();
++        if (this.#stopped)
++            return;
+         // Prepare the inbound stream to receive changes from upstreams
+         this.#inboundStream.prepare(lastSeens);
+         this.#transport.start(() => {
++            if (this.#stopped)
++                return;
+             // Announce our presence that we're ready to start receiving and sending changes
+             this.#transport.announcePresence({
+                 _tag: tags.AnnouncePresence,
+@@ -36,9 +45,23 @@ class SyncedDB {
+         });
+     }
+     stop() {
+-        this.#outboundStream.stop();
+-        this.#transport.close();
+-        this.#db.close(true);
++        if (this.#stopped)
++            return false;
++        this.#stopped = true;
++        this.#transport.onChangesReceived = null;
++        this.#transport.onStartStreaming = null;
++        this.#transport.onResetStream = null;
++        try {
++            this.#outboundStream.stop();
++        }
++        finally {
++            try {
++                this.#transport.close();
++            }
++            finally {
++                this.#db.close(true);
++            }
++        }
+         return true;
+     }
+ }
+@@ -91,4 +114,3 @@ function startSync(config, dbname, transportOptions, cb) {
+         }
+     });
+ }
+-//# sourceMappingURL=SyncedDB.js.map
+\ No newline at end of file
+diff --git a/dist/streams/OutboundStream.js b/dist/streams/OutboundStream.js
+index 371c2009c618ea632b5cafeeceed9400a2b49e67..c32ec4fd8e36a42e8e0e2011a2ffc55e10b05dba 100644
+--- a/dist/streams/OutboundStream.js
++++ b/dist/streams/OutboundStream.js
+@@ -8,12 +8,15 @@ export default class OutboundStream {
+     #timeoutHandle = null;
+     #bufferFullBackoff = 50;
+     #disposer;
++    #stopped = false;
+     constructor(db, transport) {
+         this.#db = db;
+         this.#transport = transport;
+         this.#disposer = this.#db.onChange(this.#dbChanged);
+     }
+     startStreaming = async (msg) => {
++        if (this.#stopped)
++            return;
+         this.#lastSent = msg.since;
+         this.#excludeSites = msg.excludeSites;
+         this.#localOnly = msg.localOnly;
+@@ -26,8 +29,15 @@ export default class OutboundStream {
+     // TODO: ideally we get throttle information from signals from the rest of the system.
+     // Should throttle be here or something that the user would be expected to set up?
+     // Ideally we can let them control it so they can make the responsiveness tradeoffs they want.
+-    #dbChanged = async () => {
+-        if (this.#lastSent == null) {
++    #dbChanged = () => {
++        // Change listeners and retry timers do not observe returned promises.
++        void this.#sendChanges().catch((error) => {
++            if (!this.#stopped)
++                console.error("Outbound sync failed", error);
++        });
++    };
++    #sendChanges = async () => {
++        if (this.#stopped || this.#lastSent == null) {
+             return;
+         }
+         if (this.#timeoutHandle != null) {
+@@ -37,7 +47,7 @@ export default class OutboundStream {
+         // save off last sent so we can detect a reset that happened while pulling changes.
+         const lastSent = this.#lastSent;
+         const changes = await this.#db.pullChangeset(lastSent, this.#excludeSites, this.#localOnly);
+-        if (lastSent != this.#lastSent) {
++        if (this.#stopped || lastSent != this.#lastSent) {
+             // we got reset. Abort.
+             return;
+         }
+@@ -76,7 +86,14 @@ export default class OutboundStream {
+     };
+     // stop listening to the base DB
+     stop() {
++        if (this.#stopped)
++            return;
++        this.#stopped = true;
++        this.#lastSent = null;
++        if (this.#timeoutHandle != null) {
++            clearTimeout(this.#timeoutHandle);
++            this.#timeoutHandle = null;
++        }
+         this.#disposer();
+     }
+ }
+-//# sourceMappingURL=OutboundStream.js.map
+\ No newline at end of file
 diff --git a/dist/transport/Transport.d.ts b/dist/transport/Transport.d.ts
 index 5679cdcaafdd64755c7266450536c5b1b6f2205c..fab5dc72e5dd81f64f66f6412219f6d62124a1ac 100644
 --- a/dist/transport/Transport.d.ts
@@ -11,10 +140,19 @@ index 5679cdcaafdd64755c7266450536c5b1b6f2205c..fab5dc72e5dd81f64f66f6412219f6d6
  export interface Transport {
      start(onReady: () => void): void;
 diff --git a/dist/transport/WebSocketTransport.js b/dist/transport/WebSocketTransport.js
-index 027be1f41b7d27f7344b4f3306ab504da84ba5b8..acbff0692515b9dd2f41e186914b114b4e8e3c06 100644
+index 027be1f41b7d27f7344b4f3306ab504da84ba5b8..30bc7bfda8143a76b92e843bb886f982891ad1cc 100644
 --- a/dist/transport/WebSocketTransport.js
 +++ b/dist/transport/WebSocketTransport.js
-@@ -24,9 +24,13 @@ export default class WebSocketTransport {
+@@ -10,6 +10,8 @@ export default class WebSocketTransport {
+         this.#options = options;
+     }
+     start(onReady) {
++        if (this.#closed)
++            return;
+         this.#onReady = onReady;
+         this.#socket = this.#openSocketAndKeepAlive(this.#options);
+     }
+@@ -24,14 +26,23 @@ export default class WebSocketTransport {
                  }
              }, Math.random() * 2000 + 1000);
          }
@@ -23,13 +161,176 @@ index 027be1f41b7d27f7344b4f3306ab504da84ba5b8..acbff0692515b9dd2f41e186914b114b
              btoa(`${options.authToken != null ? `auth=${options.authToken},` : ""}room=${options.room}`).replaceAll("=", ""),
 -        ]);
 +        ];
-+        // React Native's WebSocket accepts handshake headers as a third argument.
++        // React Native's WebSocket implementation accepts custom handshake headers
++        // as a third constructor argument; browser WebSocket does not.
 +        const socket = options.headers
 +            ? Reflect.construct(WebSocket, [options.url, protocols, { headers: options.headers }])
 +            : new WebSocket(options.url, protocols);
          socket.binaryType = "arraybuffer";
          socket.addEventListener("message", (e) => {
++            if (this.#closed || this.#socket !== socket)
++                return;
              this.#processEvent(new Uint8Array(e.data));
+         });
+         socket.onopen = () => {
++            if (this.#closed || this.#socket !== socket)
++                return;
+             if (this.#onReady)
+                 this.#onReady();
+         };
+@@ -66,10 +77,12 @@ export default class WebSocketTransport {
+         }
+     };
+     announcePresence(msg) {
++        if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN)
++            return;
+         this.#socket.send(encode(msg));
+     }
+     sendChanges(msg) {
+-        if (this.#socket.readyState !== WebSocket.OPEN) {
++        if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN) {
+             return "reconnecting";
+         }
+         // If we do the below we need to nofiy the caller to back off on sending.
+@@ -81,14 +94,19 @@ export default class WebSocketTransport {
+         return "sent";
+     }
+     rejectChanges(msg) {
++        if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN)
++            return;
+         this.#socket.send(encode(msg));
+     }
+     close() {
++        if (this.#closed)
++            return;
+         this.#closed = true;
+-        this.#socket.close();
+-        if (this.#keepAliveInterval) {
++        this.#onReady = null;
++        if (this.#keepAliveInterval != null) {
+             clearInterval(this.#keepAliveInterval);
++            this.#keepAliveInterval = null;
+         }
++        this.#socket?.close();
+     }
+ }
+-//# sourceMappingURL=WebSocketTransport.js.map
+\ No newline at end of file
+diff --git a/src/SyncedDB.ts b/src/SyncedDB.ts
+index ec6b6e050b0c2268871fead1ede86a8c7665ed42..577bd00a205b533b42a813a447095e2ae40d5e72 100644
+--- a/src/SyncedDB.ts
++++ b/src/SyncedDB.ts
+@@ -16,6 +16,7 @@ class SyncedDB implements ISyncedDB {
+   readonly #inboundStream;
+   readonly #outboundStream;
+   readonly #db;
++  #stopped = false;
+
+   constructor(db: DB, transport: Transport) {
+     this.#db = db;
+@@ -32,13 +33,17 @@ class SyncedDB implements ISyncedDB {
+   // so we only have a single tab syncing the same db at the same time.
+   // or single worker.
+   async start() {
++    if (this.#stopped) return;
+     const lastSeens = await this.#db.getLastSeens();
++    if (this.#stopped) return;
+     const [schemaName, schemaVersion] =
+       await this.#db.getSchemaNameAndVersion();
++    if (this.#stopped) return;
+     // Prepare the inbound stream to receive changes from upstreams
+     this.#inboundStream.prepare(lastSeens);
+
+     this.#transport.start(() => {
++      if (this.#stopped) return;
+       // Announce our presence that we're ready to start receiving and sending changes
+       this.#transport.announcePresence({
+         _tag: tags.AnnouncePresence,
+@@ -51,9 +56,20 @@ class SyncedDB implements ISyncedDB {
+   }
+
+   stop() {
+-    this.#outboundStream.stop();
+-    this.#transport.close();
+-    this.#db.close(true);
++    if (this.#stopped) return false;
++    this.#stopped = true;
++    this.#transport.onChangesReceived = null;
++    this.#transport.onStartStreaming = null;
++    this.#transport.onResetStream = null;
++    try {
++      this.#outboundStream.stop();
++    } finally {
++      try {
++        this.#transport.close();
++      } finally {
++        this.#db.close(true);
++      }
++    }
+     return true;
+   }
+ }
+diff --git a/src/streams/OutboundStream.ts b/src/streams/OutboundStream.ts
+index 19bfe91c9bd5c2c9464f8d4e8901e3afd8994a0b..5dab9b762c3889a4ab20163da1c2af02dc32838f 100644
+--- a/src/streams/OutboundStream.ts
++++ b/src/streams/OutboundStream.ts
+@@ -11,6 +11,7 @@ export default class OutboundStream {
+   #timeoutHandle: number | null = null;
+   #bufferFullBackoff = 50;
+   readonly #disposer;
++  #stopped = false;
+
+   constructor(db: DB, transport: Transport) {
+     this.#db = db;
+@@ -19,6 +20,7 @@ export default class OutboundStream {
+   }
+
+   startStreaming = async (msg: StartStreaming) => {
++    if (this.#stopped) return;
+     this.#lastSent = msg.since;
+     this.#excludeSites = msg.excludeSites;
+     this.#localOnly = msg.localOnly;
+@@ -33,8 +35,15 @@ export default class OutboundStream {
+   // TODO: ideally we get throttle information from signals from the rest of the system.
+   // Should throttle be here or something that the user would be expected to set up?
+   // Ideally we can let them control it so they can make the responsiveness tradeoffs they want.
+-  #dbChanged = async () => {
+-    if (this.#lastSent == null) {
++  #dbChanged = () => {
++    // Change listeners and retry timers do not observe returned promises.
++    void this.#sendChanges().catch((error) => {
++      if (!this.#stopped) console.error("Outbound sync failed", error);
++    });
++  };
++
++  #sendChanges = async () => {
++    if (this.#stopped || this.#lastSent == null) {
+       return;
+     }
+     if (this.#timeoutHandle != null) {
+@@ -50,7 +59,7 @@ export default class OutboundStream {
+       this.#excludeSites,
+       this.#localOnly
+     );
+-    if (lastSent != this.#lastSent) {
++    if (this.#stopped || lastSent != this.#lastSent) {
+       // we got reset. Abort.
+       return;
+     }
+@@ -98,6 +107,13 @@ export default class OutboundStream {
+
+   // stop listening to the base DB
+   stop() {
++    if (this.#stopped) return;
++    this.#stopped = true;
++    this.#lastSent = null;
++    if (this.#timeoutHandle != null) {
++      clearTimeout(this.#timeoutHandle);
++      this.#timeoutHandle = null;
++    }
+     this.#disposer();
+   }
+ }
 diff --git a/src/transport/Transport.ts b/src/transport/Transport.ts
 index 99745feade55cb448c57e955f306b4032aaa12fa..7ac3ffc661c6569001d4af739ca70074baef6e42 100644
 --- a/src/transport/Transport.ts
@@ -40,18 +341,24 @@ index 99745feade55cb448c57e955f306b4032aaa12fa..7ac3ffc661c6569001d4af739ca70074
    authToken?: string;
 +  headers?: Record<string, string>;
  };
--
-+
+
  export interface Transport {
 diff --git a/src/transport/WebSocketTransport.ts b/src/transport/WebSocketTransport.ts
-index 3717d137e1f81758724fe05944da5d9e1a0e6083..68bfbc4fadef534d259fee9c587ed24ad3268102 100644
+index 3717d137e1f81758724fe05944da5d9e1a0e6083..25448c17c64e791d17f8c5ecdaab6fce42b80ecc 100644
 --- a/src/transport/WebSocketTransport.ts
 +++ b/src/transport/WebSocketTransport.ts
-@@ -39,13 +39,18 @@ export default class WebSocketTransport implements Transport {
+@@ -22,6 +22,7 @@ export default class WebSocketTransport implements Transport {
+   }
+
+   start(onReady: () => void) {
++    if (this.#closed) return;
+     this.#onReady = onReady;
+     this.#socket = this.#openSocketAndKeepAlive(this.#options);
+   }
+@@ -39,20 +40,27 @@ export default class WebSocketTransport implements Transport {
        }, Math.random() * 2000 + 1000);
      }
--
-+
+
 -    const socket = new WebSocket(options.url, [
 +    const protocols = [
        btoa(
@@ -67,6 +374,51 @@ index 3717d137e1f81758724fe05944da5d9e1a0e6083..68bfbc4fadef534d259fee9c587ed24a
 +      ? (Reflect.construct(WebSocket, [options.url, protocols, { headers: options.headers }]) as WebSocket)
 +      : new WebSocket(options.url, protocols);
      socket.binaryType = "arraybuffer";
--
-+
+
      socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => {
++      if (this.#closed || this.#socket !== socket) return;
+       this.#processEvent(new Uint8Array(e.data));
+     });
+
+     socket.onopen = () => {
++      if (this.#closed || this.#socket !== socket) return;
+       if (this.#onReady) this.#onReady();
+     };
+
+@@ -89,11 +97,12 @@ export default class WebSocketTransport implements Transport {
+   };
+
+   announcePresence(msg: AnnouncePresence): void {
+-    this.#socket!.send(encode(msg));
++    if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN) return;
++    this.#socket.send(encode(msg));
+   }
+
+   sendChanges(msg: Changes): "reconnecting" | "buffer-full" | "sent" {
+-    if (this.#socket!.readyState !== WebSocket.OPEN) {
++    if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN) {
+       return "reconnecting";
+     }
+     // If we do the below we need to nofiy the caller to back off on sending.
+@@ -108,14 +117,18 @@ export default class WebSocketTransport implements Transport {
+   }
+
+   rejectChanges(msg: RejectChanges): void {
+-    this.#socket!.send(encode(msg));
++    if (this.#closed || this.#socket?.readyState !== WebSocket.OPEN) return;
++    this.#socket.send(encode(msg));
+   }
+
+   close() {
++    if (this.#closed) return;
+     this.#closed = true;
+-    this.#socket!.close();
+-    if (this.#keepAliveInterval) {
++    this.#onReady = null;
++    if (this.#keepAliveInterval != null) {
+       clearInterval(this.#keepAliveInterval);
++      this.#keepAliveInterval = null;
+     }
++    this.#socket?.close();
+   }
+ }

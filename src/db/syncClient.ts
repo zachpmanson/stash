@@ -8,14 +8,12 @@ import {
 import type { Change } from "@vlcn.io/ws-common";
 import {
   ensureCrsqliteLoaded,
-  getDb,
-  withAppDbLock,
-  withAppDbWriteLock,
+  withAppDb,
 } from "./database";
 import {
-  beginSyncCycle,
-  markSyncSnapshotComplete,
-  projectSyncReplicaToLocal,
+  beginSyncCycleOwned,
+  markSyncSnapshotCompleteOwned,
+  projectSyncReplicaToLocalOwned,
   SYNC_CRR_SCHEMA_NAME,
   SYNC_CRR_SCHEMA_VERSION,
   SYNC_INITIALIZED_KEY,
@@ -67,15 +65,22 @@ type SyncConnectionAttempt = {
 let activeSession: SyncSession | null = null;
 let connectionAttempt: SyncConnectionAttempt | null = null;
 let syncRestoreInProgress = false;
+// A failed teardown cannot prove that callbacks have stopped. Fail closed until restart.
+let shutdownFailure: { error: unknown } | null = null;
+
+// Observers must never interrupt lifecycle bookkeeping or DB teardown.
+function notifyStatusListener(listener: SyncListener, status: StashSyncStatus): void {
+  try { listener(status); } catch (error) { console.warn("Stash sync status listener failed", error); }
+}
 
 function publishStatus(status: StashSyncStatus): void {
   currentStatus = status;
-  for (const listener of statusListeners) listener(status);
+  for (const listener of statusListeners) notifyStatusListener(listener, status);
 }
 
 export function subscribeStashSyncStatus(listener: SyncListener): () => void {
   statusListeners.add(listener);
-  listener(currentStatus);
+  notifyStatusListener(listener, currentStatus);
   return () => statusListeners.delete(listener);
 }
 
@@ -146,16 +151,27 @@ function compareVersion(left: bigint, right: bigint): number {
 
 class StashReplica implements DB {
   readonly siteid: Uint8Array;
-  readonly #database: SQLite.SQLiteDatabase;
   readonly #listeners = new Set<() => void>();
   readonly #subscription: ReturnType<typeof SQLite.addDatabaseChangeListener>;
   #applyQueue: Promise<void> = Promise.resolve();
+  #closed = false;
+  readonly #pending = new Set<Promise<unknown>>();
 
-  constructor(database: SQLite.SQLiteDatabase, siteid: Uint8Array) {
-    this.#database = database;
+  #track<T>(operation: () => Promise<T>, whenClosed: T): Promise<T> {
+    if (this.#closed) return Promise.resolve(whenClosed);
+    const pending = operation();
+    this.#pending.add(pending);
+    void pending.then(
+      () => { this.#pending.delete(pending); },
+      () => { this.#pending.delete(pending); },
+    );
+    return pending;
+  }
+
+  constructor(databasePath: string, siteid: Uint8Array) {
     this.siteid = siteid;
     this.#subscription = SQLite.addDatabaseChangeListener((event) => {
-      if (event.databaseFilePath !== database.databasePath || !event.tableName?.startsWith("sync_")) return;
+      if (event.databaseFilePath !== databasePath || !event.tableName?.startsWith("sync_")) return;
       for (const listener of this.#listeners) listener();
     });
   }
@@ -170,7 +186,7 @@ class StashReplica implements DB {
       : "";
     // Serialize CR-SQLite statements with peer-watermark reads and app writes;
     // overlapping async statements can fail during Expo SQLite finalization on Android.
-    const rows = await withAppDbLock(() => this.#database.getAllAsync<{
+    const rows = await this.#track(() => withAppDb((database) => database.getAllAsync<{
       table: string;
       pk: Uint8Array;
       cid: string;
@@ -183,7 +199,7 @@ class StashReplica implements DB {
       `SELECT ${CHANGE_COLUMNS} FROM crsql_changes WHERE db_version > ?${excluded}`,
       sqliteInteger(since[0]),
       ...excludeSites,
-    ));
+    )), []);
 
     return rows.map((row) => [
       row.table,
@@ -203,10 +219,10 @@ class StashReplica implements DB {
     siteId: Uint8Array,
     end: readonly [bigint, number],
   ): Promise<void> {
-    const apply = this.#applyQueue.then(() => withAppDbWriteLock(() =>
-      this.#database.withTransactionAsync(async () => {
+    const apply = this.#track(() => this.#applyQueue.then(() => withAppDb((database) =>
+      database.withTransactionAsync(async () => {
         for (const change of changes) {
-          await this.#database.runAsync(
+          await database.runAsync(
             INSERT_CHANGE,
             change[0],
             change[1],
@@ -219,19 +235,19 @@ class StashReplica implements DB {
             change[8],
           );
         }
-        await this.#database.runAsync(TRACK_PEER, siteId, sqliteInteger(end[0]), end[1]);
+        await database.runAsync(TRACK_PEER, siteId, sqliteInteger(end[0]), end[1]);
       }),
-    ));
+    )), undefined);
     this.#applyQueue = apply.catch(() => undefined);
     await apply;
   }
 
   async getLastSeens(): Promise<[Uint8Array, [bigint, number]][]> {
-    const rows = await withAppDbLock(() => this.#database.getAllAsync<{
+    const rows = await this.#track(() => withAppDb((database) => database.getAllAsync<{
       site_id: Uint8Array;
       version: number;
       seq: number;
-    }>("SELECT site_id, version, seq FROM crsql_tracked_peers WHERE event = 0 AND tag = 0"));
+    }>("SELECT site_id, version, seq FROM crsql_tracked_peers WHERE event = 0 AND tag = 0")), []);
     return rows.map((row) => [row.site_id, [BigInt(row.version), row.seq]]);
   }
 
@@ -240,18 +256,21 @@ class StashReplica implements DB {
   }
 
   onChange(callback: () => void): () => void {
+    if (this.#closed) return () => undefined;
     this.#listeners.add(callback);
     return () => this.#listeners.delete(callback);
   }
 
   close(_closeWrappedDB: boolean): void {
+    // Reject new work before disposing callbacks; drain work already in flight below.
+    this.#closed = true;
     // The Stash database singleton is shared with the app and must stay open.
     this.#subscription.remove();
     this.#listeners.clear();
   }
 
   async waitForPendingChanges(): Promise<void> {
-    await this.#applyQueue;
+    await Promise.allSettled([...this.#pending]);
   }
 }
 
@@ -298,10 +317,9 @@ async function readServerStatus(
 }
 
 async function localOutboundVersion(
-  database: SQLite.SQLiteDatabase,
   serverSiteId: string,
 ): Promise<bigint> {
-  const row = await withAppDbLock(() => database.getFirstAsync<{ version: number | bigint }>(`SELECT
+  const row = await withAppDb((database) => database.getFirstAsync<{ version: number | bigint }>(`SELECT
     COALESCE(MAX(db_version), 0) AS version FROM crsql_changes WHERE site_id IS NOT ?`,
     siteIdBytes(serverSiteId),
   ));
@@ -311,14 +329,13 @@ async function localOutboundVersion(
 }
 
 async function isExchanged(
-  database: SQLite.SQLiteDatabase,
   replica: StashReplica,
   clientSiteId: string,
   status: ServerSyncStatus,
 ): Promise<{ complete: boolean; signature: string }> {
   if (status.clientSiteId !== clientSiteId) throw new Error("Sync server returned status for a different client site");
   const [ownVersion, lastSeens] = await Promise.all([
-    localOutboundVersion(database, status.serverSiteId),
+    localOutboundVersion(status.serverSiteId),
     replica.getLastSeens(),
   ]);
   const seenByServer = BigInt(status.clientSeenVersion);
@@ -346,7 +363,7 @@ async function isExchanged(
 
 function networkConfig(
   authorization: string,
-  database: SQLite.SQLiteDatabase,
+  databasePath: string,
   siteId: Uint8Array,
   onReplica?: (replica: StashReplica) => void,
 ): Config {
@@ -354,7 +371,7 @@ function networkConfig(
     // createSyncedDB awaits dbProvider before it can be stopped. Use the already
     // opened DB/site ID so setup has no second, potentially unbounded DB open/read.
     dbProvider: async () => {
-      const replica = new StashReplica(database, siteId);
+      const replica = new StashReplica(databasePath, siteId);
       onReplica?.(replica);
       return replica;
     },
@@ -370,9 +387,10 @@ export async function connectStashSync(
   credentials: Credentials,
   onStatus: SyncListener = publishStatus,
 ): Promise<{ stop: () => boolean }> {
+  if (shutdownFailure) throw shutdownFailure.error;
   if (syncRestoreInProgress) throw new Error("Stash sync cannot connect while a backup restore is in progress.");
   if (activeSession || connectionAttempt) throw new Error("Stash sync is already connected or connecting on this install.");
-  onStatus({ phase: "connecting", message: "Checking authenticated Stash sync server…" });
+  const notifyStatus = (status: StashSyncStatus) => notifyStatusListener(onStatus, status);
 
   const attempt: SyncConnectionAttempt = {
     cancelled: false,
@@ -388,115 +406,140 @@ export async function connectStashSync(
   let setupFailed = false;
   let result: { stop: () => boolean } = { stop: () => false };
 
-  attempt.done = (async () => {
+  // Defer setup so attempt.done is installed before any observer can reenter
+  // disconnect/restore and wait for this attempt.
+  attempt.done = Promise.resolve().then(async () => {
     try {
+      notifyStatus({ phase: "connecting", message: "Checking authenticated Stash sync server…" });
+      if (attempt.cancelled) return;
       const base = normalizedBaseUrl(serverUrl);
       const authorization = basicAuthorization(credentials);
-      const database = await getDb();
-      if (attempt.cancelled) return;
-      await ensureCrsqliteLoaded(database);
-
-      const marker = await database.getFirstAsync<{ value: string }>(
-        "SELECT value FROM stash_sync_metadata WHERE key = ?",
-        SYNC_INITIALIZED_KEY,
-      );
-      if (!marker) throw new Error("Prepare this install's local sync replica before connecting.");
+      const prepared = await withAppDb(async (database) => {
+        if (attempt.cancelled) return null;
+        await ensureCrsqliteLoaded(database);
+        const marker = await database.getFirstAsync<{ value: string }>(
+          "SELECT value FROM stash_sync_metadata WHERE key = ?",
+          SYNC_INITIALIZED_KEY,
+        );
+        if (!marker) throw new Error("Prepare this install's local sync replica before connecting.");
+        return { databasePath: database.databasePath, siteId: await readSiteId(database) };
+      });
+      if (!prepared) return;
       if (attempt.cancelled) return;
 
       await authenticatedHealthCheck(base, authorization, attempt.controller.signal);
       if (attempt.cancelled) return;
-      const siteId = await readSiteId(database);
+      const { siteId, databasePath } = prepared;
       const clientSiteId = siteIdHex(siteId);
       const syncReplicaRef: { current: StashReplica | null } = { current: null };
       const options = { url: websocketUrl(base), room: DATABASE_ROOM };
-      const syncedDb = await createSyncedDB(
-        networkConfig(authorization, database, siteId, (replica) => { syncReplicaRef.current = replica; }),
-        DATABASE_ROOM,
-        options,
-      );
-      try {
-        if (attempt.cancelled) {
-          syncedDb.stop();
+      let syncedDb: Awaited<ReturnType<typeof createSyncedDB>> | null = null;
+      let cleanup: Promise<void> | null = null;
+      const stopAndDrain = (): Promise<void> => {
+        if (cleanup) return cleanup;
+        const errors: unknown[] = [];
+        try { syncedDb?.stop(); } catch (error) { errors.push(error); }
+        // stop() may throw before reaching replica.close(). Always close it
+        // ourselves, then drain outbound reads and queued inbound writes.
+        try { syncReplicaRef.current?.close(false); } catch (error) { errors.push(error); }
+        cleanup = (async () => {
           await syncReplicaRef.current?.waitForPendingChanges();
+          if (errors.length) throw errors[0];
+        })();
+        void cleanup.catch((error) => { shutdownFailure = { error }; });
+        return cleanup;
+      };
+      try {
+        syncedDb = await createSyncedDB(
+          networkConfig(authorization, databasePath, siteId, (replica) => { syncReplicaRef.current = replica; }),
+          DATABASE_ROOM,
+          options,
+        );
+        if (attempt.cancelled) {
+          await stopAndDrain();
           return;
         }
-        await beginSyncCycle(database);
+        await withAppDb(beginSyncCycleOwned);
+        if (attempt.cancelled) {
+          await stopAndDrain();
+          return;
+        }
         await syncedDb.start();
         if (attempt.cancelled) {
-          syncedDb.stop();
-          await syncReplicaRef.current?.waitForPendingChanges();
+          await stopAndDrain();
           return;
         }
       } catch (error) {
-        syncedDb.stop();
-        await syncReplicaRef.current?.waitForPendingChanges();
+        await stopAndDrain();
         throw error;
       }
 
       let running = true;
       let projectedSignature = "";
-      const replica = new StashReplica(database, siteId);
-      // This adapter is only used for status reads; release its listener immediately.
-      replica.close(false);
+      const replica = syncReplicaRef.current!;
       const session: SyncSession = {
         done: Promise.resolve(),
         stop: () => {
           if (!running) return false;
           running = false;
           attempt.controller.abort();
-          syncedDb.stop();
-          onStatus({ phase: "stopped", message: "Sync disconnected." });
+          void stopAndDrain();
+          notifyStatus({ phase: "stopped", message: "Sync disconnected." });
           return true;
         },
       };
-      activeSession = session;
-      result = session;
-      onStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
-
-      const pollTask = (async () => {
+      // Install completion before publishing the session or notifying observers.
+      // Polling starts on the next microtask, after this ownership is established.
+      const pollTask = Promise.resolve().then(async () => {
         while (running) {
           try {
             const status = await readServerStatus(base, authorization, clientSiteId, attempt.controller.signal);
-            const exchange = await isExchanged(database, replica, clientSiteId, status);
+            if (!running) break;
+            const exchange = await isExchanged(replica, clientSiteId, status);
             if (!running) break;
             if (exchange.complete && exchange.signature !== projectedSignature) {
-              await beginSyncCycle(database);
-              await markSyncSnapshotComplete(database);
-              await projectSyncReplicaToLocal(database);
+              await withAppDb(async (database) => {
+                if (!running) return;
+                await beginSyncCycleOwned(database);
+                await markSyncSnapshotCompleteOwned(database);
+                await projectSyncReplicaToLocalOwned(database);
+              });
               if (!running) break;
               projectedSignature = exchange.signature;
               const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: Date.now() };
-              onStatus(state);
+              notifyStatus(state);
               publishProjection();
             } else if (!exchange.complete) {
-              onStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
+              notifyStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
             }
           } catch (error) {
             if (!running) break;
-            onStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+            notifyStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
           }
           if (running) await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_MS));
         }
-      })();
-      session.done = pollTask.then(async () => {
-        await Promise.resolve();
-        await syncReplicaRef.current?.waitForPendingChanges();
-        await Promise.resolve();
-        await syncReplicaRef.current?.waitForPendingChanges();
       });
-      void session.done.finally(() => {
-        if (activeSession === session) activeSession = null;
-      });
+      session.done = pollTask.then(
+        () => stopAndDrain(),
+        async (error) => { await stopAndDrain(); throw error; },
+      );
+      void session.done.then(
+        () => { if (activeSession === session) activeSession = null; },
+        (error) => { shutdownFailure = { error }; },
+      );
+      activeSession = session;
+      result = session;
+      notifyStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
     } catch (error) {
-      if (!attempt.cancelled) {
+      if (!attempt.cancelled || shutdownFailure) {
         setupFailed = true;
         setupError = error;
-        onStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+        notifyStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
       }
     } finally {
       if (connectionAttempt === attempt) connectionAttempt = null;
     }
-  })();
+  });
 
   await attempt.done;
   if (setupFailed) throw setupError;
@@ -511,13 +554,19 @@ export function disconnectStashSync(): boolean {
   return cancelledAttempt !== null;
 }
 
+function throwIfShutdownFailed(): void {
+  if (shutdownFailure) throw shutdownFailure.error;
+}
+
 /** Cancel connection setup or stop sync, then wait for all DB reads/projections to finish. */
 export async function disconnectStashSyncAndWait(): Promise<void> {
+  if (shutdownFailure) throw shutdownFailure.error;
   const attempt = connectionAttempt;
   if (attempt) {
     attempt.cancel();
     await attempt.done;
   }
+  throwIfShutdownFailed();
   const session = activeSession;
   if (!session) {
     disconnectStashSync();

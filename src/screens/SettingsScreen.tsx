@@ -101,6 +101,7 @@ export default function SettingsScreen() {
   const handleRestore = async () => {
     if (busy) return;
     setBusy(true);
+    let confirmationOwnsBusy = false;
     try {
       const fileUri = await pickBackupFile();
       if (!fileUri) return;
@@ -108,7 +109,7 @@ export default function SettingsScreen() {
         title: "Restore backup?",
         message: "This will replace your current data with the selected backup.",
         buttons: [
-          { text: "Cancel", style: "cancel" },
+          { text: "Cancel", style: "cancel", onPress: () => setBusy(false) },
           {
             text: "Restore",
             style: "destructive",
@@ -122,15 +123,18 @@ export default function SettingsScreen() {
                 });
               } catch (e) {
                 showModal({ title: "Restore failed", message: `${e}` });
+              } finally {
+                setBusy(false);
               }
             },
           },
         ],
       });
+      confirmationOwnsBusy = true;
     } catch (e) {
       showModal({ title: "Restore error", message: `${e}` });
     } finally {
-      setBusy(false);
+      if (!confirmationOwnsBusy) setBusy(false);
     }
   };
 

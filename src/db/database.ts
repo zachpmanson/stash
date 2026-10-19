@@ -3,11 +3,12 @@ import { Platform } from "react-native";
 
 let db: SQLite.SQLiteDatabase | null = null;
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let closeFailure: { error: unknown } | null = null;
 const loadedCrsqliteDatabases = new WeakSet<object>();
 let dbAccessTail: Promise<void> = Promise.resolve();
 
-/** Serialize database access that must not overlap with app writes or sync reads. */
-export async function withAppDbLock<T>(task: () => Promise<T>): Promise<T> {
+/** Non-reentrant ownership queue. Acquire before resolving/opening the app DB. */
+async function withAppDbLock<T>(task: () => Promise<T>): Promise<T> {
   const previous = dbAccessTail;
   let release!: () => void;
   dbAccessTail = new Promise<void>((resolve) => { release = resolve; });
@@ -19,16 +20,37 @@ export async function withAppDbLock<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Serialize app writes with replica seeding and remote projection. */
-export function withAppDbWriteLock<T>(task: () => Promise<T>): Promise<T> {
-  return withAppDbLock(task);
+/**
+ * Own the app DB for the entire operation, including opening/schema setup.
+ * Await all statements before returning. Never retain/return the handle, create
+ * detached DB work, or call another ownership-taking API inside this callback.
+ * Raw SQLite types are deliberate: lifetime is a caller contract, not a proxy.
+ */
+export function withAppDb<T>(task: (database: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  return withAppDbLock(async () => task(await getDb()));
 }
 
-export async function withAppDbTransaction(
-  database: SQLite.SQLiteDatabase,
-  task: () => Promise<void>,
-): Promise<void> {
-  await withAppDbWriteLock(() => database.withTransactionAsync(task));
+/**
+ * Called only after sync has been stopped/drained. Excludes all app DB access
+ * through close, replacement, reopening and post-restore work. A failure after
+ * closure starts poisons access until restart; filesystem replacement is NOT
+ * atomic and must never fall back to opening a partially replaced database.
+ */
+export function withAppDbReplacement<T>(
+  replace: () => Promise<void>,
+  afterOpen: (database: SQLite.SQLiteDatabase) => Promise<T>,
+): Promise<T> {
+  return withAppDbLock(async () => {
+    if (closeFailure) throw closeFailure.error;
+    try {
+      await closeDbOwned();
+      await replace();
+      return await afterOpen(await getDb());
+    } catch (error) {
+      closeFailure = { error };
+      throw error;
+    }
+  });
 }
 
 export const CRSQLITE_SUPPORTED = Platform.OS === "android";
@@ -40,18 +62,29 @@ export async function ensureCrsqliteLoaded(database: SQLite.SQLiteDatabase): Pro
   loadedCrsqliteDatabases.add(database);
 }
 
-export function getDb(): Promise<SQLite.SQLiteDatabase> {
+function getDb(): Promise<SQLite.SQLiteDatabase> {
+  if (closeFailure) return Promise.reject(closeFailure.error);
   if (db) return Promise.resolve(db);
   if (!dbPromise) {
     dbPromise = SQLite.openDatabaseAsync("stash.db", { enableChangeListener: true })
       .then(async (database) => {
-        await initSchema(database);
-        const replicaMarker = await database.getFirstAsync<{ value: string }>(
-          "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
-        ).catch(() => null);
-        if (replicaMarker && CRSQLITE_SUPPORTED) await ensureCrsqliteLoaded(database);
-        db = database;
-        return db;
+        try {
+          await initSchema(database);
+          const replicaMarker = await database.getFirstAsync<{ value: string }>(
+            "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
+          ).catch(() => null);
+          if (replicaMarker && CRSQLITE_SUPPORTED) await ensureCrsqliteLoaded(database);
+          db = database;
+          return db;
+        } catch (error) {
+          try {
+            await database.closeAsync();
+          } catch (cleanupError) {
+            closeFailure = { error: cleanupError };
+            throw cleanupError;
+          }
+          throw error;
+        }
       })
       .catch((e) => {
         dbPromise = null;
@@ -62,36 +95,24 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
-/**
- * Closes the open database connection and resets the cached singleton so the
- * next {@link getDb} call reopens from disk. Used by restore to swap in a
- * fresh database file.
- */
-export async function closeDb(): Promise<void> {
-  await withAppDbWriteLock(async () => {
-    const current = db;
-    if (current && loadedCrsqliteDatabases.has(current)) {
-      await current.execAsync("SELECT crsql_finalize()");
-      loadedCrsqliteDatabases.delete(current);
-    }
-    db = null;
-    dbPromise = null;
-    if (current) {
-      try {
-        await current.closeAsync();
-      } catch {
-        // ignore close errors; the singleton is already reset
-      }
-    }
-  });
+/** Already owns the queue; never call an ownership-taking API here. */
+async function closeDbOwned(): Promise<void> {
+  const current = dbPromise ? await dbPromise : db;
+  if (current && loadedCrsqliteDatabases.has(current)) {
+    await current.execAsync("SELECT crsql_finalize()");
+    loadedCrsqliteDatabases.delete(current);
+  }
+  if (current) await current.closeAsync();
+  // Forget only after certain closure.
+  db = null;
+  dbPromise = null;
 }
 
 /**
  * Flushes the WAL journal into the main database file so the on-disk file is
  * a complete, self-contained copy (required for a valid backup).
  */
-export async function checkpointDb(): Promise<void> {
-  const database = await getDb();
+export async function checkpointDbOwned(database: SQLite.SQLiteDatabase): Promise<void> {
   try {
     await database.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
   } catch {

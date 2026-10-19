@@ -2,7 +2,8 @@ import * as Sharing from "expo-sharing";
 import { Directory, File, Paths } from "expo-file-system";
 import { copyAsync } from "expo-file-system/legacy";
 import { zip, unzip } from "react-native-zip-archive";
-import { checkpointDb, closeDb, getDb } from "../db/database";
+import type { SQLiteDatabase } from "expo-sqlite";
+import { checkpointDbOwned, withAppDb, withAppDbReplacement } from "../db/database";
 import { withStashSyncRestoreLock } from "../db/syncClient";
 import { Folder, StashItem } from "../types";
 
@@ -33,27 +34,23 @@ function makeStagingId(): string {
  * shares it via the OS share sheet. Returns the generated zip path.
  */
 export async function createBackup(): Promise<string> {
-  // Flush any WAL data into the main .db file so the copy is complete.
-  await checkpointDb();
-
   const stagingId = makeStagingId();
   const stagingRoot = new Directory(Paths.cache, `stash-backup-${stagingId}`);
   stagingRoot.create({ intermediates: true, idempotent: true });
 
-  // 1. Copy the database into staging.
-  await copyDatabaseFile(new Directory(stagingRoot));
-
-  // 2. Copy the stashed media/files directory into staging.
-  const srcFiles = new Directory(Paths.document, FILES_DIR_NAME);
-  if (srcFiles.exists) {
-    copyDirContents(srcFiles, new Directory(stagingRoot, FILES_DIR_NAME));
-  }
-
-  // 3. Write a manifest with counts.
-  const manifest = await buildManifest();
-  const manifestFile = new File(stagingRoot, MANIFEST_NAME);
-  manifestFile.create({ overwrite: true, intermediates: true });
-  manifestFile.write(JSON.stringify(manifest, null, 2));
+  // Keep snapshot/counts/files together and exclude restore until staging is ready.
+  await withAppDb(async (database) => {
+    await checkpointDbOwned(database);
+    await copyDatabaseFileOwned(database, new Directory(stagingRoot));
+    const srcFiles = new Directory(Paths.document, FILES_DIR_NAME);
+    if (srcFiles.exists) {
+      copyDirContents(srcFiles, new Directory(stagingRoot, FILES_DIR_NAME));
+    }
+    const manifest = await buildManifestOwned(database);
+    const manifestFile = new File(stagingRoot, MANIFEST_NAME);
+    manifestFile.create({ overwrite: true, intermediates: true });
+    manifestFile.write(JSON.stringify(manifest, null, 2));
+  });
 
   // 4. Zip the staging dir into a single portable archive.
   const zipPath = new File(Paths.cache, `stash-backup-${stagingId}.zip`);
@@ -107,22 +104,22 @@ export async function restoreBackup(fileUri: string): Promise<BackupManifest> {
       throw new Error("Unsupported or invalid Stash backup.");
     }
 
-    return await withStashSyncRestoreLock(async () => {
-      // 3. Stop sync and close/finalize the DB before swapping in restored files.
-      await closeDb();
-
-      await replaceDatabase(new Directory(stagingRoot));
-      await replaceFilesDir(new Directory(stagingRoot, FILES_DIR_NAME));
-
-      // 4. Rewrite stored media URIs. `copyFileToStash` saves ABSOLUTE paths
-      //    (file:///data/user/0/<package>/files/stash/<file>), so a backup made
-      //    in one app (e.g. release) restored into another (e.g. debug) still
-      //    points at the old package's private dir. Re-target any such URI at
-      //    this app's own document stash dir.
-      await rewriteStoredUris();
-
-      return manifest;
-    });
+    // Validate before beginning destructive replacement.
+    if (!new File(stagingRoot, DB_FILENAME).exists) {
+      throw new Error("Backup is missing the database file.");
+    }
+    return await withStashSyncRestoreLock(() => withAppDbReplacement(
+      async () => {
+        await replaceDatabase(new Directory(stagingRoot));
+        await replaceFilesDir(new Directory(stagingRoot, FILES_DIR_NAME));
+      },
+      async (database) => {
+        // Cross-package backups contain absolute paths; retarget after reopening,
+        // while still owning the replacement queue (do not acquire it again).
+        await rewriteStoredUrisOwned(database);
+        return manifest;
+      },
+    ));
   } finally {
     try {
       stagingRoot.delete();
@@ -153,16 +150,14 @@ export async function pickBackupFile(): Promise<string> {
   return src.uri;
 }
 
-async function copyDatabaseFile(destDir: Directory): Promise<void> {
-  const db = await getDb();
+async function copyDatabaseFileOwned(db: SQLiteDatabase, destDir: Directory): Promise<void> {
   const data = await db.serializeAsync();
   const dbFile = new File(destDir, DB_FILENAME);
   dbFile.create({ overwrite: true, intermediates: true });
   dbFile.write(data);
 }
 
-async function buildManifest(): Promise<BackupManifest> {
-  const db = await getDb();
+async function buildManifestOwned(db: SQLiteDatabase): Promise<BackupManifest> {
   const folders = await db.getAllAsync<Folder>("SELECT id FROM folders");
   const items = await db.getAllAsync<StashItem>("SELECT id FROM items");
   return {
@@ -183,8 +178,7 @@ async function buildManifest(): Promise<BackupManifest> {
  * dir. Rewrite every local stash URI using the current document dir, keyed by
  * filename (the restored files are already in place by the time this runs).
  */
-async function rewriteStoredUris(): Promise<void> {
-  const db = await getDb();
+async function rewriteStoredUrisOwned(db: SQLiteDatabase): Promise<void> {
   const stashDir = new Directory(Paths.document, FILES_DIR_NAME);
   if (!stashDir.exists) return;
 

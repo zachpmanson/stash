@@ -1,8 +1,13 @@
 import type * as SQLite from "expo-sqlite";
 import { cryb64 } from "@vlcn.io/ws-common";
-import { CRSQLITE_SUPPORTED, ensureCrsqliteLoaded, getDb, withAppDbWriteLock } from "./database";
+import { CRSQLITE_SUPPORTED, ensureCrsqliteLoaded, withAppDb } from "./database";
 import { randomId } from "../utils/randomId";
 
+/**
+ * All *Owned helpers borrow a handle for this call only. App callers must hold
+ * withAppDb ownership; independent smoke databases must have exclusive ownership.
+ * They never acquire the app queue and must never retain the handle.
+ */
 export const SYNC_SCHEMA_VERSION = 1;
 export const CRSQLITE_EXTENSION_ENTRY_POINT = "sqlite3_crsqlite_init";
 export const SYNC_INITIALIZED_KEY = "stash_sync_seed_version";
@@ -156,14 +161,9 @@ function legacyMembershipId(itemId: string, folderId: string): string {
  * Existing app tables are read-only inputs: this never rewrites or deletes them.
  * Returns null when the replica was already seeded.
  */
-export function seedSyncReplica(
-  db: SQLite.SQLiteDatabase,
-  auRecipe = false,
-): Promise<SyncSeedCounts | null> {
-  return withAppDbWriteLock(() => seedSyncReplicaLocked(db, auRecipe));
-}
 
-async function seedSyncReplicaLocked(
+
+export async function seedSyncReplicaOwned(
   db: SQLite.SQLiteDatabase,
   auRecipe: boolean,
 ): Promise<SyncSeedCounts | null> {
@@ -316,7 +316,7 @@ async function replicaReady(db: SQLite.SQLiteDatabase): Promise<boolean> {
 }
 
 /** Keep an existing local row mirrored into the optional CRR tables. */
-export async function mirrorLocalItem(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+export async function mirrorLocalItemOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalItem>(
     `SELECT id, type, uri, title, description, favicon_url, mime_type, created_at,
@@ -353,7 +353,7 @@ export async function mirrorLocalItem(db: SQLite.SQLiteDatabase, id: string): Pr
   );
 }
 
-export async function mirrorLocalFolder(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+export async function mirrorLocalFolderOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalFolder>(
     "SELECT id, name, icon, created_at, archived_at, layout FROM folders WHERE id = ?",
@@ -375,7 +375,7 @@ export async function mirrorLocalFolder(db: SQLite.SQLiteDatabase, id: string): 
   );
 }
 
-export async function mirrorLocalMembership(
+export async function mirrorLocalMembershipOwned(
   db: SQLite.SQLiteDatabase,
   itemId: string,
   folderId: string,
@@ -411,8 +411,7 @@ export async function mirrorLocalMembership(
 }
 
 export async function mirrorAuRecipeSetting(enabled: boolean): Promise<void> {
-  const db = await getDb();
-  await withAppDbWriteLock(async () => {
+  await withAppDb(async (db) => {
     if (!(await replicaReady(db))) return;
     await db.runAsync(
       "UPDATE sync_user_settings SET au_recipe = ? WHERE id = 'local-user'",
@@ -421,7 +420,7 @@ export async function mirrorAuRecipeSetting(enabled: boolean): Promise<void> {
   });
 }
 
-export async function mirrorLocalSubstitution(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+export async function mirrorLocalSubstitutionOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalSubstitution>(
     "SELECT id, find, replace, case_sensitive, created_at FROM text_substitutions WHERE id = ?",
@@ -442,33 +441,27 @@ export async function mirrorLocalSubstitution(db: SQLite.SQLiteDatabase, id: str
 }
 
 /** Invalidate local projection authorization before applying any sync batch. */
-export function beginSyncCycle(db: SQLite.SQLiteDatabase): Promise<void> {
-  return withAppDbWriteLock(async () => {
-    if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
-    await db.runAsync(
-      "INSERT OR REPLACE INTO stash_sync_metadata (key, value) VALUES (?, '0')",
-      SYNC_PROJECTION_READY_KEY,
-    );
-  });
+export async function beginSyncCycleOwned(db: SQLite.SQLiteDatabase): Promise<void> {
+  if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
+  await db.runAsync(
+    "INSERT OR REPLACE INTO stash_sync_metadata (key, value) VALUES (?, '0')",
+    SYNC_PROJECTION_READY_KEY,
+  );
 }
 
 /** Authorize one projection only after every change in a sync exchange has landed. */
-export function markSyncSnapshotComplete(db: SQLite.SQLiteDatabase): Promise<void> {
-  return withAppDbWriteLock(async () => {
-    if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
-    await db.runAsync(
-      "INSERT OR REPLACE INTO stash_sync_metadata (key, value) VALUES (?, '1')",
-      SYNC_PROJECTION_READY_KEY,
-    );
-  });
+export async function markSyncSnapshotCompleteOwned(db: SQLite.SQLiteDatabase): Promise<void> {
+  if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
+  await db.runAsync(
+    "INSERT OR REPLACE INTO stash_sync_metadata (key, value) VALUES (?, '1')",
+    SYNC_PROJECTION_READY_KEY,
+  );
 }
 
 /** Apply the current replicated projection; local media paths are retained, never taken from the network. */
-export function projectSyncReplicaToLocal(db: SQLite.SQLiteDatabase): Promise<void> {
-  return withAppDbWriteLock(() => projectSyncReplicaToLocalLocked(db));
-}
 
-async function projectSyncReplicaToLocalLocked(db: SQLite.SQLiteDatabase): Promise<void> {
+
+export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase): Promise<void> {
   if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
   const complete = await db.getFirstAsync<{ value: string }>(
     "SELECT value FROM stash_sync_metadata WHERE key = ?",
@@ -477,7 +470,7 @@ async function projectSyncReplicaToLocalLocked(db: SQLite.SQLiteDatabase): Promi
   if (complete?.value !== "1") {
     throw new Error("Refusing destructive local projection without a completed sync snapshot.");
   }
-  await reconcileSyncRelationshipsLocked(db);
+  await reconcileSyncRelationshipsOwned(db);
 
   await db.withTransactionAsync(async () => {
     const folders = await db.getAllAsync<LocalFolder & { deleted: number }>(
@@ -579,13 +572,9 @@ async function projectSyncReplicaToLocalLocked(db: SQLite.SQLiteDatabase): Promi
 }
 
 /** Reconcile replicated relationship rows without physically deleting history. */
-export function reconcileSyncRelationships(
-  db: SQLite.SQLiteDatabase,
-): Promise<void> {
-  return withAppDbWriteLock(() => reconcileSyncRelationshipsLocked(db));
-}
 
-async function reconcileSyncRelationshipsLocked(
+
+export async function reconcileSyncRelationshipsOwned(
   db: SQLite.SQLiteDatabase,
 ): Promise<void> {
   if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
@@ -618,7 +607,7 @@ async function reconcileSyncRelationshipsLocked(
   });
 }
 
-export async function inspectSyncIntegrity(
+export async function inspectSyncIntegrityOwned(
   db: SQLite.SQLiteDatabase,
 ): Promise<SyncIntegrityReport> {
   const row = await db.getFirstAsync<SyncIntegrityReport>(`
@@ -643,7 +632,7 @@ export async function inspectSyncIntegrity(
   return row;
 }
 
-export async function loadCrsqliteExtension(db: SQLite.SQLiteDatabase): Promise<void> {
+export async function loadCrsqliteExtensionOwned(db: SQLite.SQLiteDatabase): Promise<void> {
   await ensureCrsqliteLoaded(db);
 }
 
@@ -652,16 +641,18 @@ export async function prepareCurrentStashReplica(auRecipe = false): Promise<{
   seeded: SyncSeedCounts | null;
   integrity: SyncIntegrityReport;
 }> {
-  const db = await getDb();
-  await loadCrsqliteExtension(db);
-  const seeded = await seedSyncReplica(db, auRecipe);
-  // A local seed is itself a complete snapshot; future network sync must clear
-  // and re-mark this authorization around each full exchange.
-  await markSyncSnapshotComplete(db);
-  await reconcileSyncRelationships(db);
-  const integrity = await inspectSyncIntegrity(db);
-  if (integrity.invalidItemTypes || integrity.orphanMemberships || integrity.activeLinksToDeletedFolders || integrity.emptyIds) {
-    throw new Error(`Sync replica integrity check failed: ${JSON.stringify(integrity)}`);
-  }
-  return { seeded, integrity };
+  return withAppDb(async (db) => {
+    await loadCrsqliteExtensionOwned(db);
+    const seeded = await seedSyncReplicaOwned(db, auRecipe);
+    // A local seed is itself a complete snapshot; future network sync must clear
+    // and re-mark this authorization around each full exchange.
+    await markSyncSnapshotCompleteOwned(db);
+    await reconcileSyncRelationshipsOwned(db);
+    const integrity = await inspectSyncIntegrityOwned(db);
+    if (integrity.invalidItemTypes || integrity.orphanMemberships || integrity.activeLinksToDeletedFolders || integrity.emptyIds) {
+      throw new Error(`Sync replica integrity check failed: ${JSON.stringify(integrity)}`);
+    }
+    return { seeded, integrity };
+
+  });
 }
