@@ -6,22 +6,28 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness({ dev = true, optIn = false, platform = 'android' } = {}) {
+function harness({ dev = true, optIn = false, platform = 'android', effects = false } = {}) {
   let states = [], refs = [], cursor = 0, refCursor = 0, current = null;
   const calls = [], navigation = [], modules = new Map();
+  let effectCursor = 0, effectSlots = [], pendingEffects = [], cleanups = [];
   const reject = name => async () => { calls.push(name); throw Error('Restored data is read-only until a full merge with the sync server completes. Connect in Settings.'); };
   const react = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
     useState: initial => { const i = cursor++; if (!(i in states)) states[i] = initial; return [states[i], value => { states[i] = typeof value === 'function' ? value(states[i]) : value; }]; },
     useRef: value => ({ current: refCursor < refs.length ? refs[refCursor++] : value }),
-    useCallback: fn => fn, useMemo: fn => fn(), useEffect() {},
+    useCallback: fn => fn, useMemo: fn => fn(), useEffect(fn, deps) {
+      const i = effectCursor++;
+      if (effects && (!effectSlots[i] || deps?.some((value, j) => value !== effectSlots[i][j]))) {
+        effectSlots[i] = deps; pendingEffects.push(() => { cleanups[i]?.(); cleanups[i] = fn(); });
+      }
+    },
   };
   const modal = { showModal: config => { current = config; }, useModalStore: selector => selector({ current, dismiss: () => { current = null; } }) };
   const db = Object.fromEntries(['archiveItem','archiveFolder','updateItemListenedPercent','updateFolderName','updateFolderIcon','updateFolderLayout','addItemToFolder','removeItemFromFolder','createFolder','updateItemTitle','unarchiveItem','createTextSubstitution','updateTextSubstitution','deleteTextSubstitution'].map(name => [name, reject(name)]));
   const mocks = {
     react: { __esModule: true, default: react, ...react },
     'react-native': { ...Object.fromEntries(['View','Text','TextInput','Pressable','ScrollView','Modal','KeyboardAvoidingView','Switch','FlatList','Image','ActivityIndicator','RefreshControl'].map(name => [name,name])), StyleSheet: { create: value => value }, Platform: { OS: platform }, NativeModules: {}, useWindowDimensions: () => ({ width: 360, height: 400 }) },
-    'expo-router': { useLocalSearchParams: () => ({ id: 'id', folderName: 'Folder', folderIcon: 'F' }), useRouter: () => ({ back: () => navigation.push('back'), push() {} }), useFocusEffect() {} },
+    'expo-router': { useLocalSearchParams: () => ({ id: 'id', folderName: 'Folder', folderIcon: 'F' }), useRouter: () => ({ back: () => navigation.push('back'), push: route => navigation.push(route) }), useFocusEffect() {} },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0, top: 0 }) },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
     'unicode-segmenter/grapheme': { countGraphemes: value => value.length },
@@ -56,10 +62,13 @@ function harness({ dev = true, optIn = false, platform = 'android' } = {}) {
     return module.exports;
   }
   const render = (file, values = [], refValues = [], name = 'default', props = {}) => {
-    states = values; refs = refValues; cursor = 0; refCursor = 0;
+    states = values; refs = refValues; cursor = 0; refCursor = 0; effectCursor = 0;
     return load(file, file.endsWith('TextSubstitutionsScreen.tsx') ? '\nexport { SubstitutionModal };' : '')[name](props);
   };
-  return { render, calls, navigation, mocks, states: () => states, current: () => current,
+  return { render, calls, navigation, mocks,
+    flushEffects() { const queued = pendingEffects; pendingEffects = []; queued.forEach(fn => fn()); },
+    unmount() { cleanups.forEach(fn => fn?.()); cleanups = []; effectSlots = []; pendingEffects = []; },
+    states: () => states, current: () => current,
     async pressModal(text) {
       const host = render('src/components/ModalHost.tsx', [], [], 'ModalHost');
       const button = nodes(host).find(node => node.type === 'Pressable' && words(node) === text);
@@ -70,7 +79,7 @@ function harness({ dev = true, optIn = false, platform = 'android' } = {}) {
 function nodes(root) {
   if (!root || typeof root !== 'object') return [];
   if (Array.isArray(root)) return root.flatMap(nodes);
-  return [root, ...nodes(root.props?.children), ...nodes(root.props?.buttons)];
+  return [root, ...(typeof root.type === 'function' ? nodes(root.type(root.props)) : []), ...nodes(root.props?.children), ...nodes(root.props?.buttons)];
 }
 function words(root) {
   if (typeof root === 'string') return root;
@@ -142,39 +151,164 @@ test('actual archive direct unarchive submit catches rejection', async () => {
   await input.props.onSubmitEditing(); recoveryMessage(h,'updateItemTitle');
 });
 
-for (const build of [
+
+const settingsFile = 'src/screens/SettingsScreen.tsx';
+const syncFile = 'src/screens/SyncSettingsScreen.tsx';
+const inputs = tree => nodes(tree).filter(n => n.type === 'TextInput');
+const deferred = () => { let resolve, reject; const promise = new Promise((yes,no) => { resolve=yes; reject=no; }); return { promise, resolve, reject }; };
+const tick = () => new Promise(resolve => setImmediate(resolve));
+const builds = [
   {dev:false,optIn:false,platform:'android',allowed:false},
   {dev:false,optIn:true,platform:'android',allowed:true},
   {dev:true,optIn:false,platform:'android',allowed:true},
   {dev:true,optIn:true,platform:'ios',allowed:false},
-]) test(`actual pending Settings never authorizes Connect outside shared build gate: ${JSON.stringify(build)}`, () => {
-  const h = harness(build), tree = h.render('src/screens/SettingsScreen.tsx',[null,true,false,'','','',{phase:'stopped'}]);
-  const all = nodes(tree), connect = all.find(n => n.type === 'Pressable' && words(n) === 'Connect and sync');
-  assert.equal(!!connect,build.allowed);
-  const scroll = all.find(n => n.type === 'ScrollView'); assert.ok(scroll.props.contentContainerStyle); assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
-  const banner = all.find(n => n.type === 'Text' && words(n).includes('Restored locally')); assert.ok(banner.props.style.color);
-  if (build.allowed) { assert.equal(all.filter(n => n.type === 'TextInput').length,3); assert.ok(all.find(n => n.type === 'Pressable' && words(n) === 'Disconnect')); }
+  {dev:false,optIn:true,platform:'ios',allowed:false},
+];
+for (const build of builds) test(`actual Settings row and direct Sync page obey shared build gate: ${JSON.stringify(build)}`, () => {
+  const h = harness(build), tree = h.render(settingsFile,[null,true,false]);
+  const row = nodes(tree).find(n => n.type === 'Pressable' && words(n) === 'Sync');
+  assert.equal(!!row, build.allowed);
+  assert.equal(inputs(tree).length,0);
+  assert.ok(!words(tree).includes('Prepare this install'));
+  assert.ok(!words(tree).includes('Connect and sync'));
+  const banner = nodes(tree).find(n => n.type === 'Text' && words(n).includes('Restored locally'));
+  assert.match(words(banner),build.allowed ? /Settings → Sync/ : /Recovery requires an Android/);
+  assert.ok(banner.props.style.color);
+  if (row) { row.props.onPress(); assert.deepEqual(h.navigation,['/settings/sync']); }
+  // Effects are disabled in this gate-only case; inject the subscribed signed-out state.
+  const page = h.render(syncFile,[false,false,'','','',{phase:'stopped'}]);
+  assert.equal(inputs(page).length,build.allowed ? 3 : 0);
+  assert.equal(!!nodes(page).find(n => n.type === 'Pressable' && words(n) === 'Connect and sync'),build.allowed);
+  const scroll = nodes(page).find(n => n.type === 'ScrollView');
+  assert.ok(scroll.props.contentContainerStyle); assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
 });
 
-test('actual Settings explains missing preparation and keeps Connect retryable', async () => {
-  const h = harness();
+// Most legacy recovery tests deliberately do not run effects. These Sync tests explicitly
+// mount/flush the actual subscription effect and clean it up on remount, with a fake
+// status source. Re-renders are manual; this is not a React renderer or a device test.
+function syncUi(initial = {phase:'stopped'}) {
+  const h = harness({effects:true}); let status = initial, listener, attempts = 0;
   class PreparationRequired extends Error {}
-  let attempts = 0;
+  let connect = async () => { attempts++; publish({phase:'syncing',account:{username:'stored-user',serverUrl:'https://sync.example/'}}); };
+  let disconnect = async () => { publish({phase:'stopped'}); };
+  const publish = next => { status = next; listener?.(next); };
+  h.mocks['../db/database'] = { withAppDb: async () => false, isRestorePendingOwned() {} };
   h.mocks['../db/syncClient'] = {
     StashSyncPreparationRequiredError: PreparationRequired,
-    connectStashSync: async () => { attempts++; throw new PreparationRequired("Prepare this install's local sync replica before connecting."); },
+    subscribeStashSyncStatus: fn => { listener = fn; fn(status); return () => { listener = null; }; },
+    connectStashSync: (...args) => connect(...args),
+    disconnectStashSyncAndWait: () => disconnect(),
   };
-  let tree = h.render('src/screens/SettingsScreen.tsx', [null,false,false,'http://localhost/','x','x',{phase:'stopped'}]);
-  for (let i = 0; i < 2; i++) {
-    const connect = button(tree,'Connect and sync');
-    assert.equal(connect.props.disabled,false);
-    connect.props.onPress();
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(h.current().title,'Prepare sync first');
-    assert.match(h.current().message,/Prepare.*local sync replica before connecting/);
-    assert.equal(h.states()[2],false);
-    assert.equal(h.states()[6].phase,'stopped');
-    tree = h.render('src/screens/SettingsScreen.tsx',h.states());
+  function render(values = h.states()) { return h.render(syncFile,values); }
+  render([]); h.flushEffects();
+  return { h, render, publish, PreparationRequired, attempts: () => attempts,
+    setConnect(fn) { connect = fn; }, setDisconnect(fn) { disconnect = fn; } };
+}
+
+test('actual Sync page signs in, clears password, and retains subscribed account through sync/error and reopening', async () => {
+  const u = syncUi(), {h} = u;
+  let tree = u.render(); assert.equal(inputs(tree).length,3);
+  inputs(tree)[0].props.onChangeText('https://typed.example/');
+  inputs(tree)[1].props.onChangeText('typed-user');
+  inputs(tree)[2].props.onChangeText('secret');
+  await button(u.render(),'Connect and sync').props.onPress(); await tick();
+  assert.equal(h.states()[4],'');
+  const account = {username:'stored-user',serverUrl:'https://sync.example/'};
+  for (const phase of ['syncing','synced','error']) {
+    u.publish({phase,account,message: phase === 'error' ? 'Temporary network failure' : phase});
+    tree = u.render(); assert.equal(inputs(tree).length,0);
+    assert.match(words(tree),/Signed in as stored-user/); assert.match(words(tree),/https:\/\/sync.example\//);
+    assert.ok(!words(tree).includes('typed-user')); assert.ok(!words(tree).includes('Connect and sync'));
+    assert.ok(!words(tree).includes('Prepare this install')); button(tree,'Sign out');
+  }
+  h.unmount(); const opening = u.render([]);
+  assert.equal(inputs(opening).length,0); assert.match(words(opening),/Checking sync status/);
+  h.flushEffects(); tree = u.render();
+  assert.equal(inputs(tree).length,0); assert.match(words(tree),/Signed in as stored-user/);
+  assert.match(words(tree),/Temporary network failure/);
+});
+
+for (const preparation of [true,false]) test(`actual Sync failed ${preparation ? 'preparation' : 'auth'} remains retryable with visible inputs`, async () => {
+  const u = syncUi(); let attempts=0;
+  u.setConnect(async () => { attempts++; u.publish({phase:preparation ? 'stopped' : 'error',message:'failure'}); throw preparation ? new u.PreparationRequired('Prepare local sync replica before connecting') : Error('HTTP 401'); });
+  for (let i=0;i<2;i++) {
+    const connect = button(u.render(),'Connect and sync'); assert.equal(connect.props.disabled,false);
+    connect.props.onPress(); await tick();
+    assert.equal(u.h.current().title,preparation ? 'Prepare sync first' : 'Stash sync could not start');
+    assert.equal(inputs(u.render()).length,3);
+    assert.equal(u.h.states()[1],false);
   }
   assert.equal(attempts,2);
+});
+
+for (const cancel of [false,true]) test(`actual Sync ${cancel ? 'cancel' : 'sign out'} waits for drain before revealing fields and clears password`, async () => {
+  const account = {username:'stored-user',serverUrl:'https://sync.example/'};
+  const u = syncUi(cancel ? {phase:'connecting'} : {phase:'synced',account});
+  // Simulate an in-flight attempt whose connect promise is still unresolved.
+  u.h.states()[4]='secret';
+  const gate = deferred();
+  u.setDisconnect(async () => { u.publish({phase:'stopped'}); await gate.promise; });
+  const tree = u.render();
+  if (cancel) { assert.ok(inputs(tree).every(n => n.props.editable === false)); assert.equal(button(tree,'Connect and sync').props.disabled,true); }
+  button(tree,cancel ? 'Cancel' : 'Sign out').props.onPress();
+  await tick(); let pending = u.render();
+  assert.equal(inputs(pending).length,0); assert.match(words(pending),/Signing out/);
+  assert.ok(!words(pending).includes('Connect and sync'));
+  gate.resolve(); await tick();
+  assert.equal(inputs(u.render()).length,3); assert.equal(u.h.states()[4],'');
+  assert.equal(button(u.render(),'Connect and sync').props.disabled,false);
+});
+
+test('actual Sync teardown failure is not shown as successful sign out or an enabled reconnect', async () => {
+  const u = syncUi({phase:'synced',account:{username:'stored-user',serverUrl:'https://sync.example/'}});
+  u.setDisconnect(async () => { u.publish({phase:'stopped'}); throw Error('transport failed'); });
+  button(u.render(),'Sign out').props.onPress(); await tick();
+  const tree=u.render(); assert.equal(inputs(tree).length,0);
+  assert.match(words(tree),/Sign out could not finish.*Restart the app/);
+  assert.ok(!words(tree).includes('Connect and sync'));
+  assert.equal(u.h.current().title,'Sign out failed');
+});
+
+test('actual Sync page keeps preparation hidden during recovery and moves preparation/smoke handlers off main Settings', async () => {
+  const u=syncUi(); let prepared=0, smoked=0;
+  u.h.mocks['../db/syncReplica'].prepareCurrentStashReplica=async () => { prepared++; return {seeded:true}; };
+  u.h.mocks['../db/syncReplicaSmoke'].runSyncReplicaSmoke=async () => { smoked++; return {ok:true}; };
+  button(u.render(),"Prepare this install's local sync replica").props.onPress(); await tick();
+  assert.equal(prepared,1); assert.equal(u.h.current().title,'Local sync replica prepared');
+  button(u.render(),'Run isolated sync migration smoke').props.onPress(); await tick();
+  assert.equal(smoked,1); assert.equal(u.h.current().title,'Sync migration smoke passed');
+  u.h.states()[0]=true;
+  const pending=u.render(); assert.match(words(pending),/read-only until a full server merge/);
+  assert.ok(!words(pending).includes('Prepare this install')); button(pending,'Connect and sync');
+});
+
+test('actual Sync cancellation keeps fields hidden even if connect resolves before the teardown drain', async () => {
+  const u=syncUi(), connectGate=deferred(), drainGate=deferred();
+  u.setConnect(async () => { u.publish({phase:'connecting'}); await connectGate.promise; });
+  button(u.render(),'Connect and sync').props.onPress();
+  let tree=u.render(); assert.equal(button(tree,'Connect and sync').props.disabled,true);
+  assert.ok(inputs(tree).every(input => input.props.editable === false));
+  u.setDisconnect(async () => { u.publish({phase:'stopped',disconnecting:true}); await drainGate.promise; u.publish({phase:'stopped'}); });
+  button(tree,'Cancel').props.onPress(); connectGate.resolve(); await tick();
+  assert.equal(u.h.states()[1],false); // Connect's finally has already run.
+  assert.equal(inputs(u.render()).length,0);
+  drainGate.resolve(); await tick(); assert.equal(inputs(u.render()).length,3);
+});
+
+for (const failed of [false,true]) test(`actual Sync remount respects subscribed ${failed ? 'restart-required failure' : 'pending drain'} instead of showing login`, () => {
+  const u=syncUi({phase:'stopped',...(failed ? {restartRequired:true} : {disconnecting:true}),message:'Sync disconnected.'});
+  let tree=u.render(); assert.equal(inputs(tree).length,0);
+  assert.ok(!words(tree).includes('Connect and sync'));
+  assert.match(words(tree),failed ? /Sign out could not finish.*Restart the app/ : /Signing out/);
+  u.h.unmount(); tree=u.render([]); assert.equal(inputs(tree).length,0);
+  u.h.flushEffects(); tree=u.render(); assert.equal(inputs(tree).length,0);
+  assert.match(words(tree),failed ? /Restart the app/ : /Signing out/);
+  if (!failed) { u.publish({phase:'stopped'}); assert.equal(inputs(u.render()).length,3); }
+});
+
+test('actual Sync preparation action failure resets busy without hiding retryable auth controls', async () => {
+  const u=syncUi(); u.h.mocks['../db/syncReplica'].prepareCurrentStashReplica=async () => { throw Error('preparation failed'); };
+  button(u.render(),"Prepare this install's local sync replica").props.onPress(); await tick();
+  assert.equal(u.h.current().title,'Local sync replica failed'); assert.equal(u.h.states()[1],false);
+  assert.equal(inputs(u.render()).length,3); assert.equal(button(u.render(),'Connect and sync').props.disabled,false);
 });

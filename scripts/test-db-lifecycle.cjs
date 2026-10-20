@@ -85,7 +85,7 @@ function syncHarness() {
         replica = await config.dbProvider();
         transports++;
         return {
-          start: async () => { if (startGate) await startGate.promise; },
+          start: async () => { if (startGate) await startGate.promise; if (h.options.startError) throw h.options.startError; },
           // Intentionally omit replica.close(): verify app fallback cleanup.
           stop: () => { stops++; if (stopError) throw stopError; },
         };
@@ -94,9 +94,11 @@ function syncHarness() {
     fetch: async (url, { signal }) => {
       if (url.pathname.endsWith('healthz')) {
         if (healthGate) await healthGate.promise;
+        if (h.options.healthError) throw h.options.healthError;
         return { ok: true, json: async () => ({ schema: 'test', schemaVersion: '1' }) };
       }
       statusSignal = signal;
+      if (h.options.statusResponse) return h.options.statusResponse(url, signal);
       return new Promise((_, reject) => {
         const abort = () => reject(new Error('aborted'));
         if (signal.aborted) abort();
@@ -211,12 +213,16 @@ test('throwing status observers cannot strand an attempt or interrupt teardown',
 });
 
 test('throwing subscribed observer cannot prevent other notifications or restore', async () => {
-  const h = syncHarness(), phases = [];
+  const h = syncHarness(), statuses = [];
   const unsubscribe = h.sync.subscribeStashSyncStatus(() => { throw new Error('subscriber failed'); });
-  h.sync.subscribeStashSyncStatus(status => phases.push(status.phase));
+  h.sync.subscribeStashSyncStatus(status => statuses.push(status));
   await h.connect();
   await h.sync.withStashSyncRestoreLock(async () => {});
-  assert.deepEqual(phases, ['stopped', 'connecting', 'syncing', 'stopped']);
+  // Shared subscribers get one additional stopped update when draining completes;
+  // custom phase callbacks above retain their original sequence.
+  assert.deepEqual(statuses.map(status => status.phase), ['stopped', 'connecting', 'syncing', 'stopped', 'stopped']);
+  assert.equal(statuses.at(-2).disconnecting,true);
+  assert.equal(statuses.at(-1).disconnecting,undefined);
   unsubscribe();
 });
 
@@ -323,4 +329,180 @@ test('temporary extension cleanup attempts close even when finalization rejects'
   h.options.finalizeError = Error('temporary finalize failure');
   await assert.rejects(h.api.closeTemporaryDatabase(temp),/temporary finalize failure/);
   assert.ok(h.events.includes('close:0'));
+});
+
+test('subscribed account is sanitized, immediate on remount, retained across syncing/synced/poll errors, and removed at stop', {timeout:6000}, async () => {
+  const h=syncHarness(), statuses=[], observedError=deferred();
+  const account={username:'alice',serverUrl:'https://sync.example/base/'};
+  let polls=0;
+  h.options.statusResponse=async () => {
+    polls++;
+    if (polls >= 3) throw Error('temporary status outage');
+    return {ok:true,json:async () => ({schema:'test',schemaVersion:'1',serverSiteId:'11'.repeat(16),clientSiteId:'00'.repeat(16),serverVersion:polls === 1 ? '1' : '0',clientSeenVersion:'0'})};
+  };
+  const unsubscribe=h.sync.subscribeStashSyncStatus(status => {
+    statuses.push(status);
+    if (status.phase === 'error') observedError.resolve();
+  });
+  try {
+    await h.sync.connectStashSync('https://embedded:secret@sync.example/base/?token=secret#fragment',{username:' alice ',password:'password'});
+    let remounted;
+    const unmount=h.sync.subscribeStashSyncStatus(status => { remounted=status; });
+    assert.deepEqual(JSON.parse(JSON.stringify(remounted.account)),account);
+    unmount();
+    await observedError.promise;
+    assert.ok(statuses.some(s => s.phase === 'synced' && typeof s.projectedAt === 'number'));
+    assert.ok(statuses.some(s => /Waiting for both/.test(s.message)));
+    for (const status of statuses) {
+      if (['syncing','synced','error'].includes(status.phase)) assert.deepEqual(JSON.parse(JSON.stringify(status.account)),account);
+      else assert.equal(status.account,undefined);
+      assert.doesNotMatch(JSON.stringify(status),/secret|password|embedded|Authorization|Basic/);
+    }
+    let errorOnRemount;
+    const unmountError=h.sync.subscribeStashSyncStatus(status => { errorOnRemount=status; });
+    assert.equal(errorOnRemount.phase,'error');
+    assert.deepEqual(JSON.parse(JSON.stringify(errorOnRemount.account)),account);
+    unmountError();
+    await h.sync.disconnectStashSyncAndWait();
+    assert.equal(statuses.at(-1).phase,'stopped'); assert.equal(statuses.at(-1).account,undefined);
+    let stoppedOnRemount;
+    h.sync.subscribeStashSyncStatus(status => { stoppedOnRemount=status; })();
+    assert.equal(stoppedOnRemount.account,undefined);
+  } finally { unsubscribe(); await h.sync.disconnectStashSyncAndWait(); }
+});
+
+for (const failure of ['preparation','auth','startup']) test(`account is never exposed on failed initial ${failure} and retry can establish it`, async () => {
+  const h=syncHarness(), statuses=[];
+  h.sync.subscribeStashSyncStatus(status => statuses.push(status));
+  let originalFirst;
+  if (failure === 'preparation') await h.api.withAppDb(async db => {
+    originalFirst=db.getFirstAsync;
+    db.getFirstAsync=async (sql,...args) => sql.includes('sqlite_master') ? {present:0} : originalFirst(sql,...args);
+  });
+  if (failure === 'auth') h.options.healthError=Error('HTTP 401');
+  if (failure === 'startup') h.options.startError=Error('start failed');
+  await assert.rejects(h.connect(),failure === 'preparation' ? /Prepare/ : failure === 'auth' ? /401/ : /start failed/);
+  assert.ok(statuses.every(status => !status.account));
+  assert.equal(statuses.at(-1).phase,failure === 'preparation' ? 'stopped' : 'error');
+  if (originalFirst) await h.api.withAppDb(async db => { db.getFirstAsync=originalFirst; });
+  h.options.healthError=null; h.options.startError=null;
+  await h.connect();
+  assert.equal(statuses.at(-1).account.username,'test');
+  await h.sync.disconnectStashSyncAndWait();
+  assert.equal(statuses.at(-1).account,undefined);
+});
+
+for (const phase of ['health','startup']) test(`account is absent throughout cancelled ${phase} and immediately on resubscription`, async () => {
+  const h=syncHarness(), gate=deferred(), statuses=[];
+  h.sync.subscribeStashSyncStatus(status => statuses.push(status));
+  if (phase === 'health') h.healthGate=gate; else h.startGate=gate;
+  const connect=h.connect(); await tick();
+  const cancel=h.sync.disconnectStashSyncAndWait();
+  gate.resolve(); await connect; await cancel;
+  assert.ok(statuses.every(status => !status.account));
+  assert.equal(statuses.at(-1).phase,'stopped');
+  let immediate;
+  h.sync.subscribeStashSyncStatus(status => { immediate=status; })();
+  assert.equal(immediate.account,undefined); assert.equal(immediate.phase,'stopped');
+});
+
+for (const fail of [false,true]) test(`fresh subscription sees ${fail ? 'failed' : 'pending/completed'} session drain without a usable account`, {timeout:5000}, async () => {
+  const h=syncHarness(), gate=deferred();
+  const connection=await h.connect();
+  h.options.read=async sql => { if (sql.includes('crsql_changes')) await gate.promise; return []; };
+  const read=h.replica.pullChangeset([0n,0],[],false);
+  if (fail) h.stopError=Error('teardown failed');
+  connection.stop();
+  let fresh;
+  const unsubscribe=h.sync.subscribeStashSyncStatus(status => { fresh=status; });
+  assert.equal(fresh.phase,'stopped'); assert.equal(fresh.disconnecting,true); assert.equal(fresh.account,undefined);
+  let drained=false;
+  const drain=h.sync.disconnectStashSyncAndWait().then(() => { drained=true; }, error => { assert.match(error.message,/teardown failed/); });
+  await tick(); assert.equal(drained,false);
+  gate.resolve(); await read; await drain;
+  unsubscribe();
+  h.sync.subscribeStashSyncStatus(status => { fresh=status; })();
+  assert.equal(fresh.account,undefined); assert.equal(fresh.disconnecting,undefined);
+  assert.equal(fresh.restartRequired,fail ? true : undefined);
+  if (fail) await assert.rejects(h.connect(),/teardown failed/);
+  else { assert.equal(drained,true); await h.connect(); await h.sync.disconnectStashSyncAndWait(); }
+});
+
+for (const phase of ['health','startup']) test(`cancelled ${phase} advertises teardown across remount until attempt drain completes`, async () => {
+  const h=syncHarness(), gate=deferred();
+  if (phase === 'health') h.healthGate=gate; else h.startGate=gate;
+  const connect=h.connect(); await tick();
+  const cancel=h.sync.disconnectStashSyncAndWait();
+  let fresh;
+  const unsubscribe=h.sync.subscribeStashSyncStatus(status => { fresh=status; });
+  assert.equal(fresh.disconnecting,true); assert.equal(fresh.account,undefined);
+  gate.resolve(); await connect; await cancel;
+  assert.equal(fresh.phase,'stopped'); assert.equal(fresh.disconnecting,undefined); assert.equal(fresh.restartRequired,undefined);
+  unsubscribe();
+});
+
+for (const wait of [false,true]) test(`cancel before deferred setup leaves fresh subscribers stopped and reconnectable (await drain=${wait})`, async () => {
+  const h=syncHarness();
+  const pending=h.connect();
+  const cancelling=wait ? h.sync.disconnectStashSyncAndWait() : h.sync.disconnectStashSync();
+  await pending; await cancelling;
+  let fresh; h.sync.subscribeStashSyncStatus(status => { fresh=status; })();
+  assert.equal(h.transports,0);
+  assert.equal(fresh.phase,'stopped'); assert.equal(fresh.account,undefined);
+  assert.equal(fresh.disconnecting,undefined); assert.equal(fresh.restartRequired,undefined);
+  await h.connect(); await h.sync.disconnectStashSyncAndWait();
+  assert.equal(h.transports,1);
+});
+
+test('reentrant stop never delivers a superseded account snapshot to later subscribers during drain', async () => {
+  const h=syncHarness(), gate=deferred(); let read, triggered=false, mounted;
+  h.options.read=async sql => { if (sql.includes('crsql_changes')) await gate.promise; return []; };
+  const first=h.sync.subscribeStashSyncStatus(status => {
+    if (status.account && !triggered) {
+      triggered=true;
+      read=h.replica.pullChangeset([0n,0],[],false);
+      h.sync.disconnectStashSync();
+    }
+  });
+  const second=h.sync.subscribeStashSyncStatus(status => { mounted=status; });
+  await h.connect(); await tick();
+  let fresh; h.sync.subscribeStashSyncStatus(status => { fresh=status; })();
+  const duringDrain=mounted;
+  let finished=false;
+  const draining=h.sync.disconnectStashSyncAndWait().then(() => { finished=true; });
+  await tick(); const stillPending=!finished;
+  gate.resolve(); await read; await draining;
+  first(); second();
+  assert.equal(stillPending,true);
+  assert.equal(duringDrain.phase,fresh.phase);
+  assert.equal(duringDrain.phase,'stopped'); assert.equal(duringDrain.account,undefined);
+  assert.equal(duringDrain.disconnecting,true); assert.equal(fresh.disconnecting,true);
+});
+
+test('cancelled startup teardown failure is restart-required for fresh subscribers', async () => {
+  const h=syncHarness(), gate=deferred(); h.startGate=gate; h.stopError=Error('cancel cleanup failed');
+  const connect=h.connect(); await tick();
+  const cancel=h.sync.disconnectStashSyncAndWait();
+  gate.resolve();
+  await assert.rejects(connect,/cancel cleanup failed/);
+  await assert.rejects(cancel,/cancel cleanup failed/);
+  let fresh; h.sync.subscribeStashSyncStatus(status => { fresh=status; })();
+  assert.equal(fresh.restartRequired,true); assert.equal(fresh.account,undefined); assert.equal(fresh.disconnecting,undefined);
+});
+
+test('teardown metadata observers can reenter disconnect without bypassing drain or duplicating custom phases', async () => {
+  const h=syncHarness(), gate=deferred(), phases=[]; let reentrantDrain;
+  const connection=await h.connect(status => phases.push(status.phase));
+  h.options.read=async sql => { if (sql.includes('crsql_changes')) await gate.promise; return []; };
+  const read=h.replica.pullChangeset([0n,0],[],false);
+  const unsubscribe=h.sync.subscribeStashSyncStatus(status => {
+    if (status.disconnecting && !reentrantDrain) reentrantDrain=h.sync.disconnectStashSyncAndWait();
+  });
+  connection.stop(); await tick();
+  assert.ok(reentrantDrain);
+  let completed=false; void reentrantDrain.then(() => { completed=true; });
+  await tick(); assert.equal(completed,false);
+  gate.resolve(); await read; await reentrantDrain;
+  assert.equal(completed,true); assert.deepEqual(phases,['connecting','syncing','stopped']);
+  unsubscribe();
 });
