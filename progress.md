@@ -1,6 +1,6 @@
 # Stash sync/restore and deployability progress
 
-_Last updated: 2026-10-20 (Melbourne time), actual-app recovery implementation checkpoint_
+_Last updated: 2026-10-20 (Melbourne time), reviewed implementation and two-install native acceptance passed_
 
 ## Scope and approval
 Work is in the **actual Stash app** (`src/db`, backup/restore and Settings), not only the isolated pilot. Testing uses separate debug packages and disposable authenticated loopback services. Production app/data, production sync and Naboo deployment are not authorized.
@@ -33,24 +33,35 @@ Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `back
 - Read-only persistent schema identity/version and resident-DDL preflight occurs before upstream factory/migration or schema-file overwrite.
 - Malformed payloads terminate only their socket. Failed first DB factory acquisition is evicted without poisoning later peers; constructor failures close SQLite handles. Patch source/dist and dependency integrity are maintained.
 - Authenticated status advertises the small recovery capability and actual `merge-equal-values` setting. No SQL schema/hash or wire protocol redesign.
-- Independent backend review passed checkout19/parity1 and17 tests against the exact cache-fix package `/nix/store/yj1v4h5zr9w5znbcx9136zcjyam309yb-stash-crsqlite-sync-0.1.0`. That package predates the later status-capability source addition; it is not the final deployment artifact.
+- Independent backend review passed checkout19/parity1 and17 tests against the cache-fix package. Parent subsequently built the current capability-bearing package `/nix/store/4wxiprp6ggj9flkwkaac329a7aajdb4k-stash-crsqlite-sync-0.1.0` and passed all17 packaged-runtime tests. This validates the standalone server flake, not Naboo's stale input/followed host runtime or a deployment.
 
 ## Current validation and review
 - Latest implementation validation: **102 root tests**, **10 pinned native SQLite/actual app-server adapter merge tests**, **19 server tests**, **1 schema parity test**, root/server TypeScript and diff checks pass.
 - Durable tests execute actual backup/builder/lifecycle/media/UI handlers and real pinned host SQLite. They cover the original v3/serverSeen4 defect, two fresh identities/new uploads, both exchange orders, origin filtering, same-ID conflicts, tombstones/repair upload, pending/restarts, release/platform rejection without data/session changes, rollback/install failures and settings hydration races.
 - Expo filesystem/ZIP/transport and Android UI boundaries are controlled host test seams. These are **not** Android picker/extension/change-notification/WebSocket acceptance.
 - Independent core-merge correctness review found no source blockers. Filesystem/UX review requested the build-boundary, UI error, durable-setting, Settings reachability and native-copy fixes described above; those are implemented and their final independent review also found no remaining scoped blockers (focused43/typecheck independently rerun).
-- Parent independently reran root102 and native10 successfully. In the additional concurrent server rerun, two source-preflight subprocesses exceeded their 5-second startup/exit deadlines under host/build load. The managed test group was stopped and its test children cleaned; this is not a final passing server rerun. Retry isolated/serial after the APK build; do not count shutdown assertions interrupted by group cleanup as independent service failures.
-- A pre-fix embedded-JS ARM64 build passed; a fresh build including the review fixes is running. No reviewed-recovery APK has yet been installed or accepted natively.
+- Parent independently reran root102/native10. A concurrent server attempt hit two 5-second preflight deadlines under host/build load and was stopped/cleaned; the subsequent isolated serial retry passed server19/parity1 plus TypeScript in11 seconds. Interrupted cleanup assertions are not represented as independent service defects.
+- Fresh embedded-JS ARM64 APK including review fixes passed (285 seconds); a second isolated `.debug.clone` build passed (32 seconds). Generated applicationId suffix was restored to `.debug` afterwards. Both APKs were installed and exercised natively as described below.
+
+## Native acceptance passed — Pixel 8, two isolated installs
+- Tested the actual app at source checkpoint `4345591`, with only disposable `127.0.0.1:18787` backend behind Basic-auth Caddy on `127.0.0.1:18788`. Authenticated health200, unauthenticated401, only proxy port forwarded. No production app or service was touched.
+- Restored the same native165-item/8-folder ZIP through Android's actual system picker in `com.zachmanson.stash.debug` and `com.zachmanson.stash.debug.clone`.
+- Original backup identity `995070E3723A4107A40469E5AB612488`/version3 was not reused. New identities were `1509B93C80114824AA6E68ABAA4DB787` and `63D9A2CD203440D6AC748D1ABE48F586`, both initially version3 with zero tracked peers and persistent pending marker.
+- First install visibly rejected a text save while pending, with a clear recovery message. Pending/read-only state survived force-stop/restart. Settings scrolling made credential fields and Connect reachable.
+- A server-side delete of disposable `server-offline-item` was made while the test backend was stopped. Neither stale restore resurrected it. The previously uploaded post-backup probe survived both merges.
+- After full real-WebSocket merge, each install showed synced, cleared pending and successfully uploaded a different new text item. The first install then reconnected and received the second install's item. No mere count/status inference: stopped-app DB/WAL inspections and the stopped disposable server had **identical values across all five replicated tables**.
+- Final counts:8 folders,167 items,168 membership generations,9 substitutions,1 setting. Both clients and server had version7; client identities remained distinct. Canonical all-table content SHA-256: `c35a9015979d857f1008e6df4ee7cf63d9a47362c71589c566ab2f3c6fe8b1f8`.
+- A restored image rendered in the actual app. Its bytes in both private package namespaces matched the original ZIP SHA-256 `ecf809a2daa85b7104ff56d2c1cc102e349e4be6d8fe947d7946c26ebff3995c`. These bytes came from backup, **not network media sync**.
+- Bounded per-app ReactNativeJS watches reported no native statement/fatal/unhandled error match during observed connection/new-write windows. This is not a claim of exhaustive log/crash coverage.
+- Private machine summary `/tmp/stash-falco-final-native-summary.json`; private app snapshots/evidence `/tmp/stash-falco-final-native-alpha/` and `/tmp/stash-falco-final-native-clone/`. Do not publish data-bearing DBs, item dumps or image screenshots.
 
 ## Operational state
-- Earlier disposable backend/proxy stopped; debug app disconnected/force-stopped; owned reverse/download ZIP removed. Fox subsequently released the Pixel. Check current coordination-room ownership and claim before native use.
-- Isolated app/cache, private rollback/test data and host diagnostic artifacts remain; cleanup is not complete. Never publish data-bearing backups/SQLite/screenshots blindly.
-- Native acceptance plan: `/tmp/stash-falco-native-acceptance-plan.md`; current private old ZIP `/tmp/stash-falco-native-backup.zip` and DB inspections preserve the failure fixture.
+- Final disposable backend/proxy/log watches stopped; sockets18787/18788 closed; owned ADB reverse/download ZIP/UI dump removed. Clone package uninstalled; main debug app disconnected/force-stopped and left installed for Zach's UI test. Pixel released in the coordination room. Normal Stash, Emissions and Conversations untouched.
+- This run's picked-cache ZIP was removed. Main debug data/private rollback and earlier cache artifacts, plus private host fixtures/diagnostic evidence, remain deliberately retained; cleanup is not presented as complete. No test secrets or data were published.
+- APK artifacts: `/tmp/stash-falco-apks/stash-reviewed-recovery-arm64-debug.apk` (main test build) and sibling `stash-reviewed-recovery-arm64-debug-clone.apk` (removed second install). Private source ZIP `/tmp/stash-falco-native-backup.zip` retains the failure fixture.
 - Source/review reports: `/tmp/stash-falco-app-restore-merge-implementation.md`, `/tmp/stash-falco-recovery-review-fixes.md`, `/tmp/stash-falco-restore-correctness-review.md`, `/tmp/stash-falco-restore-filesystem-review.md`, `/tmp/stash-falco-backend-final-review.md`, `/tmp/stash-falco-media-independent-review.md`.
 
 ## Remaining gates
-1. Commit/push the independently reviewed coherent source/tests checkpoint, including new test files. Finish fresh APK build and isolated/serial server rerun after host/build contention; do not claim the interrupted parent server run passed.
-2. Coordinate Pixel ownership and run the fresh embedded-JS APK against disposable authenticated Caddy/backend. Exercise old backup → post-backup server write → picker restore → readonly rejection → reconnect → new write, comparing exact contents/site IDs/cursors/media, not only counts/status. Include server delete and another isolated install importing the same backup where feasible.
-3. Record actual native evidence, stop owned services/remove reverse/download copies/release Pixel, refresh issue/PR/checkpoint and complete deliberate private test cleanup.
-4. Production gates remain: Nix input still pins incompatible pilot `752b6d4`; validate an explicitly selected compatible package/host runtime, operational backups/retention/recovery, code-plus-data rollback/migration and monitoring. No deployment/pin update or production enablement without approval. Network media sync remains unimplemented.
+1. Zach's optional UI acceptance on the installed **Stash (debug)**: browse folders/images and add a disposable text item. Test services are stopped, so this is local/offline testing, not live sync to Naboo. Leave normal Stash data out of testing.
+2. Implementation/source tests are pushed as `f14e2c2` (backend) and `4345591` (app). Keep issue/PR evidence current and retain/remove private rollback/fixture artifacts deliberately after acceptance.
+3. Production gates remain: Nix input still pins incompatible pilot `752b6d4`; validate an explicitly selected compatible package with Naboo's followed host runtime and establish operational backups/retention/recovery, code-plus-data rollback/migration and monitoring. No deployment/pin update or production enablement without approval. Network media sync remains unimplemented. Native large-font/storage-pressure/power-loss/real-AsyncStorage-failure coverage is not claimed.
