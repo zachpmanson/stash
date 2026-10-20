@@ -1,13 +1,13 @@
 # Stash sync/restore and deployability progress
 
-_Last updated: 2026-10-20 (Melbourne time), reviewed implementation and two-install native acceptance passed_
+_Last updated: 2026-10-21 (Melbourne time), approved matching Naboo backend backed up, deployed and verified_
 
 ## Scope and approval
-Work is in the **actual Stash app** (`src/db`, backup/restore and Settings), not only the isolated pilot. Testing uses separate debug packages and disposable authenticated loopback services. Production app/data, production sync and Naboo deployment are not authorized.
+Work is in the **actual Stash app** (`src/db`, backup/restore and Settings), not only the isolated pilot. Implementation/native tests used separate debug packages and disposable authenticated loopback services. Zach subsequently explicitly approved backing up the existing Naboo pilot and deploying the matching reviewed backend. The normal release app remains unchanged; no app connection was initiated automatically.
 
 Zach selected **merge restored backup history with current server data**, not server replacement. Restored synced data may be browsed but stays read-only until its first full merge completes; ordinary offline editing resumes afterward. Restore still explicitly replaces this device's local app view; unrelated current-device histories are not silently unioned, and private rollback preserves them.
 
-Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `backend`; rollout/media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
+Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `backend`; broader release/media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
 ## Prior verified native evidence
 - Two same-process Disconnect → offline-write → reconnect cycles converged on Pixel 8; later deletion propagation and backup creation were observed.
@@ -63,6 +63,14 @@ Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `back
 - Real Pixel pristine `.debug.firstrun` install: two consecutive Connect attempts showed **Prepare sync first**, stayed retryable, left DB and WAL byte-identical and created no CR-SQLite/sync metadata tables. Explicit manual Prepare then succeeded. No backend/reverse was used. Throwaway package removed and Pixel released; existing app data untouched.
 - Updated main APK `/tmp/stash-falco-apks/stash-first-run-connect-fix-arm64-debug.apk`; private focused evidence `/tmp/stash-falco-firstrun-native/`. Prior two-install merge evidence remains explicitly tied to `4345591`; the focused follow-up changes only first-run preflight/error handling.
 
+## Approved Naboo backend rollout — 2026-10-21
+- Activated at **07:49 AEDT**, via `deploy-service stash-crsqlite-sync`, from [Nix `db1b9ca`](https://github.com/zachpmanson/nix/commit/db1b9ca651002b6f48932b725c81e8452ee8af04). Nix pins reviewed Stash `9f238dfdddb59434808e40a421e5bc9413d795eb` explicitly, not the incompatible pilot default branch. No source PR was merged for this rollout.
+- A reviewed DynamicUser `preStart` hook backed up stopped original data/schemas, SQLite-validated/materialized only the copies, checksum-manifested/fsynced them and published a private checkpoint before new startup. Journal confirms **one database/two files** at `/var/lib/stash-crsqlite-sync/backups/pre-deploy-9f238dfdddb59434808e40a421e5bc9413d795eb`. Pilot room/schema remain intact; current Stash uses its separate room. No additional sudo/capability grants.
+- Full followed-host configuration build passed; closure diff contained only Stash/backend backup units. Exact deployed Node24/package `/nix/store/wic5xm01n9mdrm2s3mrjsl4v4hcchyi0-stash-crsqlite-sync-0.1.0` passed17 server regressions plus6 backup fixtures (including killed-process WAL recovery, restored pilot note/schema, byte-identical originals, permissions and fail-closed cases). Independent deployment review found no blockers; parent additionally fsynced the StateDirectory entry and reran6 fixtures.
+- Gate Result=success/exit0; live ExecStart matched the tested artifact. Readiness: `stash-sync-v1.sql`, version `6377240025945021647`, restore capability1/`mergeEqualValues:0`. Initial status had all five projections empty. Listener stayed `127.0.0.1:8787`; missing internal identity401, stamped status200, test-items route404, public unauthenticated/forged-header/bogus-auth401. `ENABLE_TEST_ENDPOINTS` unset and live startup reported false. Ejabberd start timestamp unchanged.
+- Owner asked to manually Disconnect then Connect in Stash (debug), using unchanged URL/credentials. No automatic connection, physical-device session or production authentication secret was used by the deployment checks. Successful public authenticated app acceptance remains Zach's manual check; existing Caddy auth configuration was unchanged.
+- Code/config rollback can restore the old pilot input using the normal gate without replacing its untouched database. Private archive restore was drilled only on disposable fixtures; real-host data rollback was not executed. Operational procedure lives in Nix `hosts/naboo/services/stash-crsqlite-sync.md`; local checkpoint is not an off-host retention/RPO policy. Deployment gate released to Slippy, then Peppy.
+
 ## Operational state
 - Final disposable backend/proxy/log watches stopped; sockets18787/18788 closed; owned ADB reverse/download ZIP/UI dump removed. Clone package uninstalled; main debug app disconnected/force-stopped and left installed for Zach's UI test. Pixel released in the coordination room. Normal Stash, Emissions and Conversations untouched.
 - This run's picked-cache ZIP was removed. Main debug data/private rollback and earlier cache artifacts, plus private host fixtures/diagnostic evidence, remain deliberately retained; cleanup is not presented as complete. No test secrets or data were published.
@@ -70,6 +78,6 @@ Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `back
 - Source/review reports: `/tmp/stash-falco-app-restore-merge-implementation.md`, `/tmp/stash-falco-recovery-review-fixes.md`, `/tmp/stash-falco-restore-correctness-review.md`, `/tmp/stash-falco-restore-filesystem-review.md`, `/tmp/stash-falco-backend-final-review.md`, `/tmp/stash-falco-media-independent-review.md`.
 
 ## Remaining gates
-1. Zach's optional UI acceptance on the installed **Stash (debug)**: browse folders/images and add a disposable text item. Test services are stopped, so this is local/offline testing, not live sync to Naboo. Leave normal Stash data out of testing.
-2. Implementation/source tests are pushed as `f14e2c2` (backend) and `4345591` (app). Keep issue/PR evidence current and retain/remove private rollback/fixture artifacts deliberately after acceptance.
-3. Production gates remain: Nix input still pins incompatible pilot `752b6d4`; validate an explicitly selected compatible package with Naboo's followed host runtime and establish operational backups/retention/recovery, code-plus-data rollback/migration and monitoring. No deployment/pin update or production enablement without approval. Network media sync remains unimplemented. Native large-font/storage-pressure/power-loss/real-AsyncStorage-failure coverage is not claimed.
+1. Zach's manual UI/live-sync acceptance on installed **Stash (debug)**: Disconnect then Connect with the unchanged authenticated endpoint; browse folders/images and add a disposable text item. Naboo's matching backend is now live; disposable local test services remain stopped. Normal Stash was not modified.
+2. Reviewed implementation/tests and first-run Connect fix are pushed through `9f238df`; keep the draft PR/issue evidence current and retain/remove private rollback/fixture artifacts deliberately after acceptance.
+3. Broader production gates remain: ongoing/off-host backups, retention/recovery and monitoring beyond this pre-deploy checkpoint; release-app opt-in and network media sync (unimplemented). Native large-font/storage-pressure/power-loss/real-AsyncStorage-failure coverage is not claimed. Historical ARM64 SIGSEGV [zpm/stash#56](https://github.com/zachpmanson/stash/issues/56) remains open; successful bounded tests do not establish its cause.
