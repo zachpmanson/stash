@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@vlcn.io/crsqlite@0.16.3': 99199dbef07bf40cebe08c71c843e5b9c372373155c9012b4147bd68dff99c30
-  '@vlcn.io/ws-server@0.2.3': d3fb43d34905c727e846d4585a2bd4087fb6d2b707e819b02c2d6f50fae9282b
+  '@vlcn.io/ws-server@0.2.3': 8b44e9fd6675f3f2272100c568c13efc0538dd25b4acfb87ab79c0e8ffce545e
 
 importers:
 
@@ -23,7 +23,7 @@ importers:
         version: 0.2.0
       '@vlcn.io/ws-server':
         specifier: 0.2.3
-        version: 0.2.3(patch_hash=d3fb43d34905c727e846d4585a2bd4087fb6d2b707e819b02c2d6f50fae9282b)
+        version: 0.2.3(patch_hash=8b44e9fd6675f3f2272100c568c13efc0538dd25b4acfb87ab79c0e8ffce545e)
       better-sqlite3:
         specifier: 12.6.2
         version: 12.6.2
@@ -31,6 +31,9 @@ importers:
         specifier: ^4.21.2
         version: 4.22.3
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
       '@types/express':
         specifier: ^5.0.3
         version: 5.0.6
@@ -221,6 +224,9 @@ packages:
 
   '@types/better-sqlite3@7.6.13':
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
+
+  '@types/better-sqlite3@9.6.0':
+    resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
@@ -933,6 +939,10 @@ snapshots:
     dependencies:
       '@types/node': 24.19.1
 
+  '@types/better-sqlite3@9.6.0':
+    dependencies:
+      '@types/node': 24.19.1
+
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
@@ -986,7 +996,7 @@ snapshots:
     dependencies:
       lib0: 0.2.119
 
-  '@vlcn.io/ws-server@0.2.3(patch_hash=d3fb43d34905c727e846d4585a2bd4087fb6d2b707e819b02c2d6f50fae9282b)':
+  '@vlcn.io/ws-server@0.2.3(patch_hash=8b44e9fd6675f3f2272100c568c13efc0538dd25b4acfb87ab79c0e8ffce545e)':
     dependencies:
       '@types/better-sqlite3': 7.6.13
       '@vlcn.io/crsqlite': 0.16.3(patch_hash=99199dbef07bf40cebe08c71c843e5b9c372373155c9012b4147bd68dff99c30)

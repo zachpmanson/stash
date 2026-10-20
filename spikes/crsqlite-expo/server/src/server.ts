@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import express from "express";
 import { attachWebsocketServer, internal } from "@vlcn.io/ws-server";
 import { DATABASE_ROOM, SCHEMA_NAME, SCHEMA_SQL, SCHEMA_VERSION } from "../schema.js";
@@ -22,9 +23,29 @@ function parsePort(value: string): number {
 }
 
 if (!AUTH_USER || /[\r\n]/.test(AUTH_USER)) throw new Error("AUTH_USER must be a non-empty single-line identity");
+// The upstream factory auto-migrates before returning a DB. Inspect persisted
+// identity/version read-only before it can run, or overwrite the resident DDL.
+const databasePath = path.join(DATA_DIR, DATABASE_ROOM);
+const schemaPath = path.join(SCHEMA_DIR, SCHEMA_NAME);
+if (existsSync(databasePath)) {
+  const existing = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const schema = existing.prepare("SELECT value FROM crsql_master WHERE key = 'schema_name'").pluck().get();
+    const version = existing.prepare("SELECT value FROM crsql_master WHERE key = 'schema_version'")
+      .safeIntegers(true).pluck().get();
+    if (schema !== SCHEMA_NAME || version !== SCHEMA_VERSION) {
+      throw new Error(`Persistent database schema mismatch: expected ${SCHEMA_NAME}@${SCHEMA_VERSION}, got ${String(schema)}@${String(version)}; migration is not automatic`);
+    }
+  } finally {
+    existing.close();
+  }
+}
+if (existsSync(schemaPath) && readFileSync(schemaPath, "utf8") !== SCHEMA_SQL) {
+  throw new Error(`Resident schema file does not match ${SCHEMA_NAME}@${SCHEMA_VERSION}; refusing to overwrite`);
+}
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 mkdirSync(SCHEMA_DIR, { recursive: true });
-writeFileSync(path.join(SCHEMA_DIR, SCHEMA_NAME), SCHEMA_SQL, { mode: 0o600 });
+if (!existsSync(schemaPath)) writeFileSync(schemaPath, SCHEMA_SQL, { mode: 0o600, flag: "wx" });
 
 function log(level: "info" | "warn" | "error", event: string, fields: Record<string, unknown> = {}) {
   process.stdout.write(`${JSON.stringify({ time: new Date().toISOString(), level, event, ...fields })}\n`);
@@ -71,6 +92,10 @@ app.get("/sync/status", async (request, response, next) => {
         serverVersion: String(serverVersion.version),
         clientSiteId: clientSiteId.toLowerCase(),
         clientSeenVersion: String(client?.version ?? 0),
+        restoreMerge: {
+          version: 1,
+          mergeEqualValues: (db.prepare("SELECT crsql_config_get('merge-equal-values') AS value").get() as { value: number }).value,
+        },
         counts,
       };
     });

@@ -40,7 +40,8 @@ async function waitForHealth(port, child) {
 }
 
 function launch(port, dataDir) {
-  const child = spawn(process.execPath, [path.join(root, "node_modules/tsx/dist/cli.mjs"), "src/server.ts"], {
+  const entry = process.env.STASH_TEST_SERVER_ENTRY;
+  const child = spawn(process.execPath, entry ? [entry] : [path.join(root, "node_modules/tsx/dist/cli.mjs"), "src/server.ts"], {
     cwd: root,
     env: {
       ...process.env,
@@ -100,7 +101,7 @@ async function waitForLog(child, text) {
   throw new Error(`timed out waiting for server log ${text}: ${child.output}`);
 }
 
-async function announceSyncPeer(port, schemaVersion, sender = new Uint8Array(randomBytes(16))) {
+async function announceSyncPeer(port, schemaVersion, sender = new Uint8Array(randomBytes(16)), schemaName = "stash-sync-v1.sql") {
   const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
   const socket = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, {
     headers: { "X-Auth-User": "zach" },
@@ -110,7 +111,7 @@ async function announceSyncPeer(port, schemaVersion, sender = new Uint8Array(ran
     _tag: tags.AnnouncePresence,
     sender,
     lastSeens: [],
-    schemaName: "stash-sync-v1.sql",
+    schemaName,
     schemaVersion: BigInt(schemaVersion),
   }));
   return socket;
@@ -206,6 +207,7 @@ test("authenticates upgrades and drains an active peer before persistent restart
   assert.equal(status.schema, "stash-sync-v1.sql");
   assert.equal(status.clientSiteId, clientSiteId);
   assert.equal(status.clientSeenVersion, "0");
+  assert.deepEqual(status.restoreMerge, { version: 1, mergeEqualValues: 0 });
   assert.equal(status.serverVersion, "0");
   assert.ok(status.serverSiteId);
   assert.deepEqual(status.counts, { folders: 0, items: 0, memberships: 0, substitutions: 0, settings: 0 });
@@ -283,3 +285,95 @@ test("authenticates upgrades and drains an active peer before persistent restart
   child = null;
   active.terminate();
 });
+
+test("malformed authenticated frames close only the offending peer", { timeout: 30_000 }, async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "stash-crsqlite-malformed-"));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const port = await freePort();
+  const child = launch(port, dataDir);
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) await stop(child); });
+  const health = await waitForHealth(port, child);
+  const client = openClientReplica();
+  t.after(() => client.db.close());
+  const valid = await announceSyncPeer(port, health.schemaVersion, client.siteId);
+  t.after(() => valid.terminate());
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
+
+  const invalidFrames = [
+    { name: "empty", data: new Uint8Array() },
+    { name: "unknown tag", data: new Uint8Array([255]) },
+    { name: "truncated presence", data: new Uint8Array([tags.AnnouncePresence]) },
+    { name: "illegal client message", data: encode({ _tag: tags.StartStreaming, since: [0n, 0], excludeSites: [], localOnly: false }) },
+    { name: "empty after presence", data: new Uint8Array(), announced: true },
+    { name: "empty during presence setup", data: new Uint8Array(), pending: true },
+  ];
+  let priorVersion = 0;
+  for (const [index, frame] of invalidFrames.entries()) {
+    const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
+    const bad = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, { headers: { "X-Auth-User": "zach" } });
+    t.after(() => bad.terminate());
+    await once(bad, "open", { signal: AbortSignal.timeout(3_000) });
+    if (frame.announced || frame.pending) {
+      const started = frame.announced ? once(bad, "message", { signal: AbortSignal.timeout(3_000) }) : null;
+      bad.send(encode({ _tag: tags.AnnouncePresence, sender: randomBytes(16), lastSeens: [],
+        schemaName: health.schema, schemaVersion: BigInt(health.schemaVersion) }));
+      if (started) await started;
+    }
+    const disconnected = once(bad, "close", { signal: AbortSignal.timeout(3_000) });
+    bad.send(frame.data);
+    await disconnected;
+    assert.equal(child.exitCode, null, `${frame.name} must not crash the server: ${child.output}`);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
+    assert.equal(valid.readyState, WebSocket.OPEN, `${frame.name} must not close the valid peer`);
+    client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, 1)")
+      .run(`survivor-${index}`, frame.name);
+    const version = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+    valid.send(encode({ _tag: tags.Changes, sender: client.siteId, since: [BigInt(priorVersion), 0],
+      changes: clientChanges(client.db, priorVersion) }));
+    const status = await waitForPeerVersion(port, client.siteId, version);
+    assert.equal(status.counts.items, index + 1, `valid peer must still replicate after ${frame.name}`);
+    priorVersion = version;
+  }
+});
+
+for (const invalidSchema of ["name", "version"]) {
+  test(`cold cache recovers after rejected first schema ${invalidSchema}`, { timeout: 20_000 }, async (t) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "stash-crsqlite-cold-cache-"));
+    t.after(() => rm(dataDir, { recursive: true, force: true }));
+    const port = await freePort();
+    let child = launch(port, dataDir);
+    t.after(async () => { if (child?.exitCode === null && child.signalCode === null) await stop(child); });
+    const health = await waitForHealth(port, child);
+
+    // No status request, write or valid peer may warm the cache before this failure.
+    const bad = await announceSyncPeer(port,
+      BigInt(health.schemaVersion) + (invalidSchema === "version" ? 1n : 0n),
+      randomBytes(16), invalidSchema === "name" ? "wrong-schema.sql" : health.schema);
+    t.after(() => bad.terminate());
+    await once(bad, "close", { signal: AbortSignal.timeout(3_000) });
+    assert.equal(child.exitCode, null, `bad schema must not crash the server: ${child.output}`);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
+
+    const client = openClientReplica();
+    t.after(() => client.db.close());
+    // Install the message listener before sending presence, proving setup actually completes.
+    const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
+    const valid = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, { headers: { "X-Auth-User": "zach" } });
+    t.after(() => valid.terminate());
+    await once(valid, "open", { signal: AbortSignal.timeout(3_000) });
+    const started = once(valid, "message", { signal: AbortSignal.timeout(3_000) });
+    valid.send(encode({ _tag: tags.AnnouncePresence, sender: client.siteId, lastSeens: [],
+      schemaName: health.schema, schemaVersion: BigInt(health.schemaVersion) }));
+    await started;
+    client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, 1)")
+      .run("cold-cache-recovery", `after bad schema ${invalidSchema}`);
+    const version = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+    valid.send(encode({ _tag: tags.Changes, sender: client.siteId, since: [0n, 0],
+      changes: clientChanges(client.db, 0) }));
+    const status = await waitForPeerVersion(port, client.siteId, version);
+    assert.equal(status.counts.items, 1, "correct peer must replicate after rejected first acquisition");
+    assert.equal(valid.readyState, WebSocket.OPEN);
+    await stop(child);
+    child = null;
+  });
+}

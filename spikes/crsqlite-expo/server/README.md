@@ -9,7 +9,7 @@ This isolated Node 24/TypeScript service exercises upstream `@vlcn.io/ws-server`
 - The service cannot authenticate a direct-origin client that can reach loopback and forge the header. That is why it must remain loopback-only, with Caddy proxying to it on the same host. Never change the bind address or expose this port directly.
 - `ENABLE_TEST_ENDPOINTS=1` exposes disposable offline-write/inspection HTTP hooks. It is disabled by default and must not be set in deployment.
 
-Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing through the upstream upgrade handler. The automated lifecycle test verifies that malformed requests do not take down the service, rejects a valid upgrade without `X-Auth-User` (HTTP 401), accepts one with the stamped identity, and exercises an active connection during shutdown. It also backs up/restores a CR-SQLite database and verifies persistence after restart.
+Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing through the upstream upgrade handler. Malformed authenticated payloads (including empty, unknown-tag, truncated and illegal client messages) terminate only the offending WebSocket, not the service. The lifecycle tests verify continued health and replication by another valid peer, reject upgrades without `X-Auth-User` (HTTP 401), accept the stamped identity, and exercise an active connection during shutdown. They also back up/restore a CR-SQLite database and verify persistence after restart.
 
 ## Runtime configuration
 
@@ -21,7 +21,7 @@ Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing th
 | `AUTH_USER` | `zach` | Exact Caddy-stamped `X-Auth-User` allowed to upgrade |
 | `ENABLE_TEST_ENDPOINTS` | unset | Set to `1` only for local integration tests |
 
-Startup creates/validates the database before opening the listener: schema name/version, all five candidate CRR tables, and SQLite `integrity_check`. `/healthz` reports readiness and the schema version. `/sync/status?clientSiteId=<hex>` requires the Caddy-stamped identity and reports the highest outbound version available to that client (excluding changes the client already originated), plus the highest version received from it and aggregate table counts. The app also compares its tracked version for the server site ID. Together these checks form the two-way completion barrier before destructive projection into Stash's local tables. The high-water marks follow ws-client 0.2.0's `(db_version, 0)` whole-version-group convention. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
+Before invoking the upstream database factory or writing a schema file, startup opens any existing database **read-only** and requires its stored schema name/version to match the compiled candidate exactly. Missing/unrecognized metadata also fails closed. An existing resident schema file must match the compiled DDL byte-for-byte; it is never silently overwritten. This prevents the upstream factory's automatic migration from running on a database with an unexpected identity/version. Fresh databases remain supported; current-schema startup then checks all five candidate CRR tables and SQLite `integrity_check` before opening the listener. This is not a general migration policy or a full DDL-drift detector for a database whose metadata has been manually forged; schema changes require a separately reviewed migration/recovery procedure. Rolling back code alone is not a data rollback. `/healthz` reports readiness and the schema version. `/sync/status?clientSiteId=<hex>` requires the Caddy-stamped identity and reports the highest outbound version available to that client (excluding changes the client already originated), plus the highest version received from it and aggregate table counts. The app also compares its tracked version for the server site ID. Together these checks form the two-way completion barrier before destructive projection into Stash's local tables. The high-water marks follow ws-client 0.2.0's `(db_version, 0)` whole-version-group convention. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
 
 ## Local development and tests
 
@@ -45,6 +45,13 @@ nix develop --command pnpm typecheck
 nix develop --command pnpm test
 ```
 
+The same lifecycle/preflight regressions can exercise a built package rather than the checkout's `tsx` entry:
+
+```sh
+package=$(nix build .#packages.x86_64-linux.crsqlite-sync --no-link --print-out-paths)
+STASH_TEST_SERVER_ENTRY="$package/dist/src/server.js" nix develop --command node --test test/server-lifecycle.test.mjs test/schema-preflight.test.mjs
+```
+
 For the end-to-end Android flow, see [`../app/README.md`](../app/README.md). The disposable `/test/*` hooks remain disabled unless explicitly opted in; do not use them as a product API. `/sync/status` is part of the candidate authenticated app protocol, not a replacement for the WebSocket data channel.
 
 ## Backup, restore, and reset
@@ -61,7 +68,7 @@ Restore first makes a timestamped rollback backup of the current database, valid
 
 ## Active-client shutdown
 
-The upstream `@vlcn.io/ws-server@0.2.3` installs a SIGINT handler that destroys its DB cache before active WebSocket peers release references. Its upgrade handler also throws on malformed/missing `Sec-WebSocket-Protocol` headers; the local patch turns those into HTTP 400 responses. Its outbound stream also leaves retry timers running on close, and its filesystem watcher shutdown did not expose/await the underlying close. A narrow local patch cancels those timers and returns the watcher-close promise. This service removes only the upstream SIGINT listener and uses ordered SIGINT/SIGTERM shutdown: stop accepting connections, destroy active sockets, wait for connection handlers, then destroy the database cache and await the filesystem watcher. The upstream watcher/debounce stack still leaves timer handles after close, so after all data-bearing resources are drained the service flushes its logs and exits explicitly. The automated test sends a real `AnnouncePresence` over an authenticated WebSocket (holding the server DB cache reference), stops under SIGTERM, and verifies persistence/backup/restore/restart.
+The upstream `@vlcn.io/ws-server@0.2.3` installs a SIGINT handler that destroys its DB cache before active WebSocket peers release references. Its upgrade handler also throws on malformed/missing `Sec-WebSocket-Protocol` headers; the local patch turns those into HTTP 400 responses. Payload decoding and handling now share the broker's exception boundary; an invalid payload terminates that socket, cleanup is idempotent, and a connection that finishes opening after socket closure is released without starting its streams. Its outbound stream also leaves retry timers running on close, and its filesystem watcher shutdown did not expose/await the underlying close. A narrow local patch cancels those timers and returns the watcher-close promise. This service removes only the upstream SIGINT listener and uses ordered SIGINT/SIGTERM shutdown: stop accepting connections, destroy active sockets, wait for connection handlers, then destroy the database cache and await the filesystem watcher. The upstream watcher/debounce stack still leaves timer handles after close, so after all data-bearing resources are drained the service flushes its logs and exits explicitly. The automated test sends a real `AnnouncePresence` over an authenticated WebSocket (holding the server DB cache reference), stops under SIGTERM, and verifies persistence/backup/restore/restart.
 
 ## Dependency/runtime notes
 
