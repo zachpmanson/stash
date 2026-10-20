@@ -26,6 +26,27 @@ function parsePort(value: string): number {
   return port;
 }
 
+// Browser WebSockets reuse cached HTTP Basic credentials across origins. Caddy's
+// identity stamp is necessary but not sufficient: browsers must be same-origin.
+// Native peers may omit Origin; a present opaque/foreign/malformed one is denied.
+function allowedWebSocketOrigin(request: IncomingMessage): boolean {
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite !== undefined && !["same-origin", "same-site", "none"].includes(String(fetchSite))) return false;
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  const host = request.headers.host;
+  const forwarded = request.headers["x-forwarded-proto"];
+  // Caddy overwrites this header. Direct loopback Node HTTP uses http.
+  const protocol = forwarded === undefined ? "http" : forwarded;
+  if (typeof origin !== "string" || !host || !["http", "https"].includes(String(protocol))) return false;
+  try {
+    const source = new URL(origin);
+    const target = new URL(`${protocol}://${host}`);
+    return origin === source.origin && !source.username && !source.password && !source.search && !source.hash &&
+      source.pathname === "/" && source.origin === target.origin;
+  } catch { return false; }
+}
+
 if (!AUTH_USER || /[\r\n]/.test(AUTH_USER)) throw new Error("AUTH_USER must be a non-empty single-line identity");
 // The upstream factory auto-migrates before returning a DB. Inspect persisted
 // identity/version read-only before it can run, or overwrite the resident DDL.
@@ -124,8 +145,9 @@ const dbCache = attachWebsocketServer(
   fsnotify,
   (request: IncomingMessage, _token: string | null, callback: (error: Error | null) => void) => {
     const identity = request.headers["x-auth-user"];
-    if (identity === AUTH_USER) callback(null);
-    else callback(new Error("unauthenticated WebSocket upgrade"));
+    if (identity !== AUTH_USER) callback(new Error("unauthenticated WebSocket upgrade"));
+    else if (!allowedWebSocketOrigin(request)) callback(new Error("cross-origin WebSocket upgrade"));
+    else callback(null);
   },
 );
 // Upstream's eager SIGINT handler destroys database state before connected WS

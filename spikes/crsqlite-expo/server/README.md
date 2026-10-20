@@ -1,14 +1,15 @@
 # Stash online web UI and CR-SQLite service
 
-Node 24/TypeScript, Hono HTTP routing, bundled React, and the existing raw Node HTTP/WebSocket server with CR-SQLite 0.16.3. This implements the online-only first slice of [#59](https://github.com/zachpmanson/stash/issues/59). It uses the **same** `stash-backend` room/database and unchanged `stash-sync-v1.sql` identity/version as native sync, not a second application database or browser replica.
+Node 24/TypeScript, Hono HTTP routing, bundled React, and the existing raw Node HTTP/WebSocket server with CR-SQLite 0.16.3. This implements the online-only first slice of [zpm/stash#59](https://github.com/zachpmanson/stash/issues/59). It uses the **same** `stash-backend` room/database and unchanged `stash-sync-v1.sql` identity/version as native sync, not a second application database or browser replica.
 
-Source baseline: **`9f238df`**, the reviewed but unmerged prerequisite [PR #58](https://github.com/zachpmanson/stash/pull/58). This branch includes that prerequisite until it integrates; review the new implementation with `git diff 9f238df..HEAD`. Naboo currently runs the owner-connected prerequisite revision. **This frontend/API change has not been deployed or activated.** No live service, database, credentials, host configuration or devices were accessed in this task. Deployment remains an independent owner approval gate. Media sync remains separate under [#26](https://github.com/zachpmanson/stash/issues/26).
+Source baseline: **`9f238df`**, the reviewed but unmerged prerequisite [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58). This branch includes that prerequisite until it integrates; review the new implementation with `git diff 9f238df..HEAD`. Implementation/review used only disposable state and synthetic credentials, with no live service/database/device access. Zach subsequently authorized deployment **after independent review/fixes pass**; activation, exact pin and private backup evidence are tracked on the issue and Nix operational runbook rather than inferred from a successful build. Media sync remains separate under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
 ## Trust boundary
 
 - The listener is fixed to `127.0.0.1`; there is no bind-address override or firewall listener. Naboo Caddy is the only ingress.
 - Caddy requires its existing Basic-auth identity for **root HTML, assets, API and WebSockets**, and overwrites `X-Auth-User` with the configured single-tenant identity. Independently, every API path (including unknown routes), each asset route and WebSocket upgrade requires exact `AUTH_USER` (default `zach`). Browser requests are same-origin and do not supply the stamped header. Do not forward a client-supplied identity or expose the origin.
 - Writes require `application/json` and `X-Stash-Request: 1`; foreign `Origin` hosts and cross-site Fetch Metadata are rejected. There is no CORS permission. JSON bodies are limited to 64 KiB, with smaller field/type/URL limits and unknown-field rejection. Errors omit SQL, stack traces and private paths. Plaintext rendering, validated credential-free http(s) links, a restrictive CSP and exact static-file routes prevent HTML injection and filesystem traversal.
+- Raw WebSocket upgrades also validate any supplied browser `Origin` against the request's public origin (including scheme/port), rejecting opaque/malformed/foreign origins and cross-site Fetch Metadata. Caddy must overwrite `X-Forwarded-Proto` and preserve the public Host; the same-host trusted proxy boundary is unchanged. Native peers without Origin remain supported. This prevents browser-cached Basic credentials from authenticating an attacker-origin WebSocket; HTTP CSRF middleware alone cannot protect raw upgrades.
 - No JWT, users table or custom auth. HTTP Basic credentials remain browser-managed: there is deliberately **no fake signout button**.
 - The service cannot authenticate a direct-origin client that can reach loopback and forge the header. That is why it must remain loopback-only, with Caddy proxying to it on the same host. Never change the bind address or expose this port directly.
 - `ENABLE_TEST_ENDPOINTS=1` exposes disposable offline-write/inspection HTTP hooks. It is disabled by default and must not be set in deployment.
@@ -69,7 +70,7 @@ nix develop --command pnpm db backup /safe/path/stash-backend.sqlite
 nix develop --command pnpm db restore /safe/path/stash-backend.sqlite
 ```
 
-Restore first makes a timestamped rollback backup of the current database, validates the selected backup, then atomically replaces the live database and removes stale WAL/SHM sidecars. Keep the rollback file until the service has restarted and health/data checks pass. To reset only the disposable peer, stop the service and remove `spikes/crsqlite-expo/server/data/`; the next startup creates an empty database from the candidate schema. Never point this service at Stash's production database.
+Restore first makes a timestamped rollback backup of the current database, validates the selected backup, then atomically replaces the live database and removes stale WAL/SHM sidecars. Keep the rollback file until the service has restarted and health/data checks pass. To reset only the disposable peer, stop the service and remove `spikes/crsqlite-expo/server/data/`; the next startup creates an empty database from the candidate schema. Never point a development/test process or reset operation at Naboo state; privileged live recovery follows the separately reviewed Nix operational procedure.
 
 ## Active-client shutdown
 
@@ -128,7 +129,7 @@ Reads derive native logical views: membership generations collapse by pair, miss
 
 HTTP and native WS borrow the same extension-loaded `DBCache` handle. Transactions are synchronous and contain no await. After a successful commit, the added `FSNotify.notifyChanges(room)` explicitly wakes existing outbound peers while the HTTP acquisition is still held; filesystem/WAL event timing is not required. No changes are made to schema/version, seed markers, migration policy, sync protocol or voice/user preferences. Existing preflight checks still run before the listener opens.
 
-The UI polls every 30 seconds while visible, refreshes on focus, and provides manual Refresh/Retry. Editing pauses background refresh; writes show pending/error feedback. This is online-only: no optimistic/offline write queue, conflict editor, hard delete, browser Basic signout or media rendering. Folder ordering uses portable creation time, not native-only `last_used_at`. Pagination is offset-based; concurrent creation can move page boundaries, so refresh to reconcile.
+The UI polls every 30 seconds while visible, refreshes on focus, and provides manual Refresh/Retry. Editing pauses background refresh; its observed baseline is frozen and only dirty fields are submitted, so changing a title does not overwrite concurrent native content. Unchanged edits make no write. A deleted selected item or removed folder filter is cleared rather than poisoning later refreshes; writes show pending/error feedback. This is online-only: no optimistic/offline write queue, conflict editor, hard delete, browser Basic signout or media rendering. Folder ordering uses portable creation time, not native-only `last_used_at`. Pagination is offset-based; concurrent creation can move page boundaries, so refresh to reconcile.
 
 ## Added validation and limitations
 
@@ -137,7 +138,18 @@ The UI polls every 30 seconds while visible, refreshes on focus, and provides ma
 - Real isolated HTTP service, real CRSQLite and real authenticated WS → **actual immutable native `StashReplica`, mirror and projection helpers** from this checkout. Asserts projected values/memberships, native-created link and edits → API, equal-clock scalar conflict convergence, archives, observed-remove/concurrent-add membership behavior, fresh generations, folder survival masks, deletion and unavailable media. It does not merely count rows or fake replication.
 - Missing/wrong identities (including unknown API routes), malformed and oversized JSON including chunked bodies, types/unknown fields, URL schemes/credentials, SQL injection, rollback, CSRF, pagination, static traversal/MIME/CSP and test-hooks-off behavior.
 - Explicit same-process notifications with the filesystem watcher stopped, plus patched runtime/source parity.
+- Exact-origin/scheme/proxy/native-no-Origin WS upgrade guards, dirty-field edits across concurrent refresh, unchanged-edit no-op, selected-item404 recovery and removed-folder filter recovery.
 - React component state/interaction tests and static rendering safety checks. `react-test-renderer` currently emits its upstream deprecation warning; these are **not** a real browser/accessibility-engine/physical Android E2E claim.
+
+Optional real-browser smoke (provide installed Chromium/Caddy binaries; uses only fresh disposable loopback services/profiles/synthetic credentials and blocks external browser traffic):
+
+```sh
+CADDY_BIN=/path/to/caddy CHROMIUM_BIN=/path/to/chromium \
+  STASH_TEST_SERVER_ENTRY="$package/dist/src/server.js" \
+  nix develop --cores 2 --max-jobs 1 --command node test/browser-smoke.mjs
+```
+
+This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, verifies same-origin replication, and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
 
 The test script sets `NODE_PATH=./node_modules` so the immutable native harness resolves the server's TypeScript without installing the root app dependency tree. To additionally run its existing restore regressions from this server directory:
 

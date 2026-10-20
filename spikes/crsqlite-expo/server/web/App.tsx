@@ -5,6 +5,12 @@ import type {
   WebItem as Item,
   WebItemPage,
 } from "../src/contracts.js";
+export class ApiResponseError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiResponseError";
+  }
+}
 export async function request<T>(
   path: string,
   method = "GET",
@@ -25,8 +31,9 @@ export async function request<T>(
         "Authentication required. Reopen this page through the authenticated Stash address.",
       );
     const data = await response.json().catch(() => null);
-    throw new Error(
-      data?.error ?? "Could not reach Stash. Check your connection and retry.",
+    throw new ApiResponseError(
+      response.status,
+      typeof data?.error === "string" ? data.error : "Could not reach Stash. Check your connection and retry.",
     );
   }
   return response.json();
@@ -87,7 +94,7 @@ export function ItemReader({ item }: { item: Item }) {
     </>
   );
 }
-function ItemEditor({
+export function ItemEditor({
   item,
   busy,
   onSave,
@@ -98,12 +105,19 @@ function ItemEditor({
   onSave: (data: Record<string, string>) => void;
   onCancel: () => void;
 }) {
+  // Freeze the editor's observed baseline; refreshes must not turn untouched
+  // fields into writes that overwrite concurrent edits from another device.
+  const [initial] = useState(() => item ? { title: item.title ?? "", content: item.content ?? "" } : null);
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
         const values = new FormData(event.currentTarget);
-        onSave(Object.fromEntries(values) as Record<string, string>);
+        const changes = Object.fromEntries(values) as Record<string, string>;
+        if (initial) for (const key of ["title", "content"] as const) {
+          if (changes[key] === initial[key]) delete changes[key];
+        }
+        onSave(changes);
       }}
     >
       <h2>{item ? "Edit item" : "New item"}</h2>
@@ -122,7 +136,7 @@ function ItemEditor({
           <input
             name="title"
             maxLength={500}
-            defaultValue={item?.title ?? ""}
+            defaultValue={initial?.title ?? ""}
           />
         </label>
         <label>
@@ -132,7 +146,7 @@ function ItemEditor({
             name="content"
             maxLength={item?.type === "url" ? 4096 : 48000}
             rows={10}
-            defaultValue={item?.content ?? ""}
+            defaultValue={initial?.content ?? ""}
           />
         </label>
         <div className="actions">
@@ -173,14 +187,27 @@ export function App() {
         request<Folder[]>("/folders"),
         request<WebItemPage>(`/items?${query}`),
         selected
-          ? request<Item>(`/items/${encodeURIComponent(selected)}`)
+          ? request<Item>(`/items/${encodeURIComponent(selected)}`).catch((cause) => {
+              if (cause instanceof ApiResponseError && cause.status === 404) return null;
+              throw cause;
+            })
           : Promise.resolve(null),
       ]);
       if (sequence.current !== token) return;
+      const missingFolder = folderId !== "" && !nextFolders.some((folder) => folder.id === folderId);
       setFolders(nextFolders);
       setItems(nextItems.items);
       setHasMore(nextItems.hasMore);
-      setDetail(nextDetail);
+      setDetail(missingFolder ? null : nextDetail);
+      if (missingFolder) {
+        setFolderId("");
+        setOffset(0);
+      }
+      if (missingFolder || (selected && !nextDetail)) {
+        setSelected("");
+        setEditor((current) => current === "edit" ? null : current);
+        setNotice(missingFolder ? "Folder removed; showing all items." : "That item is no longer available.");
+      }
       setError("");
     } catch (cause) {
       if (sequence.current === token)
@@ -409,7 +436,11 @@ export function App() {
                 item={editor === "edit" ? detail : null}
                 busy={busy}
                 onCancel={() => setEditor(null)}
-                onSave={(data) =>
+                onSave={(data) => {
+                  if (editor === "edit" && Object.keys(data).length === 0) {
+                    setEditor(null);
+                    return;
+                  }
                   void mutate(
                     () =>
                       request<{ id: string }>(
@@ -423,8 +454,8 @@ export function App() {
                       setEditor(null);
                       setSelected(result.id);
                     },
-                  )
-                }
+                  );
+                }}
               />
             ) : detail ? (
               <>

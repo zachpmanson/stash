@@ -41,7 +41,7 @@ async function waitForHealth(port, child) {
 
 function launch(port, dataDir) {
   const entry = process.env.STASH_TEST_SERVER_ENTRY;
-  const child = spawn(process.execPath, entry ? [entry] : [path.join(root, "node_modules/tsx/dist/cli.mjs"), "src/server.ts"], {
+  const child = spawn(process.execPath, entry ? [entry] : ["--import", "tsx", "src/server.ts"], {
     cwd: root,
     env: {
       ...process.env,
