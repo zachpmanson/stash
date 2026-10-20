@@ -34,6 +34,14 @@ const TRACK_PEER = `INSERT INTO crsql_tracked_peers (site_id, event, version, se
 const SYNC_POLL_MS = 1_000;
 
 type Credentials = { username: string; password: string };
+
+export class StashSyncPreparationRequiredError extends Error {
+  constructor() {
+    super("Prepare this install's local sync replica before connecting.");
+    this.name = "StashSyncPreparationRequiredError";
+  }
+}
+
 type SyncPhase = "connecting" | "syncing" | "synced" | "error" | "stopped";
 export type StashSyncStatus = {
   phase: SyncPhase;
@@ -432,12 +440,16 @@ export async function connectStashSync(
       const authorization = basicAuthorization(credentials);
       const prepared = await withAppDb(async (database) => {
         if (attempt.cancelled) return null;
-        await ensureCrsqliteLoaded(database);
+        const metadata = await database.getFirstAsync<{ present: number }>(
+          "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stash_sync_metadata') AS present",
+        );
+        if (!metadata?.present) throw new StashSyncPreparationRequiredError();
         const marker = await database.getFirstAsync<{ value: string }>(
           "SELECT value FROM stash_sync_metadata WHERE key = ?",
           SYNC_INITIALIZED_KEY,
         );
-        if (!marker) throw new Error("Prepare this install's local sync replica before connecting.");
+        if (!marker) throw new StashSyncPreparationRequiredError();
+        await ensureCrsqliteLoaded(database);
         const recoveryPending = await isRestorePendingOwned(database);
         if (recoveryPending) await assertRecoveryConfigurationOwned(database);
         const version = recoveryPending ? await database.getFirstAsync<{ version: number }>("SELECT crsql_db_version() AS version") : null;
@@ -569,7 +581,7 @@ export async function connectStashSync(
       if (!attempt.cancelled || shutdownFailure) {
         setupFailed = true;
         setupError = error;
-        notifyStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+        notifyStatus({ phase: error instanceof StashSyncPreparationRequiredError ? "stopped" : "error", message: error instanceof Error ? error.message : String(error) });
       }
     } finally {
       if (connectionAttempt === attempt) connectionAttempt = null;

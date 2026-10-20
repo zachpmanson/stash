@@ -59,7 +59,7 @@ function harness({ dev = true, optIn = false, platform = 'android' } = {}) {
     states = values; refs = refValues; cursor = 0; refCursor = 0;
     return load(file, file.endsWith('TextSubstitutionsScreen.tsx') ? '\nexport { SubstitutionModal };' : '')[name](props);
   };
-  return { render, calls, navigation, states: () => states, current: () => current,
+  return { render, calls, navigation, mocks, states: () => states, current: () => current,
     async pressModal(text) {
       const host = render('src/components/ModalHost.tsx', [], [], 'ModalHost');
       const button = nodes(host).find(node => node.type === 'Pressable' && words(node) === text);
@@ -154,4 +154,27 @@ for (const build of [
   const scroll = all.find(n => n.type === 'ScrollView'); assert.ok(scroll.props.contentContainerStyle); assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
   const banner = all.find(n => n.type === 'Text' && words(n).includes('Restored locally')); assert.ok(banner.props.style.color);
   if (build.allowed) { assert.equal(all.filter(n => n.type === 'TextInput').length,3); assert.ok(all.find(n => n.type === 'Pressable' && words(n) === 'Disconnect')); }
+});
+
+test('actual Settings explains missing preparation and keeps Connect retryable', async () => {
+  const h = harness();
+  class PreparationRequired extends Error {}
+  let attempts = 0;
+  h.mocks['../db/syncClient'] = {
+    StashSyncPreparationRequiredError: PreparationRequired,
+    connectStashSync: async () => { attempts++; throw new PreparationRequired("Prepare this install's local sync replica before connecting."); },
+  };
+  let tree = h.render('src/screens/SettingsScreen.tsx', [null,false,false,'http://localhost/','x','x',{phase:'stopped'}]);
+  for (let i = 0; i < 2; i++) {
+    const connect = button(tree,'Connect and sync');
+    assert.equal(connect.props.disabled,false);
+    connect.props.onPress();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.current().title,'Prepare sync first');
+    assert.match(h.current().message,/Prepare.*local sync replica before connecting/);
+    assert.equal(h.states()[2],false);
+    assert.equal(h.states()[6].phase,'stopped');
+    tree = h.render('src/screens/SettingsScreen.tsx',h.states());
+  }
+  assert.equal(attempts,2);
 });

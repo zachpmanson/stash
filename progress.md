@@ -55,6 +55,14 @@ Draft [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58) targets `back
 - Bounded per-app ReactNativeJS watches reported no native statement/fatal/unhandled error match during observed connection/new-write windows. This is not a claim of exhaustive log/crash coverage.
 - Private machine summary `/tmp/stash-falco-final-native-summary.json`; private app snapshots/evidence `/tmp/stash-falco-final-native-alpha/` and `/tmp/stash-falco-final-native-clone/`. Do not publish data-bearing DBs, item dumps or image screenshots.
 
+## Owner first-run Connect follow-up
+- Zach's screenshot exposed an unprepared-install gap after the native seeded-restore tests: Connect queried missing `stash_sync_metadata` and showed a raw SQLite exception. The two-install recovery tests did not exercise Connect before any preparation/restoration.
+- Connect now probes table/seed availability **before** loading CR-SQLite or contacting a server. A typed preparation-required error keeps lifecycle/UI stopped and retryable, with an explicit manual-Prepare message; no automatic seeding or connection is introduced.
+- Regression checks preserve byte-identical local DB/data, avoid extension/network/transport work, and prove explicit Prepare followed by retry succeeds for absent-table and empty-metadata cases. An actual Settings-handler test verifies repeated preparation rejection does not strand Connect disabled.
+- Parent full gates: root103, pinned native preparation/merge12, TypeScript and diff checks pass. Independent scoped review found no blockers and independently passed39 focused tests. Updated ARM64 debug APK built (93 seconds).
+- Real Pixel pristine `.debug.firstrun` install: two consecutive Connect attempts showed **Prepare sync first**, stayed retryable, left DB and WAL byte-identical and created no CR-SQLite/sync metadata tables. Explicit manual Prepare then succeeded. No backend/reverse was used. Throwaway package removed and Pixel released; existing app data untouched.
+- Updated main APK `/tmp/stash-falco-apks/stash-first-run-connect-fix-arm64-debug.apk`; private focused evidence `/tmp/stash-falco-firstrun-native/`. Prior two-install merge evidence remains explicitly tied to `4345591`; the focused follow-up changes only first-run preflight/error handling.
+
 ## Operational state
 - Final disposable backend/proxy/log watches stopped; sockets18787/18788 closed; owned ADB reverse/download ZIP/UI dump removed. Clone package uninstalled; main debug app disconnected/force-stopped and left installed for Zach's UI test. Pixel released in the coordination room. Normal Stash, Emissions and Conversations untouched.
 - This run's picked-cache ZIP was removed. Main debug data/private rollback and earlier cache artifacts, plus private host fixtures/diagnostic evidence, remain deliberately retained; cleanup is not presented as complete. No test secrets or data were published.

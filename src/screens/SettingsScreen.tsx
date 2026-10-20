@@ -12,7 +12,7 @@ import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
 import { runSyncReplicaSmoke } from "../db/syncReplicaSmoke";
 import { prepareCurrentStashReplica } from "../db/syncReplica";
-import { connectStashSync, disconnectStashSync, subscribeStashSyncStatus, type StashSyncStatus } from "../db/syncClient";
+import { connectStashSync, disconnectStashSync, subscribeStashSyncStatus, StashSyncPreparationRequiredError, type StashSyncStatus } from "../db/syncClient";
 import { withAppDb, isRestorePendingOwned } from "../db/database";
 import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
 import { VoiceMode } from "../utils/readability";
@@ -49,8 +49,9 @@ export default function SettingsScreen() {
     try {
       await connectStashSync(syncServerUrl, { username: syncUsername, password: syncPassword });
     } catch (e) {
-      setSyncStatus({ phase: "error", message: e instanceof Error ? e.message : String(e) });
-      showModal({ title: "Stash sync could not start", message: `${e}` });
+      const needsPreparation = e instanceof StashSyncPreparationRequiredError;
+      setSyncStatus({ phase: needsPreparation ? "stopped" : "error", message: e instanceof Error ? e.message : String(e) });
+      showModal({ title: needsPreparation ? "Prepare sync first" : "Stash sync could not start", message: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }

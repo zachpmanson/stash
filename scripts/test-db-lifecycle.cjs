@@ -48,7 +48,7 @@ function databaseHarness() {
           } else if (options.initError) throw options.initError;
         },
         getAllAsync: async sql => options.read ? options.read(sql) : [],
-        getFirstAsync: async (sql, ...args) => args.includes("restore_merge_pending") ? null : sql.includes('crsql_site_id')
+        getFirstAsync: async (sql, ...args) => args.includes("restore_merge_pending") ? null : sql.includes('sqlite_master') ? { present: 1 } : sql.includes('crsql_site_id')
           ? { site_id: new Uint8Array(16) } : sql.includes('metadata') ? { value: '1' } : { count: 1 },
         runAsync: async () => {},
         withTransactionAsync: async task => task(),
