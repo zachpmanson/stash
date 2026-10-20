@@ -1,6 +1,6 @@
 # Stash sync/restore and deployability progress
 
-_Last updated: 2026-10-20, 20:37 AEDT (Melbourne time)_
+_Last updated: 2026-10-20 (Melbourne time), resumed review/native test checkpoint_
 
 ## Goal and boundaries
 Validate experimental Android CR-SQLite backup/restore/reconnect using only an isolated debug app and disposable backend. Assess backend readiness without deploying or enabling production sync. Production rollout and media sync remain gated under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
@@ -30,17 +30,31 @@ Branch `falco/stash-reconnect` is pushed through `b7977ae`:
 - `nix develop --command sh -c 'node --test scripts/test-db-lifecycle.cjs && node --test scripts/test-ws-teardown.cjs && pnpm lint && git diff --check'` passed (`stash-resumed-lifecycle-checks`, exit 0).
 - 18 mocked DB/sync lifecycle tests and 14 WebSocket teardown tests passed, plus TypeScript and diff checks. These do not establish native restore safety.
 
-## Current state
-- Work was stopped at Zach's request, then resumed on his explicit instruction.
-- The earlier backend review was cancelled without a final readiness verdict. Fresh read-only lifecycle and backend-readiness reviews are now running; their results are pending.
-- Disposable backend/Caddy processes were stopped. Temporary data, isolated debug app and ADB reverse mapping were not removed at the stop; check their state before reuse or cleanup.
-- Slippy currently owns Pixel `3A111FDJH0062B` for Emissions checks. Stash device work waits for his release in `testing@muc.chat.zachmanson.com`.
-- A temporary single-action UI helper has been prepared to select fields from live layout and verify focus/content before proceeding; it has not yet been used on-device.
+### Resumed native backup → picker restore → reconnect: failed convergence
+- Slippy released the Pixel; Stash explicitly claimed it. Keyboard obscured fields while accessibility still reported their underlying bounds. Verified keyboard focus with Tab navigation and field-by-field checks; disposable authentication and initial convergence succeeded.
+- Created a native backup while synced, exported it privately for inspection, and selected that exact ZIP through Android's system file picker. Restore reported **165 items across 8 folders** and disconnected sync as designed.
+- Backup integrity was `ok`; it contained CR-SQLite site ID `995070e3723a4107a40469e5ab612488`, DB version **3**, seed marker **1** and CRR state. This demonstrates that this post-sync native backup retains replica identity/history; it does not prove server sync is required to produce them. Local-only preparation remains a separate untested path.
+- Before restore, saved a disposable text probe and verified upload: server watermark advanced to **4**, with **166 items**. Restoring the older backup rewound that same site ID to version **3** and removed the probe locally.
+- Reconnected in the same app process: UI reported **“Stash data is in sync.”** Then saved a different post-restore probe. UI still reported synced, but the server retained only the pre-restore probe; the new probe existed only locally. Server watermark stayed **4**. Inspection of a stopped-app DB/WAL copy confirmed the same site ID, local version **4**, 166 items, and only the post-restore probe. SQLite integrity remained `ok`.
+- **Conclusion:** native restore mechanics ran, but restore/reconnect is unsafe: rewound identity/version history can produce false convergence and skipped uploads. This is a reproduced blocker, not a passing round trip.
+- Private evidence: `/tmp/stash-falco-native-backup-inspect/`, `/tmp/stash-falco-restored-before-reconnect.sqlite`, `/tmp/stash-falco-post-restore-inspect/`, and `/tmp/stash-falco-restore-false-sync.{png,xml}`. Do not publish the data-bearing artifacts.
+
+## Independent review findings
+- Lifecycle review reproduced seeded-backup identity/version rollback false success in a mock; the native test above confirms the practical divergence. Zach explicitly chose **merge restored data with current server state**, not replacement. Design a fresh-replica recovery path; do not merely reset watermarks.
+- Lifecycle review also reproduced an in-flight media save surviving restore and inserting a URI whose copied file was deleted. Replacement ownership does not yet span media preparation/save.
+- Backend audit: configured Nix input still pins incompatible notes-spike revision `752b6d4`; authenticated malformed payload can crash the process; upstream automatic schema migration precedes the service's version validation and can destructively change data before checking.
+- Backend TypeScript, 3 isolated server tests and schema-parity test passed; those tests did not cover the reproduced malformed-frame/migration defects. Operational backup, rollback/convergence and monitoring remain unvalidated.
+- Review artifacts: `/tmp/stash-falco-lifecycle-resumed.md`, `/tmp/stash-falco-backend-readiness-resumed.md`.
+
+## Current state and cleanup
+- Native convergence blocker reported to Zach; he approved merge-with-current-server recovery. Backend crash/schema safeguards are the next implementation slice, with no Nix pin change or deployment.
+- Debug app disconnected then force-stopped. Both disposable services stopped; own ADB reverse and downloaded test ZIP removed. Pixel explicitly released in the coordination room. Production Stash and Emissions untouched.
+- Isolated app/cache and private host test data/evidence remain for diagnosis; cleanup is not complete.
 
 ## Remaining gates
-1. Synthesize independent lifecycle review findings and fix/retest any accepted blockers.
-2. Coordinate Pixel ownership, repair endpoint/input focus, and establish a verified disposable authenticated connection.
-3. Complete native backup → file-picker restore → reconnect on ARM64, checking app/server convergence, local data/files, offline writes, and native DB errors.
-4. Verify seeded-demo requirements and whether native backup retains required CR-SQLite metadata after local preparation/server sync. Source exposes local-only replica preparation; a server connection must not be assumed necessary without validation. No validated seeded artifact exists.
-5. Finish backend audit: loopback/auth boundary, schema parity, persistence, health/logging, backup/recovery and rollback. Never deploy test endpoints or expose the raw backend port.
-6. Refresh issue/PR evidence and clean up disposable services, ADB mapping, data and isolated app when no longer needed. No production deployment without approval.
+1. Fix backend malformed-frame containment and reject unexpected persistent schema before upstream migration; add isolated regressions and independently review fixes. Keep exact-package/Nix pin review separate from deployment.
+2. Implement the approved merge policy via a supported fresh-replica recovery/reconciliation strategy and persisted identity/version rollback regressions. A simple watermark reset is insufficient.
+3. Fix in-flight media-save versus restore race and preserve a deferred-permission/file-existence regression test.
+4. Repeat native backup → old-snapshot restore → reconnect → new write with directly observed app/server convergence after the fix; include media and cross-install identity behavior.
+5. Finish seeded-demo/local-only preparation validation and operational backup, schema migration, code-plus-data rollback and monitoring prerequisites.
+6. Refresh issue/PR evidence and finish disposable cleanup. No production deployment without approval.
