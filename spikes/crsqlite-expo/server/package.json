@@ -6,22 +6,28 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "test": "node --test test/*.test.mjs",
-    "build": "tsc --outDir dist",
+    "test": "NODE_PATH=./node_modules node --import tsx --test test/*.test.mjs",
+    "build": "tsc --outDir dist && node scripts/build-web.mjs",
     "db": "node scripts/db-admin.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json"
   },
   "dependencies": {
+    "@hono/node-server": "2.1.5",
     "@vlcn.io/crsqlite": "0.16.3",
     "@vlcn.io/ws-common": "0.2.0",
     "@vlcn.io/ws-server": "0.2.3",
     "better-sqlite3": "12.6.2",
-    "express": "^4.21.2"
+    "hono": "4.13.13",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "0.25.12",
+    "react-test-renderer": "19.2.4",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "ws": "8.18.3"

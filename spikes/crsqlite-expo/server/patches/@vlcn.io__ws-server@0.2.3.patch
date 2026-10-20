@@ -62,7 +62,7 @@ index d79babd932c93107ee8e76179d8cdb60ef4efc88..b97efcccf4f8b3bcb358aa2345c48a2c
  //# sourceMappingURL=ConnectionBroker.js.map
 \ No newline at end of file
 diff --git a/dist/DB.js b/dist/DB.js
-index 68cdcd9f76f32b3793c2b8666d108566e5c9c381..d74aa8651c025b2d438a46e622e65792bde6aad3 100644
+index 68cdcd9f76f32b3793c2b8666d108566e5c9c381..0672000f03be16d94678967c020b7fb09ea3fadf 100644
 --- a/dist/DB.js
 +++ b/dist/DB.js
 @@ -42,85 +42,91 @@ export default class DB {
@@ -278,13 +278,39 @@ index b8948cbf4ca5d5aa2b1c15464653e25487ff16f7..ea232b1a40dccf13a1bb0eb0ea05fb89
      }
      async unref(roomId) {
          logger.info(`Remove db from cache for room "${roomId}"`);
+diff --git a/dist/fs/FSNotify.d.ts b/dist/fs/FSNotify.d.ts
+index a53e01df1e588e1cc1e4f2a17e4b10f6edd5a5bd..8f451ec1d3e7c343947ee32dd3fcf1dbfac0d663 100644
+--- a/dist/fs/FSNotify.d.ts
++++ b/dist/fs/FSNotify.d.ts
+@@ -15,6 +15,7 @@ export default class FSNotify {
+     addListener(dbid: string, cb: () => void): () => void;
+     removeListener(dbid: string, cb: () => void): void;
+     __listeners_TESTS_ONLY(): Map<string, Set<() => void>>;
+-    shutdown(): void;
++    notifyChanges(dbid: string): void;
++    shutdown(): Promise<void>;
+ }
+ //# sourceMappingURL=FSNotify.d.ts.map
+\ No newline at end of file
 diff --git a/dist/fs/FSNotify.js b/dist/fs/FSNotify.js
-index 412ebd4231dc44e1b11487d801e96c0322de9039..9d3ad6fca92c518f585af118c330bb794ded23b8 100644
+index 412ebd4231dc44e1b11487d801e96c0322de9039..364db43ee723c04e41161db8e35d07ed48d45558 100644
 --- a/dist/fs/FSNotify.js
 +++ b/dist/fs/FSNotify.js
-@@ -86,7 +86,8 @@ export default class FSNotify {
+@@ -85,8 +85,20 @@ export default class FSNotify {
+     __listeners_TESTS_ONLY() {
          return this.listeners;
      }
++    /** Explicit post-commit notification for same-process writers. */
++    notifyChanges(dbid) {
++        for (const listener of this.listeners.get(dbid) ?? []) {
++            try {
++                listener();
++            }
++            catch (error) {
++                console.error(error);
++            }
++        }
++    }
      shutdown() {
 -        this.watcher.close();
 +        this.fileChanged.cancel();
@@ -725,12 +751,20 @@ index d762c05005381997ca1d4e790f6c2f1abe9774bf..b2adc446c70ddbe6e28103fb01c802f3
 
    async unref(roomId: string) {
 diff --git a/src/fs/FSNotify.ts b/src/fs/FSNotify.ts
-index 7246dc89529c52665479daf6df1757d36d1e5fff..fcb561aa273debe56e321cda2c2ba90e8ccb94d5 100644
+index 7246dc89529c52665479daf6df1757d36d1e5fff..8525d8db0ec957689817f74bdd39d7a09faf43fa 100644
 --- a/src/fs/FSNotify.ts
 +++ b/src/fs/FSNotify.ts
-@@ -99,6 +99,7 @@ export default class FSNotify {
+@@ -98,7 +98,15 @@ export default class FSNotify {
+     return this.listeners;
    }
 
++  /** Explicit post-commit notification for same-process writers. */
++  notifyChanges(dbid: string) {
++    for (const listener of this.listeners.get(dbid) ?? []) {
++      try { listener(); } catch (error) { console.error(error); }
++    }
++  }
++
    shutdown() {
 -    this.watcher.close();
 +    this.fileChanged.cancel();
