@@ -1,6 +1,6 @@
 import { TextSubstitution } from "../types";
 import { randomId } from "../utils/randomId";
-import { withAppDb } from "./database";
+import { withAppDb, withAppDbMutation } from "./database";
 import { mirrorLocalSubstitutionOwned } from "./syncReplica";
 
 export async function getTextSubstitutions(): Promise<TextSubstitution[]> {
@@ -16,7 +16,7 @@ export async function createTextSubstitution(
   replace: string,
   caseSensitive: boolean,
 ): Promise<TextSubstitution> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     const id = randomId();
     const now = Date.now();
     const cs: 0 | 1 = caseSensitive ? 1 : 0;
@@ -37,7 +37,7 @@ export async function updateTextSubstitution(
   replace: string,
   caseSensitive: boolean,
 ): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     const cs: 0 | 1 = caseSensitive ? 1 : 0;
     await db.withTransactionAsync( async () => {
       await db.runAsync("UPDATE text_substitutions SET find = ?, replace = ?, case_sensitive = ? WHERE id = ?", [
@@ -52,7 +52,7 @@ export async function updateTextSubstitution(
 }
 
 export async function deleteTextSubstitution(id: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await db.withTransactionAsync( async () => {
       await db.runAsync("DELETE FROM text_substitutions WHERE id = ?", [id]);
       await mirrorLocalSubstitutionOwned(db, id);

@@ -1,9 +1,10 @@
 import { ResolvedSharePayload } from "expo-sharing";
 import * as Location from "expo-location";
 import { Directory, File, Paths } from "expo-file-system";
-import { saveItem } from "../db/items";
+import { saveItemOwned } from "../db/items";
+import { assertAppDbGenerationOwned, getAppDbGeneration, withAppDb } from "../db/database";
 import { ItemType, StashItem } from "../types";
-import { copyFileToStash, getExtension, isImageMime, isVideoMime } from "./fileUtils";
+import { copyFileToStash, deleteStashFile, getExtension, isImageMime, isVideoMime } from "./fileUtils";
 import { readExifGps, GpsPoint } from "./exif";
 import { fetchLinkPreview } from "./linkPreview";
 import { fetchArticle } from "./readability";
@@ -28,80 +29,113 @@ type CoreInput = {
 };
 
 async function saveCore({ type, source, mimeType, captureLocation }: CoreInput, folderIds: string[]): Promise<StashItem> {
+  const generation = getAppDbGeneration();
   const id = randomId();
   const now = Date.now();
-
-  let uri = source;
-  let title: string | null = null;
-  let description: string | null = null;
-  let faviconUrl: string | null = null;
-  let thumbnailPath: string | null = null;
-  let articleHtml: string | null = null;
-  let recipeJson: string | null = null;
-  let lat: number | null = null;
-  let lng: number | null = null;
-
-  if (type === "image" || type === "file") {
-    const ext = getExtension(mimeType);
-    const filename = `${id}.${ext}`;
-    const savedUri = await copyFileToStash(source, filename);
-    if (type === "image") {
-      thumbnailPath = savedUri;
-    }
-    uri = savedUri;
-    if (captureLocation) {
-      const gps = await captureLocationForImage(savedUri);
-      if (gps) {
-        lat = gps.lat;
-        lng = gps.lng;
-      }
-    }
-  } else if (type === "url") {
-    uri = uri.trim();
-    const preview = await fetchLinkPreview(uri);
-    title = preview.title;
-    description = preview.description;
-    faviconUrl = preview.favicon;
-    try {
-      const article = await fetchArticle(uri);
-      articleHtml = article.html;
-      if (article.recipe) recipeJson = JSON.stringify(article.recipe);
-    } catch {
-      // article extraction is best-effort
-    }
-    if (preview.image) {
-      try {
-        const dir = new Directory(Paths.cache, "stash");
-        dir.create({ intermediates: true });
-        const thumbDest = new File(dir, `thumb_${id}.jpg`);
-        const downloaded = await File.downloadFileAsync(preview.image, thumbDest, { idempotent: true });
-        thumbnailPath = downloaded.uri;
-      } catch {
-        // non-critical
-      }
-    }
-  }
-
-  const item: Omit<StashItem, "archived_at"> = {
-    id,
-    type,
-    uri,
-    title,
-    description,
-    favicon_url: faviconUrl,
-    thumbnail_path: thumbnailPath,
-    mime_type: mimeType,
-    created_at: now,
-    article_text: null,
-    article_html: articleHtml,
-    recipe_json: recipeJson,
-    lat,
-    lng,
-    folder_ids: folderIds,
+  // Private cache staging survives replacement of document/stash. Never reuse
+  // an existing directory, and never clean final files outside DB ownership.
+  const staging = new Directory(Paths.cache, `stash-save-${randomId()}`);
+  let ownsStaging = false;
+  let retainStaging = false;
+  const media = type === "image" || type === "file";
+  const prepareStaging = () => {
+    staging.create({ intermediates: true });
+    ownsStaging = true;
   };
 
-  await saveItem(item, folderIds);
-  return { ...item, archived_at: null };
+  try {
+    let uri = source;
+    let title: string | null = null;
+    let description: string | null = null;
+    let faviconUrl: string | null = null;
+    let thumbnailPath: string | null = null;
+    let articleHtml: string | null = null;
+    let recipeJson: string | null = null;
+    let lat: number | null = null;
+    let lng: number | null = null;
+
+    if (type === "image" || type === "file") {
+      const ext = getExtension(mimeType);
+      const filename = `${id}.${ext}`;
+      prepareStaging();
+      const stagedFile = new File(staging, filename);
+      new File(source).copy(stagedFile);
+      uri = stagedFile.uri;
+      if (captureLocation) {
+        const gps = await captureLocationForImage(uri);
+        if (gps) {
+          lat = gps.lat;
+          lng = gps.lng;
+        }
+      }
+    } else if (type === "url") {
+      uri = uri.trim();
+      const preview = await fetchLinkPreview(uri);
+      title = preview.title;
+      description = preview.description;
+      faviconUrl = preview.favicon;
+      try {
+        const article = await fetchArticle(uri);
+        articleHtml = article.html;
+        if (article.recipe) recipeJson = JSON.stringify(article.recipe);
+      } catch {
+        // article extraction is best-effort
+      }
+      if (preview.image) {
+        try {
+          prepareStaging();
+          const thumbDest = new File(staging, `thumb_${id}.jpg`);
+          const downloaded = await File.downloadFileAsync(preview.image, thumbDest, { idempotent: true });
+          thumbnailPath = downloaded.uri;
+        } catch {
+          // non-critical
+        }
+      }
+    }
+
+    const item: Omit<StashItem, "archived_at"> = {
+      id,
+      type,
+      uri,
+      title,
+      description,
+      favicon_url: faviconUrl,
+      thumbnail_path: thumbnailPath,
+      mime_type: mimeType,
+      created_at: now,
+      article_text: null,
+      article_html: articleHtml,
+      recipe_json: recipeJson,
+      lat,
+      lng,
+      folder_ids: folderIds,
+    };
+
+    await withAppDb(async (db) => {
+      assertAppDbGenerationOwned(generation);
+      let promotedUri: string | null = null;
+      try {
+        if (media) {
+          promotedUri = await copyFileToStash(uri, `${id}.${getExtension(mimeType)}`);
+          item.uri = promotedUri;
+          if (type === "image") item.thumbnail_path = promotedUri;
+        }
+        await saveItemOwned(db, item, folderIds);
+      } catch (error) {
+        // Only delete a file this operation actually created, before replacement
+        // can install same-name media. Never delete on a collision/stale save.
+        if (promotedUri) await deleteStashFile(promotedUri);
+        throw error;
+      }
+    });
+    retainStaging = !media && !!thumbnailPath;
+    return { ...item, archived_at: null };
+  } finally {
+    // Successful URL thumbnails still live in cache; retain their private dir.
+    if (ownsStaging && !retainStaging) {
+      try { staging.delete(); } catch { /* best-effort temporary-file cleanup */ }
+    }
+  }
 }
 
 export async function processAndSaveShare(payload: ResolvedSharePayload, folderIds: string[], options?: { captureLocation?: boolean }): Promise<StashItem> {

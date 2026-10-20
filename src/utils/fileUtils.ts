@@ -6,8 +6,17 @@ export async function copyFileToStash(uri: string, filename: string): Promise<st
   stashDir.create({ intermediates: true, idempotent: true });
   const source = new File(uri);
   const dest = new File(stashDir, filename);
-  source.copy(dest);
-  return dest.uri;
+  // Never overwrite restored/existing bytes, even in the unlikely event of an
+  // ID collision. Call under DB ownership when paired with a database save.
+  if (dest.exists) throw new Error("A stashed file with this name already exists.");
+  try {
+    source.copy(dest);
+    return dest.uri;
+  } catch (error) {
+    // A failed native copy may have created a partial file. It is ours alone.
+    await deleteStashFile(dest.uri);
+    throw error;
+  }
 }
 export async function deleteStashFile(fileUri: string): Promise<void> {
   try {

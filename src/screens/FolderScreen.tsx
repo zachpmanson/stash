@@ -72,7 +72,7 @@ export default function FolderScreen() {
             style: "destructive",
             onPress: async () => {
               await archiveItem(item.id);
-              loadItems();
+              await loadItems();
             },
           },
         ],

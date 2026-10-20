@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from "react";
+import { runUiAction } from "../utils/uiAction";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { createFolder } from "../db/folders";
 import { Colors, Radius, Spacing, Typography } from "../theme";
@@ -19,7 +20,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
   const [creating, setCreating] = useState(false);
   const insets = useSafeAreaInsets();
 
-  const handleCreate = useCallback(async () => {
+  const handleCreate = useCallback(() => runUiAction(async () => {
     const name = newName.trim();
     if (!name) return;
     setCreating(true);
@@ -30,7 +31,7 @@ export default function FolderSelector({ folders, selectedIds, onToggle, onFolde
     } finally {
       setCreating(false);
     }
-  }, [newName, onFolderCreated]);
+  }), [newName, onFolderCreated]);
 
   return (
     <View style={[styles.container]}>

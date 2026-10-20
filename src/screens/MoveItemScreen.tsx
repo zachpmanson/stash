@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { runUiAction } from "../utils/uiAction";
 import {
   View, Text, StyleSheet, FlatList, Pressable,
 } from 'react-native';
@@ -25,7 +26,7 @@ export default function MoveItemScreen() {
     })();
   }, [itemId]);
 
-  const toggleFolder = useCallback(async (folderId: string) => {
+  const toggleFolder = useCallback((folderId: string) => runUiAction(async () => {
     const isIn = currentFolderIds.has(folderId);
     if (isIn && currentFolderIds.size === 1) {
       showModal({ title: 'Cannot remove', message: 'Item must be in at least one folder.' });
@@ -38,7 +39,7 @@ export default function MoveItemScreen() {
       await addItemToFolder(itemId, folderId);
       setCurrentFolderIds(prev => new Set([...prev, folderId]));
     }
-  }, [itemId, currentFolderIds]);
+  }), [itemId, currentFolderIds]);
 
   return (
     <Screen>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { runUiAction } from "../utils/uiAction";
 import {
   View,
   Text,
@@ -88,7 +89,7 @@ export default function ArchiveScreen() {
     [load],
   );
 
-  const handleUnarchiveSubmit = useCallback(async () => {
+  const handleUnarchiveSubmit = useCallback(() => runUiAction(async () => {
     if (!unarchivingItem) return;
     const trimmed = unarchiveTitle.trim();
     if (trimmed !== (unarchivingItem.title ?? "").trim()) {
@@ -96,8 +97,8 @@ export default function ArchiveScreen() {
     }
     await unarchiveItem(unarchivingItem.id);
     setUnarchivingItem(null);
-    load();
-  }, [unarchivingItem, unarchiveTitle, load]);
+    await load();
+  }), [unarchivingItem, unarchiveTitle, load]);
 
   const handleItemOptions = useCallback(
     (item: StashItem) => {

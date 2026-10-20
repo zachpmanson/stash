@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Linking, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Linking, ScrollView, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -7,20 +7,22 @@ import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
 import { useFolderStore } from "../state/folderState";
-import { useSettingsStore } from "../state/settingsState";
+import { changeAuRecipeSetting, useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
 import { runSyncReplicaSmoke } from "../db/syncReplicaSmoke";
-import { mirrorAuRecipeSetting, prepareCurrentStashReplica } from "../db/syncReplica";
+import { prepareCurrentStashReplica } from "../db/syncReplica";
 import { connectStashSync, disconnectStashSync, subscribeStashSyncStatus, type StashSyncStatus } from "../db/syncClient";
+import { withAppDb, isRestorePendingOwned } from "../db/database";
+import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
 import { VoiceMode } from "../utils/readability";
 
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
-const SHOW_SYNC_DEV_TOOLS = Platform.OS === "android" && (__DEV__ || process.env.EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS === "1");
 
 export default function SettingsScreen() {
   const router = useRouter();
   const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [syncServerUrl, setSyncServerUrl] = useState("");
   const [syncUsername, setSyncUsername] = useState("");
@@ -34,9 +36,12 @@ export default function SettingsScreen() {
   const quoteVoice = voices.find((v) => v.identifier === quoteId);
   const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
   const auRecipe = useSettingsStore((s) => s.auRecipe);
-  const setAuRecipe = useSettingsStore((s) => s.setAuRecipe);
 
-  useEffect(() => subscribeStashSyncStatus(setSyncStatus), []);
+  useEffect(() => {
+    const refreshPending = () => { void withAppDb(isRestorePendingOwned).then(setRecoveryPending).catch(console.error); };
+    refreshPending();
+    return subscribeStashSyncStatus((status) => { setSyncStatus(status); refreshPending(); });
+  }, []);
 
   const handleConnectSync = async () => {
     if (busy) return;
@@ -52,8 +57,7 @@ export default function SettingsScreen() {
   };
 
   const handleAuRecipeChange = (enabled: boolean) => {
-    setAuRecipe(enabled);
-    void mirrorAuRecipeSetting(enabled).catch((error) => console.error("Failed to mirror recipe setting", error));
+    void changeAuRecipeSetting(enabled).catch((error) => showModal({ title: "Setting not changed", message: String(error) }));
   };
 
   const handleSyncSmoke = async () => {
@@ -107,7 +111,7 @@ export default function SettingsScreen() {
       if (!fileUri) return;
       showModal({
         title: "Restore backup?",
-        message: "This will replace your current data with the selected backup.",
+        message: "This replaces this device’s data (a private rollback is retained). Synced backups merge with the server, not replace it. Restored synced data is read-only until the first full merge completes.",
         buttons: [
           { text: "Cancel", style: "cancel", onPress: () => setBusy(false) },
           {
@@ -116,10 +120,13 @@ export default function SettingsScreen() {
             onPress: async () => {
               try {
                 const manifest = await restoreBackup(fileUri);
+                setRecoveryPending(manifest.recoveryPending);
                 await useFolderStore.getState().refresh();
                 showModal({
                   title: "Restored",
-                  message: `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders.`,
+                  message: manifest.recoveryPending
+                    ? "Restored locally; merging with server is required. Browse read-only, then connect to sync below. Your backup and private pre-restore rollback are retained."
+                    : `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders locally.`,
                 });
               } catch (e) {
                 showModal({ title: "Restore failed", message: `${e}` });
@@ -141,7 +148,8 @@ export default function SettingsScreen() {
   return (
     <Screen options={{ title: "Settings" }}>
       <VoicePickerModal visible={voiceMenu !== null} mode={voiceMenu ?? "primary"} onClose={() => setVoiceMenu(null)} />
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        {recoveryPending && <Text style={styles.pendingBanner}>Restored locally — read-only until a full server merge completes. {STASH_SYNC_DEV_TOOLS ? "Connect to sync below." : "Recovery requires an Android development or explicitly opted-in sync build."}</Text>}
         <Row
           icon="save-alt"
           label="Back up data"
@@ -175,7 +183,7 @@ export default function SettingsScreen() {
           value={auRecipe}
           onValueChange={handleAuRecipeChange}
         />
-        {SHOW_SYNC_DEV_TOOLS && (
+        {STASH_SYNC_DEV_TOOLS && (
           <>
             <View style={styles.syncPanel}>
               <Text style={styles.syncHeading}>Experimental sync (Android only)</Text>
@@ -225,13 +233,13 @@ export default function SettingsScreen() {
                   <Text style={styles.syncButtonLabel}>Disconnect</Text>
                 </Pressable>
               </View>
-              <Row icon="sync" label="Prepare this install's local sync replica" onPress={() => handlePrepareReplica()} />
-              <Row icon="science" label="Run isolated sync migration smoke" onPress={() => handleSyncSmoke()} />
+              {STASH_SYNC_DEV_TOOLS && !recoveryPending && <Row icon="sync" label="Prepare this install's local sync replica" onPress={() => handlePrepareReplica()} />}
+              {STASH_SYNC_DEV_TOOLS && <Row icon="science" label="Run isolated sync migration smoke" onPress={() => handleSyncSmoke()} />}
             </View>
           </>
         )}
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
-      </View>
+      </ScrollView>
     </Screen>
   );
 }
@@ -290,6 +298,7 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     gap: Spacing.sm,
   },
+  pendingBanner: { ...Typography.body, color: Colors.textSecondary, backgroundColor: Colors.surface2, padding: Spacing.md, borderRadius: Radius.md },
   row: {
     flexDirection: "row",
     alignItems: "center",

@@ -9,6 +9,7 @@ import type { Change } from "@vlcn.io/ws-common";
 import {
   ensureCrsqliteLoaded,
   withAppDb,
+  isRestorePendingOwned,
 } from "./database";
 import {
   beginSyncCycleOwned,
@@ -18,6 +19,9 @@ import {
   SYNC_CRR_SCHEMA_VERSION,
   SYNC_INITIALIZED_KEY,
 } from "./syncReplica";
+
+import { assertRecoveryConfigurationOwned } from "./restoreMerge";
+import { useSettingsStore } from "../state/settingsState";
 
 const DATABASE_ROOM = "stash-backend";
 const CHANGE_COLUMNS = '"table", "pk", "cid", "val", "col_version", "db_version", NULL, "cl", "seq"';
@@ -44,6 +48,7 @@ type ServerSyncStatus = {
   serverVersion: string;
   clientSiteId: string;
   clientSeenVersion: string;
+  restoreMerge?: { version: number; mergeEqualValues: number };
 };
 
 type ReactNativeWebSocket = new (
@@ -313,6 +318,11 @@ async function readServerStatus(
   if (status.schema !== SYNC_CRR_SCHEMA_NAME || status.schemaVersion !== SYNC_CRR_SCHEMA_VERSION.toString()) {
     throw new Error("Sync server schema changed during the session; disconnect before sending more data.");
   }
+  siteIdBytes(status.serverSiteId);
+  siteIdBytes(status.clientSiteId);
+  for (const version of [status.serverVersion, status.clientSeenVersion]) {
+    if (typeof version !== "string" || !/^(0|[1-9][0-9]*)$/.test(version)) throw new Error("Sync server returned an invalid version.");
+  }
   return status;
 }
 
@@ -359,6 +369,12 @@ async function isExchanged(
       serverSeen: seenByServer.toString(),
     }),
   };
+}
+
+function requireRecoveryCapability(status: ServerSyncStatus): void {
+  if (status.restoreMerge?.version !== 1 || status.restoreMerge.mergeEqualValues !== 0) {
+    throw new Error("The server does not support safe restore merge with merge-equal-values=0. Restored data remains read-only.");
+  }
 }
 
 function networkConfig(
@@ -422,7 +438,10 @@ export async function connectStashSync(
           SYNC_INITIALIZED_KEY,
         );
         if (!marker) throw new Error("Prepare this install's local sync replica before connecting.");
-        return { databasePath: database.databasePath, siteId: await readSiteId(database) };
+        const recoveryPending = await isRestorePendingOwned(database);
+        if (recoveryPending) await assertRecoveryConfigurationOwned(database);
+        const version = recoveryPending ? await database.getFirstAsync<{ version: number }>("SELECT crsql_db_version() AS version") : null;
+        return { databasePath: database.databasePath, siteId: await readSiteId(database), recoveryPending, version: version?.version };
       });
       if (!prepared) return;
       if (attempt.cancelled) return;
@@ -431,6 +450,14 @@ export async function connectStashSync(
       if (attempt.cancelled) return;
       const { siteId, databasePath } = prepared;
       const clientSiteId = siteIdHex(siteId);
+      if (prepared.recoveryPending) {
+        const status = await readServerStatus(base, authorization, clientSiteId, attempt.controller.signal);
+        requireRecoveryCapability(status);
+        if (status.clientSiteId !== clientSiteId || BigInt(status.clientSeenVersion) > BigInt(prepared.version!)) {
+          throw new Error("The server has seen a newer version of this recovery identity. Refusing a rewound replica.");
+        }
+        if (attempt.cancelled) return;
+      }
       const syncReplicaRef: { current: StashReplica | null } = { current: null };
       const options = { url: websocketUrl(base), room: DATABASE_ROOM };
       let syncedDb: Awaited<ReturnType<typeof createSyncedDB>> | null = null;
@@ -495,16 +522,24 @@ export async function connectStashSync(
           try {
             const status = await readServerStatus(base, authorization, clientSiteId, attempt.controller.signal);
             if (!running) break;
+            if (prepared.recoveryPending) requireRecoveryCapability(status);
             const exchange = await isExchanged(replica, clientSiteId, status);
             if (!running) break;
             if (exchange.complete && exchange.signature !== projectedSignature) {
-              await withAppDb(async (database) => {
-                if (!running) return;
+              const pending = await withAppDb(async (database) => {
+                if (!running) return true;
                 await beginSyncCycleOwned(database);
                 await markSyncSnapshotCompleteOwned(database);
                 await projectSyncReplicaToLocalOwned(database);
+                const setting = await database.getFirstAsync<{ value: string }>("SELECT value FROM stash_sync_metadata WHERE key = 'projected_au_recipe'");
+                if (setting) useSettingsStore.getState().setAuRecipe(setting.value === "1");
+                return isRestorePendingOwned(database);
               });
               if (!running) break;
+              if (pending) {
+                notifyStatus({ phase: "syncing", message: "Uploading recovery relationship reconciliation…" });
+                continue;
+              }
               projectedSignature = exchange.signature;
               const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: Date.now() };
               notifyStatus(state);

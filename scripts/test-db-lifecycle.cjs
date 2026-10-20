@@ -48,7 +48,7 @@ function databaseHarness() {
           } else if (options.initError) throw options.initError;
         },
         getAllAsync: async sql => options.read ? options.read(sql) : [],
-        getFirstAsync: async sql => sql.includes('crsql_site_id')
+        getFirstAsync: async (sql, ...args) => args.includes("restore_merge_pending") ? null : sql.includes('crsql_site_id')
           ? { site_id: new Uint8Array(16) } : sql.includes('metadata') ? { value: '1' } : { count: 1 },
         runAsync: async () => {},
         withTransactionAsync: async task => task(),
@@ -63,7 +63,7 @@ function databaseHarness() {
     },
     addDatabaseChangeListener: () => ({ remove: () => events.push('unsubscribe') }),
   };
-  const api = load('src/db/database.ts', { 'expo-sqlite': sqlite, 'react-native': { Platform: { OS: 'android' } } });
+  const api = load('src/db/database.ts', { 'expo-sqlite': sqlite, 'react-native': { Platform: { OS: 'android' } }, 'expo-file-system': { File: class { exists = false; }, Paths: {} } });
   return { api, sqlite, options, events, handles };
 }
 function syncHarness() {
@@ -72,6 +72,8 @@ function syncHarness() {
   let transports = 0, stops = 0;
   const api = load('src/db/syncClient.ts', {
     'expo-sqlite': h.sqlite, './database': h.api,
+    './restoreMerge': { assertRecoveryConfigurationOwned: async () => {} },
+    '../state/settingsState': { useSettingsStore: { getState: () => ({ setAuRecipe() {} }) } },
     './syncReplica': {
       SYNC_CRR_SCHEMA_NAME: 'test', SYNC_CRR_SCHEMA_VERSION: 1n, SYNC_INITIALIZED_KEY: 'seed',
       beginSyncCycleOwned: async () => {}, markSyncSnapshotCompleteOwned: async () => {},
@@ -298,4 +300,27 @@ test('teardown failure closes replica but blocks restore and reconnection', asyn
   assert.equal(h.events.includes('unsubscribe'), true);
   await assert.rejects(h.connect(), /transport failed/);
   await assert.rejects(h.sync.disconnectStashSyncAndWait(), /transport failed/);
+});
+
+test('pre-close restore preparation failure leaves current handle usable and invalidates prepared saves', async () => {
+  const h = databaseHarness();
+  await h.api.withAppDb(async () => {});
+  const generation = h.api.getAppDbGeneration();
+  await assert.rejects(h.api.withAppDbReplacement(async () => assert.fail('replace ran'), async () => assert.fail('reopened'), async db => {
+    assert.equal(db, h.handles[0]); throw Error('prepare failed');
+  }), /prepare failed/);
+  await h.api.withAppDb(async db => {
+    assert.equal(db, h.handles[0]);
+    assert.throws(() => h.api.assertAppDbGenerationOwned(generation), /replaced/);
+  });
+  assert.equal(h.events.some(event => event.startsWith('close:')), false);
+});
+
+test('temporary extension cleanup attempts close even when finalization rejects', async () => {
+  const h = databaseHarness();
+  const temp = await h.sqlite.openDatabaseAsync();
+  await h.api.ensureCrsqliteLoaded(temp);
+  h.options.finalizeError = Error('temporary finalize failure');
+  await assert.rejects(h.api.closeTemporaryDatabase(temp),/temporary finalize failure/);
+  assert.ok(h.events.includes('close:0'));
 });

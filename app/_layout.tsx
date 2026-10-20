@@ -11,6 +11,7 @@ import { ModalHost } from "../src/components/ModalHost";
 import { isShareLaunch } from "../src/utils/nativeShareIntent";
 import { subscribeStashSyncProjection } from "../src/db/syncClient";
 import { useFolderStore } from "../src/state/folderState";
+import { initializeSettingsFromDatabase } from "../src/state/settingsState";
 
 const SHARE_LAUNCH = isShareLaunch();
 
@@ -44,6 +45,8 @@ function RootLayout() {
   const router = useRouter();
   const { resolvedSharedPayloads } = useIncomingShare();
   const handledSigRef = useRef<string | null>(null);
+
+  useEffect(() => { void initializeSettingsFromDatabase().catch(console.error); }, []);
 
   useEffect(() => subscribeStashSyncProjection(() => {
     void useFolderStore.getState().refresh();

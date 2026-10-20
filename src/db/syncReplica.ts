@@ -1,6 +1,6 @@
 import type * as SQLite from "expo-sqlite";
 import { cryb64 } from "@vlcn.io/ws-common";
-import { CRSQLITE_SUPPORTED, ensureCrsqliteLoaded, withAppDb } from "./database";
+import { CRSQLITE_SUPPORTED, ensureCrsqliteLoaded, withAppDb, assertAppDbWritableOwned, RESTORE_PENDING_KEY, isRestorePendingOwned } from "./database";
 import { randomId } from "../utils/randomId";
 
 /**
@@ -168,14 +168,8 @@ export async function seedSyncReplicaOwned(
   auRecipe: boolean,
 ): Promise<SyncSeedCounts | null> {
   if (!CRSQLITE_SUPPORTED) throw new Error("CR-SQLite is currently packaged only for Android.");
-  await db.execAsync(SYNC_SCHEMA_SQL);
-  await db.runAsync(
-    "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_name', ?)",
-    SYNC_CRR_SCHEMA_NAME,
-  );
-  await db.execAsync(
-    `INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_version', ${SYNC_CRR_SCHEMA_VERSION})`,
-  );
+  await assertAppDbWritableOwned(db);
+  await initializeEmptySyncReplicaOwned(db);
 
   const prior = await db.getFirstAsync<{ value: string }>(
     "SELECT value FROM stash_sync_metadata WHERE key = ?",
@@ -317,6 +311,7 @@ async function replicaReady(db: SQLite.SQLiteDatabase): Promise<boolean> {
 
 /** Keep an existing local row mirrored into the optional CRR tables. */
 export async function mirrorLocalItemOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+  await assertAppDbWritableOwned(db);
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalItem>(
     `SELECT id, type, uri, title, description, favicon_url, mime_type, created_at,
@@ -354,6 +349,7 @@ export async function mirrorLocalItemOwned(db: SQLite.SQLiteDatabase, id: string
 }
 
 export async function mirrorLocalFolderOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+  await assertAppDbWritableOwned(db);
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalFolder>(
     "SELECT id, name, icon, created_at, archived_at, layout FROM folders WHERE id = ?",
@@ -380,6 +376,7 @@ export async function mirrorLocalMembershipOwned(
   itemId: string,
   folderId: string,
 ): Promise<void> {
+  await assertAppDbWritableOwned(db);
   if (!(await replicaReady(db))) return;
   const local = await db.getFirstAsync<{ present: number }>(
     `SELECT EXISTS(SELECT 1 FROM item_folders WHERE item_id = ? AND folder_id = ?) AS present`,
@@ -410,17 +407,22 @@ export async function mirrorLocalMembershipOwned(
   );
 }
 
-export async function mirrorAuRecipeSetting(enabled: boolean): Promise<void> {
+export async function mirrorAuRecipeSetting(enabled: boolean, onCommitted?: () => void): Promise<void> {
   await withAppDb(async (db) => {
-    if (!(await replicaReady(db))) return;
-    await db.runAsync(
-      "UPDATE sync_user_settings SET au_recipe = ? WHERE id = 'local-user'",
-      enabled ? 1 : 0,
-    );
+    await assertAppDbWritableOwned(db);
+    if (await replicaReady(db)) {
+      await db.withTransactionAsync(async () => {
+        await db.runAsync("UPDATE sync_user_settings SET au_recipe = ? WHERE id = 'local-user'", enabled ? 1 : 0);
+        // SQLite remains authoritative after recovery, including offline edits.
+        await db.runAsync("INSERT OR REPLACE INTO stash_sync_metadata (key, value) VALUES ('projected_au_recipe', ?)", enabled ? "1" : "0");
+      });
+    }
+    onCommitted?.();
   });
 }
 
 export async function mirrorLocalSubstitutionOwned(db: SQLite.SQLiteDatabase, id: string): Promise<void> {
+  await assertAppDbWritableOwned(db);
   if (!(await replicaReady(db))) return;
   const row = await db.getFirstAsync<LocalSubstitution>(
     "SELECT id, find, replace, case_sensitive, created_at FROM text_substitutions WHERE id = ?",
@@ -470,9 +472,11 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
   if (complete?.value !== "1") {
     throw new Error("Refusing destructive local projection without a completed sync snapshot.");
   }
-  await reconcileSyncRelationshipsOwned(db);
-
   await db.withTransactionAsync(async () => {
+    const pending = await isRestorePendingOwned(db);
+    const before = pending ? await db.getFirstAsync<{ count: number }>("SELECT total_changes() AS count") : null;
+    await reconcileSyncRelationshipsOwned(db, true);
+    const after = pending ? await db.getFirstAsync<{ count: number }>("SELECT total_changes() AS count") : null;
     const folders = await db.getAllAsync<LocalFolder & { deleted: number }>(
       "SELECT id, name, icon, created_at, archived_at, layout, deleted FROM sync_folders ORDER BY id",
     );
@@ -504,10 +508,14 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
       if (!["image", "url", "text", "file"].includes(item.type)) {
         throw new Error(`Cannot project unsupported item type '${item.type}'.`);
       }
-      const previous = await db.getFirstAsync<{ uri: string; thumbnail_path: string | null }>(
+      let previous = await db.getFirstAsync<{ uri: string; thumbnail_path: string | null }>(
         "SELECT uri, thumbnail_path FROM items WHERE id = ?",
         item.id!,
       );
+      if (!previous && (item.type === "image" || item.type === "file")) {
+        const resources = await db.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_restore_media') AS present");
+        if (resources?.present) previous = await db.getFirstAsync<{ uri: string; thumbnail_path: string | null }>("SELECT uri, thumbnail_path FROM stash_restore_media WHERE id = ?", item.id!);
+      }
       // File bytes are not yet synced. Keep a device's existing local path;
       // defer showing a remote media-only item until its media is available.
       if ((item.type === "image" || item.type === "file") && !previous) continue;
@@ -536,6 +544,7 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
     }
 
     await db.runAsync("DELETE FROM items WHERE id NOT IN (SELECT id FROM sync_items)");
+    await db.runAsync("DELETE FROM folders WHERE id NOT IN (SELECT id FROM sync_folders WHERE deleted = 0)");
     await db.runAsync("DELETE FROM item_folders");
     await db.runAsync(`
       INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at)
@@ -562,6 +571,13 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
     await db.runAsync(
       "DELETE FROM text_substitutions WHERE id NOT IN (SELECT id FROM sync_text_substitutions)",
     );
+    await db.runAsync(`INSERT OR REPLACE INTO stash_sync_metadata (key, value)
+      SELECT 'projected_au_recipe', CAST(au_recipe AS TEXT) FROM sync_user_settings WHERE id = 'local-user'`);
+    // Relationship repairs are real CRR writes. Upload them before announcing
+    // recovery completion; the following full exchange can consume the marker.
+    if (!pending || (before && after && before.count === after.count)) {
+      await db.runAsync("DELETE FROM stash_sync_metadata WHERE key = ?", RESTORE_PENDING_KEY);
+    }
     // Consume this one-shot authorization; the sync driver must re-mark only
     // after a full exchange has completed successfully.
     await db.runAsync(
@@ -576,6 +592,7 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
 
 export async function reconcileSyncRelationshipsOwned(
   db: SQLite.SQLiteDatabase,
+  inTransaction = false,
 ): Promise<void> {
   if (!(await replicaReady(db))) throw new Error("The local CR-SQLite replica has not been initialized.");
   const complete = await db.getFirstAsync<{ value: string }>(
@@ -585,7 +602,7 @@ export async function reconcileSyncRelationshipsOwned(
   if (complete?.value !== "1") {
     throw new Error("Refusing relationship reconciliation without a completed sync snapshot.");
   }
-  await db.withTransactionAsync(async () => {
+  const reconcile = async () => {
     // A live item link is authoritative for folder survival, per the approved
     // add-wins policy. Folder deletion only tombstones membership generations
     // currently visible on the deleting peer.
@@ -604,7 +621,9 @@ export async function reconcileSyncRelationshipsOwned(
 
     // Keep memberships to a tombstoned folder in CRR state: the reconciliation
     // above revives the parent. No FK or physical purge is used here.
-  });
+  };
+  if (inTransaction) await reconcile();
+  else await db.withTransactionAsync(reconcile);
 }
 
 export async function inspectSyncIntegrityOwned(
@@ -642,6 +661,7 @@ export async function prepareCurrentStashReplica(auRecipe = false): Promise<{
   integrity: SyncIntegrityReport;
 }> {
   return withAppDb(async (db) => {
+    await assertAppDbWritableOwned(db);
     await loadCrsqliteExtensionOwned(db);
     const seeded = await seedSyncReplicaOwned(db, auRecipe);
     // A local seed is itself a complete snapshot; future network sync must clear
@@ -655,4 +675,16 @@ export async function prepareCurrentStashReplica(auRecipe = false): Promise<{
     return { seeded, integrity };
 
   });
+}
+
+/** New, independently owned files only. Never seed a restored app projection. */
+export async function initializeEmptySyncReplicaOwned(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(SYNC_SCHEMA_SQL);
+  await db.runAsync(
+    "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_name', ?)",
+    SYNC_CRR_SCHEMA_NAME,
+  );
+  await db.execAsync(
+    `INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('schema_version', ${SYNC_CRR_SCHEMA_VERSION})`,
+  );
 }

@@ -1,4 +1,4 @@
-import { withAppDb } from "./database";
+import { withAppDb, withAppDbMutation } from "./database";
 import { Folder, FolderLayout } from "../types";
 import { countGraphemes } from "unicode-segmenter/grapheme";
 import { mirrorLocalFolderOwned } from "./syncReplica";
@@ -80,7 +80,7 @@ export async function getFolderById(id: string): Promise<Folder | null> {
 }
 
 export async function createFolder(id: string, name: string, icon?: string, layout?: FolderLayout): Promise<Folder> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     const now = Date.now();
     const resolvedIcon = icon ?? defaultIcon(name);
     const resolvedLayout = layout ?? "grid";
@@ -104,7 +104,7 @@ export async function createFolder(id: string, name: string, icon?: string, layo
 }
 
 export async function updateFolderName(id: string, name: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await db.withTransactionAsync( async () => {
       await db.runAsync("UPDATE folders SET name = ? WHERE id = ?", [name.trim(), id]);
       await mirrorLocalFolderOwned(db, id);
@@ -113,7 +113,7 @@ export async function updateFolderName(id: string, name: string): Promise<void> 
 }
 
 export async function updateFolderIcon(id: string, icon: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     console.log({ len: countGraphemes(icon), icon });
     if (countGraphemes(icon) !== 1) throw new Error("Icon must be single emoji");
     await db.withTransactionAsync( async () => {
@@ -124,7 +124,7 @@ export async function updateFolderIcon(id: string, icon: string): Promise<void> 
 }
 
 export async function updateFolderLayout(id: string, layout: FolderLayout): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await db.withTransactionAsync( async () => {
       await db.runAsync("UPDATE folders SET layout = ? WHERE id = ?", [layout, id]);
       await mirrorLocalFolderOwned(db, id);
@@ -133,7 +133,7 @@ export async function updateFolderLayout(id: string, layout: FolderLayout): Prom
 }
 
 export async function touchFolder(id: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await (async () => {
       await db.runAsync("UPDATE folders SET last_used_at = ? WHERE id = ?", [Date.now(), id]);
     })();
@@ -141,7 +141,7 @@ export async function touchFolder(id: string): Promise<void> {
 }
 
 export async function archiveFolder(id: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await db.withTransactionAsync( async () => {
       await db.runAsync("UPDATE folders SET archived_at = ? WHERE id = ?", [Date.now(), id]);
       await mirrorLocalFolderOwned(db, id);
@@ -150,7 +150,7 @@ export async function archiveFolder(id: string): Promise<void> {
 }
 
 export async function unarchiveFolder(id: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     await db.withTransactionAsync( async () => {
       await db.runAsync("UPDATE folders SET archived_at = NULL WHERE id = ?", [id]);
       await mirrorLocalFolderOwned(db, id);
@@ -159,7 +159,7 @@ export async function unarchiveFolder(id: string): Promise<void> {
 }
 
 export async function deleteFolder(id: string): Promise<void> {
-  return withAppDb(async (db) => {
+  return withAppDbMutation(async (db) => {
     // Preserve the user-visible local behavior. The replicated copy uses a folder
     // tombstone and removes only generations observed by this device.
     await db.withTransactionAsync( async () => {

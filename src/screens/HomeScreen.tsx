@@ -1,6 +1,7 @@
 import IconButton from "@/components/IconButton";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
+import { runUiAction } from "../utils/uiAction";
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { showModal } from "src/state/modalState";
 import { useScrollTopState } from "src/state/scrollTopState";
@@ -41,14 +42,14 @@ export default function HomeScreen() {
     setNewFolderVisible(true);
   }, []);
 
-  const handleNewFolderSubmit = useCallback(async () => {
+  const handleNewFolderSubmit = useCallback(() => runUiAction(async () => {
     const name = newFolderName.trim();
     if (name) {
       await createFolder(randomId(), name);
-      refresh();
+      await refresh();
     }
     setNewFolderVisible(false);
-  }, [newFolderName, refresh]);
+  }), [newFolderName, refresh]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

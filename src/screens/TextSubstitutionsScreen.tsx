@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { showActionError } from "../utils/uiAction";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import Modal from "../components/Modal";
@@ -121,8 +122,9 @@ function SubstitutionModal({
       } else {
         await createTextSubstitution(find.trim(), replace, caseSensitive);
       }
-      onSaved();
+      await onSaved();
     } catch (e) {
+      showActionError(e);
       setSaving(false);
     }
   };
@@ -132,8 +134,9 @@ function SubstitutionModal({
     setSaving(true);
     try {
       await deleteTextSubstitution(existing.id);
-      onSaved();
+      await onSaved();
     } catch (e) {
+      showActionError(e);
       setSaving(false);
     }
   };

@@ -2,6 +2,7 @@ import React, { useCallback } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
 import { ModalButton, useModalStore } from "src/state/modalState";
+import { runUiAction } from "../utils/uiAction";
 
 const DEFAULT_BUTTONS: ModalButton[] = [{ text: "OK", style: "default" }];
 
@@ -15,7 +16,7 @@ export function ModalHost() {
   const handlePress = useCallback(
     async (btn: ModalButton) => {
       dismiss();
-      await btn.onPress?.();
+      await runUiAction(() => btn.onPress?.());
     },
     [dismiss],
   );

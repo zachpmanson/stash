@@ -5,6 +5,7 @@ import * as IntentLauncher from "expo-intent-launcher";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { runUiAction } from "../utils/uiAction";
 import {
   ActivityIndicator,
   findNodeHandle,
@@ -97,7 +98,7 @@ export default function ItemDetailScreen() {
     [item, loadArticleFrom],
   );
 
-  const handleMarkBookmark = useCallback(async () => {
+  const handleMarkBookmark = useCallback(() => runUiAction(async () => {
     if (!item || item.type !== "url") return;
     if (!selectionCacheRef.current) {
       showModal({
@@ -115,9 +116,9 @@ export default function ItemDetailScreen() {
     const percent = maxScroll > 0 ? Math.round((scrollY / maxScroll) * 100) : 50;
     const clamped = Math.min(99, Math.max(1, percent));
     await updateItemListenedPercent(item.id, clamped);
-    getItemById(itemId).then(setItem);
+    setItem(await getItemById(itemId));
     showSnackbar(`Bookmark saved at ${clamped}%`);
-  }, [item, itemId, contentHeight, scrollY, windowHeight]);
+  }), [item, itemId, contentHeight, scrollY, windowHeight]);
 
   const handleScrollToBookmark = useCallback(() => {
     const pct = item?.listened_percent ?? 0;
