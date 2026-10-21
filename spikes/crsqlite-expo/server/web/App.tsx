@@ -54,6 +54,10 @@ export function App() {
   const { folderId, archived, selected, offset } = route;
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  // Retained cards after a failed refresh still belong to their last successful query.
+  const [loadedPage, setLoadedPage] = useState<
+    Pick<Route, "folderId" | "archived" | "offset"> | null
+  >(null);
   const [hasMore, setHasMore] = useState(false);
   const [detail, setDetail] = useState<Item | null>(null);
   const [editor, setEditor] = useState<"new" | "edit" | null>(null);
@@ -75,6 +79,9 @@ export function App() {
   const folderButton = useRef<HTMLButtonElement>(null);
   const lastItemButton = useRef<HTMLButtonElement | null>(null);
   const editorReturnFocus = useRef<HTMLElement | null>(null);
+  const membershipCount = folders.filter((f) =>
+    detail?.folderIds.includes(f.id),
+  ).length;
   const activeFolder = folders.find((f) => f.id === folderId);
   const layout = activeFolder
     ? activeFolder.layout === "grid"
@@ -141,6 +148,7 @@ export function App() {
           (!!folderId && !nextDetail.folderIds.includes(folderId)));
       setFolders(nextFolders);
       setItems(nextItems.items);
+      setLoadedPage({ folderId, archived, offset });
       setHasMore(nextItems.hasMore);
       setDetail(missingFolder || incompatible ? null : nextDetail);
       if (missingFolder || incompatible) {
@@ -567,7 +575,9 @@ export function App() {
             <p className="eyebrow">
               {archived ? "Archive · archived items only" : "Your collection"}
             </p>
-            <h2>{activeFolder?.name || "All items"}</h2>
+            <h2 title={activeFolder?.name || "All items"}>
+              {activeFolder?.name || "All items"}
+            </h2>
             <div className="actions mt-4">
               <span className="text-muted text-sm">
                 {archived
@@ -576,9 +586,11 @@ export function App() {
               </span>
               <div
                 className="layout-toggle ml-auto"
+                role="group"
                 aria-label="Collection layout"
               >
                 <button
+                  title="List layout"
                   aria-label="List layout"
                   aria-pressed={layout === "list"}
                   disabled={busy}
@@ -587,6 +599,7 @@ export function App() {
                   <Icon name="list" />
                 </button>
                 <button
+                  title="Grid layout"
                   aria-label="Grid layout"
                   aria-pressed={layout === "grid"}
                   disabled={busy}
@@ -610,10 +623,29 @@ export function App() {
                   ? "Archived items will appear here."
                   : "Add a text or link to start this collection."}
               </p>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  archived
+                    ? navigate({ archived: false, selected: "", offset: 0 })
+                    : startNew()
+                }
+              >
+                {archived ? "Back to collection" : "New item"}
+              </button>
             </div>
           )}
           <ul
             className={`items ${layout === "grid" ? "grid grid-cols-2 gap-3" : "flex flex-col gap-2"}`}
+            onFocusCapture={(event) => {
+              // Native focus scrolling does not account for the sticky heading.
+              const pane = event.currentTarget.parentElement!;
+              const heading = pane.querySelector(".collection-heading")!;
+              const overlap =
+                heading.getBoundingClientRect().bottom + 6 -
+                event.target.getBoundingClientRect().top;
+              if (overlap > 0) pane.scrollTop -= overlap;
+            }}
           >
             {items.map((item) => (
               <ItemCard
@@ -674,6 +706,15 @@ export function App() {
           </ul>
           {(offset > 0 || hasMore) && (
             <nav aria-label="Item pages" className="actions mt-6">
+              {!loading &&
+                items.length > 0 &&
+                loadedPage?.folderId === folderId &&
+                loadedPage.archived === archived &&
+                loadedPage.offset === offset && (
+                  <span className="text-muted text-sm">
+                    Items {offset + 1}–{offset + items.length}
+                  </span>
+                )}
               <button
                 disabled={!offset || loading || busy}
                 onClick={() =>
@@ -815,7 +856,12 @@ export function App() {
               {!detail.mediaUnavailable && (
                 <>
                   <details className="organise">
-                    <summary>Organise · Folder membership</summary>
+                    <summary>
+                      <span className="sr-only">Folder membership: </span>
+                      Organise · {membershipCount === 0
+                        ? "No folders"
+                        : `${membershipCount} ${membershipCount === 1 ? "folder" : "folders"}`}
+                    </summary>
                     <fieldset disabled={busy}>
                       <legend className="sr-only">Folder membership</legend>
                       {folders.map((f) => (

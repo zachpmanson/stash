@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 
 import type { WebItem as Item } from "../src/contracts.js";
 export class ApiResponseError extends Error {
@@ -58,6 +58,7 @@ export function ItemReader({
   item: Item;
   actions?: React.ReactNode;
 }) {
+  const linkHintId = useId();
   const href = item.type === "url" ? safeLink(item.content) : null;
   return (
     <>
@@ -80,9 +81,17 @@ export function ItemReader({
           {item.type === "url" ? (
             href ? (
               <p>
-                <a href={href} target="_blank" rel="noopener noreferrer">
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-describedby={linkHintId}
+                >
                   {href}
                 </a>
+                <span id={linkHintId} className="external-link-hint">
+                  Opens in a new tab
+                </span>
               </p>
             ) : (
               <p>This link is unavailable or unsafe to open.</p>
@@ -115,6 +124,7 @@ export function ItemEditor({
   onCancel: () => void;
   onDirty?: (dirty: boolean) => void;
 }) {
+  const contentHelpId = useId();
   // Freeze the editor's observed baseline; refreshes must not turn untouched
   // fields into writes that overwrite concurrent edits from another device.
   const [initial] = useState(() =>
@@ -154,7 +164,7 @@ export function ItemEditor({
           </label>
         )}
         <label>
-          Title
+          Title (optional)
           <input
             name="title"
             autoFocus
@@ -163,17 +173,23 @@ export function ItemEditor({
           />
         </label>
         <label>
-          Content (text or http(s) link)
+          Content (required)
           <textarea
             required
+            aria-describedby={contentHelpId}
             name="content"
             maxLength={item?.type === "url" ? 4096 : 48000}
             rows={10}
             defaultValue={initial?.content ?? ""}
           />
         </label>
+        <p id={contentHelpId} className="field-help">
+          Content is required. For links, paste a full http:// or https:// address.
+        </p>
         <div className="actions">
-          <button type="submit">Save item</button>
+          <button type="submit" className="primary">
+            {busy ? "Saving…" : "Save item"}
+          </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>

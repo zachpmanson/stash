@@ -300,11 +300,18 @@ try {
     { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false },
     sessionId,
   );
+  assert.ok(await evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · No folders')`));
+  // The busy probe delays only synthetic local writes; no production traffic.
+  await evaluate(`(()=>{const original=window.fetch;window.fetch=async (...args)=>{if(window.fixtureDelayWrite && args[1]?.method && args[1].method!=='GET')await new Promise(r=>setTimeout(r,350));return original(...args)}})()`);
   await click("New folder");
   await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
+  assert.ok(await evaluate(`(()=>{const f=document.querySelector('input[name=name]').form;return f.querySelectorAll('button.primary[type=submit]').length===1 && f.querySelector('button[type=button]').textContent==='Cancel'})()`));
+  await screenshot("desktop-folder-form");
+  await evaluate(`window.fixtureDelayWrite=true`);
   await evaluate(
     `(()=>{const f=document.querySelector('input[name=name]').form;f.elements.name.value='Synthetic reading shelf';f.requestSubmit()})()`,
   );
+  await waitFor(() => evaluate(`document.querySelector('input[name=name]')?.form.querySelector('button.primary')?.textContent.trim()==='Creating…' && document.querySelector('input[name=name]').form.querySelector('button.primary').disabled`));
   await waitFor(() =>
     evaluate(
       `document.querySelector('.collection h2')?.textContent==='Synthetic reading shelf'`,
@@ -315,16 +322,37 @@ try {
   );
   assert.ok(folderId);
   await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
-  await click("New item");
+  assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), "New item");
+  // Empty-state creation uses the same guarded transition as the header.
+  await click('New folder');
+  await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
+  await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Keep empty-state draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+  const emptyNavigation = evaluate(`document.querySelector('.empty button').click()`);
+  await waitFor(() => !!dialog);
+  await cdp('Page.handleJavaScriptDialog', { accept: false }, sessionId);
+  await emptyNavigation;
+  dialog = null;
+  assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), 'Keep empty-state draft');
+  const cancelEmptyDraft = click('Cancel');
+  await waitFor(() => !!dialog);
+  await cdp('Page.handleJavaScriptDialog', { accept: true }, sessionId);
+  await cancelEmptyDraft;
+  dialog = null;
+  await waitFor(() => evaluate(`!!document.querySelector('.empty button')`));
+  await evaluate(`document.querySelector('.empty button').click()`);
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
+  assert.ok(await evaluate(`(()=>{const f=document.querySelector('textarea').form,c=f.elements.content;return f.querySelectorAll('button.primary[type=submit]').length===1 && f.elements.title.closest('label').textContent.includes('optional') && !f.elements.title.required && c.required && document.getElementById(c.getAttribute('aria-describedby')).textContent.includes('http:// or https://') && f.querySelector('button[type=button]').textContent.trim()==='Cancel'})()`));
+  await screenshot("desktop-item-form");
   await evaluate(
     `(()=>{const f=document.querySelector('textarea').form;f.elements.title.value='A quiet place for ideas';f.elements.content.value='This is a synthetic notebook, created only for interface review.\\n\\nA library does not need to be loud. Keep a thought, save a link, and come back when there is time to enjoy it.\\n\\n'+('A note for another day: make space for the things that catch your eye. Read slowly, follow an interesting thread, and leave a little room for something unexpected.\\n\\n').repeat(18)+'Long-word wrapping check: '+ 'x'.repeat(90);f.requestSubmit()})()`,
   );
+  await waitFor(() => evaluate(`document.querySelector('textarea')?.form.querySelector('button.primary')?.textContent.trim()==='Saving…' && document.querySelector('textarea').closest('fieldset').disabled`));
   await waitFor(() =>
     evaluate(
       `document.querySelector('.reader h2')?.textContent==='A quiet place for ideas'`,
     ),
   );
+  await evaluate(`window.fixtureDelayWrite=false`);
   const filedId = await evaluate(
     `new URLSearchParams(location.search).get('item')`,
   );
@@ -372,7 +400,28 @@ try {
     await evaluate(`new URLSearchParams(location.search).get('item')`),
     filedId,
   );
+  assert.ok(await evaluate(`(()=>{const cards=[...document.querySelectorAll('.item-card')];return cards.some(c=>c.getBoundingClientRect().height<100) && cards.every(c=>c.getBoundingClientRect().height>=76) && document.querySelector('.layout-toggle').getAttribute('role')==='group' && [...document.querySelectorAll('.layout-toggle button')].every(b=>b.title===b.getAttribute('aria-label'))})()`));
+  assert.ok(await evaluate(`document.querySelector('.organise summary').textContent.includes('Organise · 1 folder')`));
+  assert.ok(await evaluate(`[...document.querySelectorAll('.item-card small')].some(n=>n.textContent==='Note') && [...document.querySelectorAll('.item-card small')].some(n=>n.textContent==='example.com')`));
+  assert.ok(await evaluate(`(()=>{const b=[...document.querySelectorAll('.layout-toggle button')];return getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='true')).backgroundColor!==getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='false')).backgroundColor})()`));
+  console.log('UI10_LIST_GEOMETRY ' + JSON.stringify(await evaluate(`[...document.querySelectorAll('.item-card')].map(c=>({title:c.querySelector('.card-title').textContent,height:c.getBoundingClientRect().height}))`)));
   await screenshot("desktop-list-reader");
+  // Membership count includes archived folders and updates through the real checkbox mutation.
+  const { id: archivedMembership } = await json('/folders', 'POST', { name: 'Synthetic archived membership' });
+  await json(`/folders/${archivedMembership}`, 'PATCH', { archived: true });
+  await json(`/items/${filedId}/folders/${archivedMembership}`, 'PUT', { present: true });
+  await click('Refresh');
+  await waitFor(() => evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · 2 folders')`));
+  await evaluate(`document.querySelector('.organise').open=true;[...document.querySelectorAll('.organise label')].find(n=>n.textContent.includes('Synthetic archived membership')).querySelector('input').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · 1 folder')`));
+  await evaluate(`document.querySelector('.organise').open=false`);
+  const linkId = (await json(`/items?folderId=${folderId}`)).items.find(i => i.type === 'url').id;
+  await evaluate(`document.querySelector('[data-item-id="${linkId}"]').click()`);
+  await waitFor(() => evaluate(`!!document.querySelector('.reader a')`));
+  assert.ok(await evaluate(`(()=>{const a=document.querySelector('.reader a');return a.href==='https://example.com/synthetic' && a.target==='_blank' && a.rel==='noopener noreferrer' && document.getElementById(a.getAttribute('aria-describedby')).textContent==='Opens in a new tab'})()`));
+  await screenshot('desktop-link-reader');
+  await evaluate(`document.querySelector('[data-item-id="${filedId}"]').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.reader h2')?.textContent==='A quiet place for ideas'`));
   // Desktop layout writes and atomic filing must preserve master's private feeds.
   const feedPath = `/feeds/folders/${folderId}.atom`;
   assert.equal((await fetch(`http://127.0.0.1:${proxyPort}${feedPath}`, {
@@ -489,8 +538,10 @@ try {
       `[...document.querySelectorAll('.folder-link')].some(b=>b.textContent==='Synthetic reading shelf')`,
     ),
   );
+  await waitFor(() => evaluate(`!!document.querySelector('.empty button')`));
+  assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), 'Back to collection');
   await screenshot("desktop-empty-archive");
-  await evaluate(`history.back()`);
+  await evaluate(`document.querySelector('.empty button').click()`);
   await waitFor(() =>
     evaluate(
       `!new URLSearchParams(location.search).has('archive') && !!document.querySelector('[aria-label="New item"]')`,
@@ -574,6 +625,16 @@ try {
       `document.documentElement.scrollWidth<=innerWidth && document.querySelector('[aria-label="New item"]').getBoundingClientRect().right<=innerWidth`,
     ),
   );
+  await evaluate(`document.querySelector('[aria-label="List layout"]').focus()`);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }, sessionId);
+  assert.ok(await evaluate(`document.activeElement.getAttribute('aria-label')==='Grid layout' && getComputedStyle(document.activeElement).outlineStyle!=='none'`));
+  await screenshot('320-layout-focus');
+  await click('New item');
+  await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
+  assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth && document.querySelector('.field-help').getBoundingClientRect().right<=innerWidth && document.querySelector('textarea').getBoundingClientRect().right<=innerWidth`));
+  await screenshot('320-item-form');
+  await click('Cancel');
+  await waitFor(() => evaluate(`!document.querySelector('textarea')`));
   await cdp(
     "Emulation.setDeviceMetricsOverride",
     { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
@@ -638,6 +699,20 @@ try {
   await waitFor(() =>
     evaluate(`document.querySelectorAll('.item-card').length===27`),
   );
+  for (const metrics of [
+    { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false },
+    { width: 320, height: 740, deviceScaleFactor: 1, mobile: true },
+    { width: 720, height: 500, deviceScaleFactor: 2, mobile: false },
+  ]) {
+    await cdp('Emulation.setDeviceMetricsOverride', metrics, sessionId);
+    assert.ok(await evaluate(`(()=>{const pane=document.querySelector('.collection'),h=document.querySelector('.collection-heading');pane.scrollTop=320;const a=h.getBoundingClientRect(),p=pane.getBoundingClientRect();return Math.abs(a.top-p.top)<2 && a.bottom<p.bottom && getComputedStyle(h).position==='sticky' && getComputedStyle(h).backgroundColor!=='rgba(0, 0, 0, 0)' && document.documentElement.scrollWidth<=innerWidth})()`));
+    await screenshot('sticky-' + metrics.width);
+    // Keyboard focus cannot be hidden underneath the sticky toolbar.
+    await evaluate(`document.querySelectorAll('.item-card')[10].focus()`);
+    await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 }, sessionId);
+    assert.ok(await evaluate(`document.activeElement.classList.contains('item-card') && document.activeElement.getBoundingClientRect().top>=document.querySelector('.collection-heading').getBoundingClientRect().bottom+5`));
+  }
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
   await evaluate(
     `document.querySelector('.collection').scrollTop=320;document.querySelector('.item-card').click()`,
   );
@@ -740,6 +815,62 @@ try {
     dialog = null;
     await waitFor(() => evaluate(`!document.querySelector('input[name=name]')`));
   }
+  // A separate synthetic collection exercises real 100-item paging, never guessed totals.
+  const { id: pageFolder } = await json('/folders', 'POST', { name: 'Synthetic pagination' });
+  for (let n = 0; n < 103; n++) await json('/items', 'POST', { type: 'text', content: `Paging note ${n}`, folderId: pageFolder });
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${proxyPort}/?folder=${pageFolder}` }, sessionId);
+  await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===100`));
+  assert.ok(await evaluate(`document.querySelector('[aria-label="Item pages"]').textContent.includes('Items 1–100') && [...document.querySelectorAll('[aria-label="Item pages"] button')].find(b=>b.textContent==='Previous').disabled`));
+  // Fail only the next synthetic page GET in this disposable browser session.
+  await evaluate(`(()=>{window.fixtureFirstPage=[...document.querySelectorAll('[data-item-id]')].map(b=>b.dataset.itemId);const original=window.fetch;window.fetch=async (...args)=>{const url=new URL(args[0],location.href);if(url.pathname==='/api/items' && url.searchParams.get('offset')==='100' && args[1]?.method==='GET'){window.fetch=original;return Response.json({error:'Synthetic page failed'},{status:503})}return original(...args)}})()`);
+  await click('Next');
+  await waitFor(() => evaluate(`document.querySelector('[role=alert]')?.textContent.includes('Synthetic page failed') && document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
+  assert.ok(await evaluate(`new URLSearchParams(location.search).get('offset')==='100' && JSON.stringify([...document.querySelectorAll('[data-item-id]')].map(b=>b.dataset.itemId))===JSON.stringify(window.fixtureFirstPage) && !document.querySelector('[aria-label="Item pages"]').textContent.includes('Items')`));
+  await screenshot('pagination-failed-503');
+  await click('Retry');
+  await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===3 && document.querySelector('[aria-label="Item pages"]').textContent.includes('Items 101–103')`));
+  assert.ok(await evaluate(`new URLSearchParams(location.search).get('offset')==='100' && [...document.querySelectorAll('[aria-label="Item pages"] button')].find(b=>b.textContent==='Next').disabled && !document.querySelector('[aria-label="Item pages"]').textContent.includes(' of ')`));
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: true }, sessionId);
+  assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth`));
+  await screenshot('320-pagination');
+  console.log('PASS failed Next 503 retains first 100 cards without false range; successful Retry commits Items 101–103');
+  await click('Previous');
+  await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===100 && !new URLSearchParams(location.search).has('offset')`));
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${proxyPort}/?folder=${pageFolder}&offset=200` }, sessionId);
+  await waitFor(() => evaluate(`!!document.querySelector('.empty button') && !!document.querySelector('[aria-label="Item pages"]')`));
+  assert.ok(await evaluate(`!document.querySelector('[aria-label="Item pages"]').textContent.includes('Items') && !document.body.textContent.includes('1–0')`));
+  // Long names/cards/URLs, unsafe replicated links and device-only media use only this disposable DB.
+  const longName = 'Synthetic shelf ' + 'x'.repeat(184);
+  const { id: overflowFolder } = await json('/folders', 'POST', { name: longName });
+  const longHref = 'https://example.com/' + 'x'.repeat(200) + '?synthetic=1';
+  const { id: longLink } = await json('/items', 'POST', { type: 'url', title: 'Long synthetic link', content: longHref, folderId: overflowFolder });
+  await json('/items', 'POST', { type: 'text', title: 'T'.repeat(500), content: 'E'.repeat(1000), folderId: overflowFolder });
+  for (const [id, type, content] of [
+    ['fixture-unsafe', 'url', 'javascript:alert(1)'],
+    ['fixture-media', 'image', null],
+  ]) {
+    removeFixture('INSERT INTO sync_items(id,type,content) VALUES (?,?,?)', id, type, content);
+    removeFixture('INSERT INTO sync_item_folders(membership_id,item_id,folder_id) VALUES (?,?,?)', id, id, overflowFolder);
+  }
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${proxyPort}/?folder=${overflowFolder}&item=${longLink}` }, sessionId);
+  await waitFor(() => evaluate(`!!document.querySelector('.reader a') && document.querySelectorAll('.item-card').length===4`));
+  assert.ok(await evaluate(`(()=>{const a=document.querySelector('.reader a');return a.href===${JSON.stringify(longHref)} && a.textContent===a.href && a.getBoundingClientRect().right<=innerWidth && document.getElementById(a.getAttribute('aria-describedby')).textContent==='Opens in a new tab' && document.documentElement.scrollWidth<=innerWidth})()`));
+  await screenshot('320-long-link');
+  await click('Back to collection');
+  await waitFor(() => evaluate(`!new URLSearchParams(location.search).get('item')`));
+  await click('Grid layout');
+  await waitFor(() => evaluate(`document.querySelector('.items').classList.contains('grid')`));
+  assert.ok(await evaluate(`(()=>{const h=document.querySelector('.collection-heading h2'),cards=[...document.querySelectorAll('.item-card')];return h.title===${JSON.stringify(longName)} && h.getBoundingClientRect().height<=parseFloat(getComputedStyle(h).lineHeight)*2+1 && cards.every(c=>c.getBoundingClientRect().right<=innerWidth) && document.documentElement.scrollWidth<=innerWidth && cards.some(c=>c.querySelector('small').textContent==='Link') && cards.some(c=>c.querySelector('small').textContent==='Media · available on device')})()`));
+  await screenshot('320-long-title-grid');
+  await evaluate(`document.querySelector('[data-item-id="fixture-unsafe"]').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.reader').textContent.includes('unsafe to open')`));
+  assert.equal(await evaluate(`document.querySelectorAll('.reader a, .external-link-hint').length`), 0);
+  await click('Back to collection');
+  await evaluate(`document.querySelector('[data-item-id="fixture-media"]').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.reader').textContent.includes('Media unavailable on the web')`));
+  assert.equal(await evaluate(`document.querySelectorAll('.reader img, .reader video').length`), 0);
+  console.log('PASS 320px long heading/card/URL overflow, unsafe replicated Link label without anchor/hint, and honest device-only media');
+  console.log('PASS ten focused UI improvements: compact list/sticky toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');
   console.log("PASS real remote filter removal preserves unrelated new-folder DOM/value/dirty protection and invalidates owned rename");
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",
