@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -10,6 +11,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { request } from "node:http";
 import WebSocket from "ws";
+import Database from "better-sqlite3";
+import { extensionPath } from "@vlcn.io/crsqlite";
 import { encode, tags } from "@vlcn.io/ws-common";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -37,9 +40,17 @@ async function waitForHealth(port, child) {
 }
 
 function launch(port, dataDir) {
-  const child = spawn(process.execPath, [path.join(root, "node_modules/tsx/dist/cli.mjs"), "src/server.ts"], {
+  const entry = process.env.STASH_TEST_SERVER_ENTRY;
+  const child = spawn(process.execPath, entry ? [entry] : ["--import", "tsx", "src/server.ts"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, ENABLE_TEST_ENDPOINTS: "1", AUTH_USER: "zach" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      SCHEMA_DIR: path.join(dataDir, "schemas"),
+      ENABLE_TEST_ENDPOINTS: "1",
+      AUTH_USER: "zach",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.output = "";
@@ -66,7 +77,7 @@ function websocketUpgrade(port, authenticated, includeProtocol = true) {
       headers: {
         Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
-        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-spike.sqlite").toString("base64").replace(/=+$/, "") } : {}),
+        ...(includeProtocol ? { "Sec-WebSocket-Protocol": Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "") } : {}),
         ...(authenticated ? { "X-Auth-User": "zach" } : {}),
       },
     });
@@ -90,17 +101,17 @@ async function waitForLog(child, text) {
   throw new Error(`timed out waiting for server log ${text}: ${child.output}`);
 }
 
-async function announceSyncPeer(port, schemaVersion) {
-  const protocol = Buffer.from("room=stash-spike.sqlite").toString("base64").replace(/=+$/, "");
+async function announceSyncPeer(port, schemaVersion, sender = new Uint8Array(randomBytes(16)), schemaName = "stash-sync-v1.sql") {
+  const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
   const socket = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, {
     headers: { "X-Auth-User": "zach" },
   });
   await once(socket, "open");
   socket.send(encode({
     _tag: tags.AnnouncePresence,
-    sender: new Uint8Array(randomBytes(16)),
+    sender,
     lastSeens: [],
-    schemaName: "stash-spike.sql",
+    schemaName,
     schemaVersion: BigInt(schemaVersion),
   }));
   return socket;
@@ -111,10 +122,40 @@ async function postOfflineWrite(port) {
   assert.equal(response.status, 200);
 }
 
+function openClientReplica() {
+  const db = new Database(":memory:");
+  db.loadExtension(extensionPath);
+  db.exec(readFileSync(path.join(root, "../schemas/stash-sync-v1.sql"), "utf8"));
+  const { siteId } = db.prepare("SELECT crsql_site_id() AS siteId").get();
+  return { db, siteId };
+}
+
+function clientChanges(db, sinceVersion) {
+  return db.prepare(`SELECT "table", pk, cid, val, col_version, db_version, cl, seq
+    FROM crsql_changes WHERE db_version > ? ORDER BY db_version, seq`).all(sinceVersion).map((row) => [
+    row.table, row.pk, row.cid, row.val, BigInt(row.col_version), BigInt(row.db_version), null,
+    BigInt(row.cl), row.seq,
+  ]);
+}
+
+async function waitForPeerVersion(port, clientSiteId, expectedVersion) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId.toString("hex")}`, {
+      headers: { "X-Auth-User": "zach" },
+    });
+    assert.equal(response.status, 200);
+    const status = await response.json();
+    if (BigInt(status.clientSeenVersion) >= BigInt(expectedVersion)) return status;
+    await delay(50);
+  }
+  throw new Error(`server did not observe client version ${expectedVersion}`);
+}
+
 async function runDbAdmin(dataDir, ...args) {
   const child = spawn(process.execPath, [path.join(root, "scripts/db-admin.mjs"), ...args], {
     cwd: root,
-    env: { ...process.env, DATA_DIR: dataDir },
+    env: { ...process.env, DATA_DIR: dataDir, SCHEMA_DIR: path.join(dataDir, "schemas") },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -125,8 +166,8 @@ async function runDbAdmin(dataDir, ...args) {
   return JSON.parse(output.trim());
 }
 
-async function notes(port) {
-  const response = await fetch(`http://127.0.0.1:${port}/test/notes`);
+async function items(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/test/items`);
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -146,8 +187,37 @@ test("authenticates upgrades and drains an active peer before persistent restart
   const health = await waitForHealth(port, child);
   assert.equal(health.ok, true);
   assert.equal(health.bind, "127.0.0.1");
-  assert.equal(health.schema, "stash-spike.sql");
+  assert.equal(health.schema, "stash-sync-v1.sql");
+  const clientSiteId = randomBytes(16).toString("hex");
+  const unauthenticatedStatus = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`);
+  assert.equal(unauthenticatedStatus.status, 401, "sync status must require Caddy-stamped identity");
+  const wrongIdentityStatus = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "attacker" },
+  });
+  assert.equal(wrongIdentityStatus.status, 401, "sync status must reject an unexpected identity");
+  const malformedSiteStatus = await fetch("http://127.0.0.1:" + port + "/sync/status?clientSiteId=xyz", {
+    headers: { "X-Auth-User": "zach" },
+  });
+  assert.equal(malformedSiteStatus.status, 400, "sync status must reject malformed site IDs");
+  const statusResponse = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "zach" },
+  });
+  assert.equal(statusResponse.status, 200);
+  const status = await statusResponse.json();
+  assert.equal(status.schema, "stash-sync-v1.sql");
+  assert.equal(status.clientSiteId, clientSiteId);
+  assert.equal(status.clientSeenVersion, "0");
+  assert.deepEqual(status.restoreMerge, { version: 1, mergeEqualValues: 0 });
+  assert.equal(status.serverVersion, "0");
+  assert.ok(status.serverSiteId);
+  assert.deepEqual(status.counts, { folders: 0, items: 0, memberships: 0, substitutions: 0, settings: 0 });
   await postOfflineWrite(port);
+  const changedStatusResponse = await fetch(`http://127.0.0.1:${port}/sync/status?clientSiteId=${clientSiteId}`, {
+    headers: { "X-Auth-User": "zach" },
+  });
+  const changedStatus = await changedStatusResponse.json();
+  assert.equal(changedStatus.counts.items, 1);
+  assert.ok(BigInt(changedStatus.serverVersion) > 0n);
 
   const malformed = await websocketUpgrade(port, false, false);
   assert.equal(malformed.status, 400, "malformed upgrades must be rejected without crashing the service");
@@ -160,27 +230,150 @@ test("authenticates upgrades and drains an active peer before persistent restart
   assert.ok(accepted.socket);
   accepted.socket.destroy();
 
-  syncPeer = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-spike.sqlite");
+  const client = openClientReplica();
+  t.after(() => client.db.close());
+  client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, ?)")
+    .run("client-status-item", "offline from the client", 1);
+  const initialClientVersion = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+  syncPeer = await announceSyncPeer(port, health.schemaVersion, client.siteId);
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
+  syncPeer.send(encode({
+    _tag: tags.Changes,
+    sender: client.siteId,
+    since: [0n, 0],
+    changes: clientChanges(client.db, 0),
+  }));
+  const receivedInitial = await waitForPeerVersion(port, client.siteId, initialClientVersion);
+  assert.equal(receivedInitial.counts.items, 2);
+  assert.equal(receivedInitial.serverVersion, changedStatus.serverVersion,
+    "client-authored changes should not advance that client's outbound server watermark");
+
+  client.db.prepare("DELETE FROM sync_items WHERE id = ?").run("client-status-item");
+  const afterDeleteVersion = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+  syncPeer.send(encode({
+    _tag: tags.Changes,
+    sender: client.siteId,
+    since: [BigInt(initialClientVersion), 0],
+    changes: clientChanges(client.db, initialClientVersion),
+  }));
+  const receivedDelete = await waitForPeerVersion(port, client.siteId, afterDeleteVersion);
+  assert.equal(receivedDelete.counts.items, 1, "client tombstone must remove the remote candidate row");
 
   await stop(child);
   child = null;
   syncPeer.terminate();
 
   const backup = await runDbAdmin(dataDir, "backup", backupPath);
-  assert.equal(backup.schema, "stash-spike.sql");
+  assert.equal(backup.schema, "stash-sync-v1.sql");
   assert.ok(backup.version);
-  await rm(path.join(dataDir, "stash-spike.sqlite"));
+  await rm(path.join(dataDir, "stash-backend"));
   const restore = await runDbAdmin(dataDir, "restore", backupPath);
-  assert.equal(restore.schema, "stash-spike.sql");
+  assert.equal(restore.schema, "stash-sync-v1.sql");
 
   child = launch(port, dataDir);
   await waitForHealth(port, child);
-  assert.deepEqual(await notes(port), [{ id: "server-offline", body: "written on the server while Android was offline" }]);
+  assert.deepEqual(await items(port), [{
+    id: "server-offline-item",
+    type: "text",
+    content: "written on the server while the app was offline",
+    title: "Server offline item",
+  }]);
 
   active = await announceSyncPeer(port, health.schemaVersion);
-  await waitForLog(child, "AnnouncePresence for: stash-spike.sqlite");
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
   await stop(child);
   child = null;
   active.terminate();
 });
+
+test("malformed authenticated frames close only the offending peer", { timeout: 30_000 }, async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "stash-crsqlite-malformed-"));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const port = await freePort();
+  const child = launch(port, dataDir);
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) await stop(child); });
+  const health = await waitForHealth(port, child);
+  const client = openClientReplica();
+  t.after(() => client.db.close());
+  const valid = await announceSyncPeer(port, health.schemaVersion, client.siteId);
+  t.after(() => valid.terminate());
+  await waitForLog(child, "AnnouncePresence for: stash-backend");
+
+  const invalidFrames = [
+    { name: "empty", data: new Uint8Array() },
+    { name: "unknown tag", data: new Uint8Array([255]) },
+    { name: "truncated presence", data: new Uint8Array([tags.AnnouncePresence]) },
+    { name: "illegal client message", data: encode({ _tag: tags.StartStreaming, since: [0n, 0], excludeSites: [], localOnly: false }) },
+    { name: "empty after presence", data: new Uint8Array(), announced: true },
+    { name: "empty during presence setup", data: new Uint8Array(), pending: true },
+  ];
+  let priorVersion = 0;
+  for (const [index, frame] of invalidFrames.entries()) {
+    const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
+    const bad = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, { headers: { "X-Auth-User": "zach" } });
+    t.after(() => bad.terminate());
+    await once(bad, "open", { signal: AbortSignal.timeout(3_000) });
+    if (frame.announced || frame.pending) {
+      const started = frame.announced ? once(bad, "message", { signal: AbortSignal.timeout(3_000) }) : null;
+      bad.send(encode({ _tag: tags.AnnouncePresence, sender: randomBytes(16), lastSeens: [],
+        schemaName: health.schema, schemaVersion: BigInt(health.schemaVersion) }));
+      if (started) await started;
+    }
+    const disconnected = once(bad, "close", { signal: AbortSignal.timeout(3_000) });
+    bad.send(frame.data);
+    await disconnected;
+    assert.equal(child.exitCode, null, `${frame.name} must not crash the server: ${child.output}`);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
+    assert.equal(valid.readyState, WebSocket.OPEN, `${frame.name} must not close the valid peer`);
+    client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, 1)")
+      .run(`survivor-${index}`, frame.name);
+    const version = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+    valid.send(encode({ _tag: tags.Changes, sender: client.siteId, since: [BigInt(priorVersion), 0],
+      changes: clientChanges(client.db, priorVersion) }));
+    const status = await waitForPeerVersion(port, client.siteId, version);
+    assert.equal(status.counts.items, index + 1, `valid peer must still replicate after ${frame.name}`);
+    priorVersion = version;
+  }
+});
+
+for (const invalidSchema of ["name", "version"]) {
+  test(`cold cache recovers after rejected first schema ${invalidSchema}`, { timeout: 20_000 }, async (t) => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "stash-crsqlite-cold-cache-"));
+    t.after(() => rm(dataDir, { recursive: true, force: true }));
+    const port = await freePort();
+    let child = launch(port, dataDir);
+    t.after(async () => { if (child?.exitCode === null && child.signalCode === null) await stop(child); });
+    const health = await waitForHealth(port, child);
+
+    // No status request, write or valid peer may warm the cache before this failure.
+    const bad = await announceSyncPeer(port,
+      BigInt(health.schemaVersion) + (invalidSchema === "version" ? 1n : 0n),
+      randomBytes(16), invalidSchema === "name" ? "wrong-schema.sql" : health.schema);
+    t.after(() => bad.terminate());
+    await once(bad, "close", { signal: AbortSignal.timeout(3_000) });
+    assert.equal(child.exitCode, null, `bad schema must not crash the server: ${child.output}`);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
+
+    const client = openClientReplica();
+    t.after(() => client.db.close());
+    // Install the message listener before sending presence, proving setup actually completes.
+    const protocol = Buffer.from("room=stash-backend").toString("base64").replace(/=+$/, "");
+    const valid = new WebSocket(`ws://127.0.0.1:${port}/sync`, protocol, { headers: { "X-Auth-User": "zach" } });
+    t.after(() => valid.terminate());
+    await once(valid, "open", { signal: AbortSignal.timeout(3_000) });
+    const started = once(valid, "message", { signal: AbortSignal.timeout(3_000) });
+    valid.send(encode({ _tag: tags.AnnouncePresence, sender: client.siteId, lastSeens: [],
+      schemaName: health.schema, schemaVersion: BigInt(health.schemaVersion) }));
+    await started;
+    client.db.prepare("INSERT INTO sync_items (id, type, content, created_at) VALUES (?, 'text', ?, 1)")
+      .run("cold-cache-recovery", `after bad schema ${invalidSchema}`);
+    const version = client.db.prepare("SELECT crsql_db_version() AS version").get().version;
+    valid.send(encode({ _tag: tags.Changes, sender: client.siteId, since: [0n, 0],
+      changes: clientChanges(client.db, 0) }));
+    const status = await waitForPeerVersion(port, client.siteId, version);
+    assert.equal(status.counts.items, 1, "correct peer must replicate after rejected first acquisition");
+    assert.equal(valid.readyState, WebSocket.OPEN);
+    await stop(child);
+    child = null;
+  });
+}

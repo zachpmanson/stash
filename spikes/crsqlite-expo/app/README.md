@@ -5,15 +5,16 @@ Disposable Android client for the sibling [`../server`](../server/README.md). Th
 ## What it checks
 
 - Expo SDK 55 loads the pinned CR-SQLite v0.16.3 Android binaries on x86_64 and arm64.
+- The reviewed Stash candidate DDL (mirrored from `../schemas/stash-sync-v1.sql`) opens all five replicated tables on Android, produces CR-SQLite changes and a delete tombstone, and passes SQLite integrity check in a fresh disposable DB. This is a schema/native-runtime smoke test, not the production migration or real-backup migration.
 - Independent Expo SQLite connections exchange offline changes in-process.
 - A persistent Node 24 server using upstream `@vlcn.io/ws-server` exchanges real WebSocket changes with the app via `@vlcn.io/ws-client`.
-- Independently written Android/server rows converge; reconnect/retry does not duplicate rows; server data persists across restart.
+- Two disposable Expo SQLite replicas make distinct offline writes in Stash-shaped `sync_items`; authenticated WebSocket exchange converges, and reconnect/replay is idempotent.
 - The Android client serializes its CR-SQLite database into a Stash-style ZIP, restores it, retains CR-SQLite metadata, and resumes syncing.
 - A Node 24 SQLite peer exchanges changes and serializes/restores CRR data.
 
-The full Android flow was runtime-tested on the x86_64 emulator. The client calls `crsql_finalize()` before closing its SQLite handle; omitting it caused a native extension teardown crash during restore. No production migration, iOS/Pixel validation, or app release is included.
+The authenticated Android flow was runtime-tested on both the x86_64 emulator and a Pixel 8 arm64 device against a disposable loopback-only server behind Caddy. On-device convergence exposed two Expo SQLite adapter issues—BigInt values in incoming changes and overlapping apply transactions—which are now normalized/serialized; reconnect and ZIP restore/reconnect also passed. The client calls `crsql_finalize()` before closing its SQLite handle; omitting it caused a native extension teardown crash during restore. This does not validate the production migration, populated Stash database/backup migration, iOS, or an app release.
 
-The Expo app allows cleartext networking only for this disposable test. The service remains bound to `127.0.0.1`; Android emulator port forwarding is used for local testing.
+The Expo app allows cleartext networking only for this disposable test. The service remains bound to `127.0.0.1`; Android emulator port forwarding is used for local testing. The Stash candidate schema smoke button is entirely local: it uses its own fresh database and never opens the Stash app database or contacts the server.
 
 ## Install and build
 
@@ -48,11 +49,11 @@ NODE_ENV=production /home/beltino/beltino/scripts/build-capped.sh \
 
 ## Test against Naboo
 
-The app defaults to `https://stash.zachmanson.com`. The server is behind Caddy Basic auth; enter the configured username/password in the app. Credentials are kept in memory only, sent over HTTPS for both health and WebSocket handshakes, and are never bundled or persisted. The app rejects non-local HTTP URLs when credentials are present.
+The app defaults to `https://stash.zachmanson.com`. The candidate service schema is isolated under the extensionless room `stash-backend` (matching the service's on-disk file); do not connect until the corresponding service build is intentionally installed and `/healthz` reports `stash-sync-v1.sql`. The older Naboo deployment may still serve the notes-spike schema. Once the candidate service is available, Caddy Basic auth credentials are entered in the app, kept in memory only, and sent over HTTPS for health and WebSocket handshakes. The app rejects non-local HTTP URLs when credentials are present.
 
-Install the debug APK, then open **CR-SQLite Android ↔ server spike**. Write one offline row for each of the two independent local replicas, then tap **Connect + verify**. Both peers connect to Naboo with Basic auth; the app reports success only after the two rows converge on both local databases through the remote sync service. Disconnect/reconnect and use **Backup ZIP → restore → reconnect** to check backup/restore and continued exchange.
+Install the debug APK, then open **CR-SQLite Android ↔ server spike**. Start with **Smoke-test Stash candidate schema (local only)** to test the candidate schema on-device without server access. For the separate network spike, write one offline row for each of the two independent local replicas, then tap **Connect + verify**. Both peers connect to Naboo with Basic auth; the app reports success only after the two rows converge on both local databases through the remote sync service. Disconnect/reconnect and use **Backup ZIP → restore → reconnect** to check backup/restore and continued exchange.
 
-This test needs no server test endpoints: the second local replica is the observer. Naboo remains candidate-schema-only; its `/test/*` routes stay disabled. Use HTTPS for the public host. The app's candidate schema in `schema.ts` must remain identical to `../server/schema.ts`.
+This test needs no server test endpoints: the second local replica is the observer. Naboo's `/test/*` routes stay disabled. Use HTTPS for the public host. The app, Stash local-replica, server runtime, and reviewed SQL schema copies are checked byte-for-byte by `test/stash-schema-matches-sql.test.mjs`.
 
 ## Host/server SQLite check
 

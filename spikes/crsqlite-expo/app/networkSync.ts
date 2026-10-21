@@ -5,8 +5,8 @@ import { createSyncedDB, defaultConfig, type Config, type DB } from "@vlcn.io/ws
 import type { Change } from "@vlcn.io/ws-common";
 import { DATABASE_ROOM, SCHEMA_NAME, SCHEMA_SQL, SCHEMA_VERSION } from "./schema";
 
-const DATABASE_NAME = "crsqlite-network-test.db";
-const OBSERVER_DATABASE_NAME = "crsqlite-network-observer.db";
+const DATABASE_NAME = "stash-sync-client.db";
+const OBSERVER_DATABASE_NAME = "stash-sync-observer.db";
 const EXTENSION_ENTRY_POINT = "sqlite3_crsqlite_init";
 
 type RemoteCredentials = { username: string; password: string };
@@ -23,19 +23,29 @@ const TRACK_PEER = `INSERT INTO crsql_tracked_peers (site_id, event, version, se
     version = MAX(version, excluded.version),
     seq = CASE version > excluded.version WHEN 1 THEN seq ELSE excluded.seq END`;
 
-export type Note = { id: string; body: string };
+function sqliteBindValue(value: unknown): SQLite.SQLiteBindValue {
+  if (typeof value === "bigint") {
+    const number = Number(value);
+    if (!Number.isSafeInteger(number)) throw new Error(`Cannot bind unsafe SQLite integer ${value}`);
+    return number;
+  }
+  return value as SQLite.SQLiteBindValue;
+}
+
+export type SyncItem = { id: string; content: string; title: string };
 
 class ExpoReplica implements DB {
   readonly siteid: Uint8Array;
   readonly #database: SQLite.SQLiteDatabase;
   readonly #listeners = new Set<() => void>();
   readonly #subscription: ReturnType<typeof SQLite.addDatabaseChangeListener>;
+  #applyQueue: Promise<void> = Promise.resolve();
 
   constructor(database: SQLite.SQLiteDatabase, siteid: Uint8Array) {
     this.#database = database;
     this.siteid = siteid;
     this.#subscription = SQLite.addDatabaseChangeListener((event) => {
-      if (event.databaseFilePath === this.#database.databasePath && event.tableName === "notes") {
+      if (event.databaseFilePath === this.#database.databasePath && event.tableName === "sync_items") {
         for (const listener of this.#listeners) listener();
       }
     });
@@ -79,14 +89,14 @@ class ExpoReplica implements DB {
     siteId: Uint8Array,
     end: readonly [bigint, number],
   ): Promise<void> {
-    await this.#database.withTransactionAsync(async () => {
+    const apply = this.#applyQueue.then(() => this.#database.withTransactionAsync(async () => {
       for (const change of changes) {
         await this.#database.runAsync(
           INSERT_CHANGE,
           change[0],
           change[1],
           change[2],
-          change[3] as SQLite.SQLiteBindValue,
+          sqliteBindValue(change[3]),
           Number(change[4]),
           Number(change[5]),
           siteId,
@@ -95,7 +105,9 @@ class ExpoReplica implements DB {
         );
       }
       await this.#database.runAsync(TRACK_PEER, siteId, Number(end[0]), end[1]);
-    });
+    }));
+    this.#applyQueue = apply.catch(() => undefined);
+    await apply;
   }
 
   async getLastSeens(): Promise<[Uint8Array, [bigint, number]][]> {
@@ -126,6 +138,7 @@ class ExpoReplica implements DB {
 
 let database: SQLite.SQLiteDatabase | null = null;
 let observerDatabase: SQLite.SQLiteDatabase | null = null;
+const syncDiagnostics = { androidChanges: 0, observerChanges: 0, applyErrors: [] as string[] };
 
 async function openReplicaDatabase(name: string): Promise<SQLite.SQLiteDatabase> {
   const db = await SQLite.openDatabaseAsync(name, {
@@ -133,13 +146,20 @@ async function openReplicaDatabase(name: string): Promise<SQLite.SQLiteDatabase>
     enableChangeListener: true,
   });
   await db.loadExtensionAsync("libcrsqlite.so", EXTENSION_ENTRY_POINT);
-  const tables = await db.getFirstAsync<{ notes: number; clock: number }>(
+  const tables = await db.getFirstAsync<{ items: number; clock: number }>(
     `SELECT
-      EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes') AS notes,
-      EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes__crsql_clock') AS clock`,
+      EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_items') AS items,
+      EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_items__crsql_clock') AS clock`,
   );
-  if (!tables?.notes) await db.execAsync(SCHEMA_SQL);
-  else if (!tables.clock) await db.execAsync("SELECT crsql_as_crr('notes')");
+  if (!tables?.items) await db.execAsync(SCHEMA_SQL);
+  else if (!tables.clock) {
+    await db.execAsync(`
+      SELECT crsql_as_crr('sync_folders');
+      SELECT crsql_as_crr('sync_items');
+      SELECT crsql_as_crr('sync_item_folders');
+      SELECT crsql_as_crr('sync_text_substitutions');
+      SELECT crsql_as_crr('sync_user_settings');`);
+  }
   await db.runAsync(
     "INSERT OR REPLACE INTO crsql_master (key, value) VALUES (?, ?)",
     "schema_name",
@@ -163,23 +183,29 @@ async function getObserverDatabase(): Promise<SQLite.SQLiteDatabase> {
   return observerDatabase;
 }
 
-async function createNote(db: SQLite.SQLiteDatabase, peer: string, id: string): Promise<Note> {
-  const note = { id, body: `offline write from ${peer} (${id})` };
-  await db.runAsync("INSERT OR REPLACE INTO notes (id, body) VALUES (?, ?)", note.id, note.body);
-  return note;
+async function createItem(db: SQLite.SQLiteDatabase, peer: string, id: string): Promise<SyncItem> {
+  const item = { id, content: `offline write from ${peer} (${id})`, title: `${peer} offline item` };
+  await db.runAsync(
+    "INSERT OR REPLACE INTO sync_items (id, type, content, title, created_at) VALUES (?, 'text', ?, ?, ?)",
+    item.id,
+    item.content,
+    item.title,
+    Date.now(),
+  );
+  return item;
 }
 
-export async function createAndroidNote(id: string): Promise<Note> {
-  return createNote(await getDatabase(), "Android", id);
+export async function createAndroidItem(id: string): Promise<SyncItem> {
+  return createItem(await getDatabase(), "Android", id);
 }
 
-export async function createObserverNote(id: string): Promise<Note> {
-  return createNote(await getObserverDatabase(), "observer peer", id);
+export async function createObserverItem(id: string): Promise<SyncItem> {
+  return createItem(await getObserverDatabase(), "observer peer", id);
 }
 
-export async function listNotes(): Promise<Note[]> {
+export async function listItems(): Promise<SyncItem[]> {
   const db = await getDatabase();
-  return db.getAllAsync<Note>("SELECT id, body FROM notes ORDER BY id");
+  return db.getAllAsync<SyncItem>("SELECT id, content, title FROM sync_items ORDER BY id");
 }
 
 function normalizedServerUrl(serverUrl: string): URL {
@@ -251,23 +277,47 @@ export async function startSync(
   const authorization = basicAuthorization(credentials);
   await probeWebSocket(serverUrl, credentials);
 
-  function configFor(db: SQLite.SQLiteDatabase): Config {
+  syncDiagnostics.androidChanges = 0;
+  syncDiagnostics.observerChanges = 0;
+  syncDiagnostics.applyErrors = [];
+
+  function configFor(db: SQLite.SQLiteDatabase, peer: "android" | "observer"): Config {
     return {
       dbProvider: async () => {
         const site = await db.getFirstAsync<{ site_id: Uint8Array }>("SELECT crsql_site_id() AS site_id");
         if (!site) throw new Error("CR-SQLite returned no local site id");
         return new ExpoReplica(db, site.site_id);
       },
-      transportProvider: (options) => defaultConfig.transportProvider({
-        ...options,
-        headers: { Authorization: authorization },
-      }),
+      transportProvider: (options) => {
+        const transport = defaultConfig.transportProvider({
+          ...options,
+          headers: { Authorization: authorization },
+        });
+        let handler = transport.onChangesReceived;
+        Object.defineProperty(transport, "onChangesReceived", {
+          configurable: true,
+          get: () => handler,
+          set: (callback: typeof handler) => {
+            handler = callback && (async (message) => {
+              if (peer === "android") syncDiagnostics.androidChanges += message.changes.length;
+              else syncDiagnostics.observerChanges += message.changes.length;
+              try {
+                await callback(message);
+              } catch (error) {
+                syncDiagnostics.applyErrors.push(`${peer}: ${error instanceof Error ? error.message : String(error)}`);
+                throw error;
+              }
+            });
+          },
+        });
+        return transport;
+      },
     };
   }
 
   const options = { url: websocketUrl(base, "/sync"), room: DATABASE_ROOM };
-  const primarySync = await createSyncedDB(configFor(primary), DATABASE_ROOM, options);
-  const observerSync = await createSyncedDB(configFor(observer), DATABASE_ROOM, options);
+  const primarySync = await createSyncedDB(configFor(primary, "android"), DATABASE_ROOM, options);
+  const observerSync = await createSyncedDB(configFor(observer, "observer"), DATABASE_ROOM, options);
   await primarySync.start();
   try {
     await observerSync.start();
@@ -284,7 +334,7 @@ export async function startSync(
   };
 }
 
-export async function backupRestoreZip(): Promise<{ notes: Note[]; crsqlObjects: number }> {
+export async function backupRestoreZip(): Promise<{ items: SyncItem[]; crsqlObjects: number }> {
   const db = await getDatabase();
   await db.execAsync("PRAGMA wal_checkpoint(FULL)");
 
@@ -334,7 +384,7 @@ export async function backupRestoreZip(): Promise<{ notes: Note[]; crsqlObjects:
     enableChangeListener: true,
   });
   await restored.loadExtensionAsync("libcrsqlite.so", EXTENSION_ENTRY_POINT);
-  const notes = await restored.getAllAsync<Note>("SELECT id, body FROM notes ORDER BY id");
+  const items = await restored.getAllAsync<SyncItem>("SELECT id, content, title FROM sync_items ORDER BY id");
   const crr = await restored.getFirstAsync<{ count: number }>(
     "SELECT count(*) AS count FROM sqlite_master WHERE name GLOB 'crsql_*'",
   );
@@ -350,28 +400,28 @@ export async function backupRestoreZip(): Promise<{ notes: Note[]; crsqlObjects:
   try { backupRoot.delete(); } catch { /* best-effort cleanup */ }
   try { restoreRoot.delete(); } catch { /* best-effort cleanup */ }
   try { zipFile.delete(); } catch { /* best-effort cleanup */ }
-  return { notes, crsqlObjects: crr.count };
+  return { items, crsqlObjects: crr.count };
 }
 
 export async function waitForConvergence(
-  androidNoteId: string,
-  observerNoteId: string,
+  androidItemId: string,
+  observerItemId: string,
   timeoutMs = 30_000,
-): Promise<Note[]> {
+): Promise<SyncItem[]> {
   const deadline = Date.now() + timeoutMs;
-  const required = new Set([androidNoteId, observerNoteId]);
+  const required = new Set([androidItemId, observerItemId]);
   let lastError = "not converged yet";
 
   while (Date.now() < deadline) {
     try {
-      const [primaryNotes, observerNotes] = await Promise.all([
-        listNotes(),
-        getObserverDatabase().then((db) => db.getAllAsync<Note>("SELECT id, body FROM notes ORDER BY id")),
+      const [primaryItems, observerItems] = await Promise.all([
+        listItems(),
+        getObserverDatabase().then((db) => db.getAllAsync<SyncItem>("SELECT id, content, title FROM sync_items ORDER BY id")),
       ]);
-      const primaryIds = new Set(primaryNotes.map((note) => note.id));
-      const observerIds = new Set(observerNotes.map((note) => note.id));
+      const primaryIds = new Set(primaryItems.map((item) => item.id));
+      const observerIds = new Set(observerItems.map((item) => item.id));
       if ([...required].every((id) => primaryIds.has(id) && observerIds.has(id))) {
-        return primaryNotes;
+        return primaryItems;
       }
       lastError = `Android=${[...primaryIds].join(",")} observer=${[...observerIds].join(",")}`;
     } catch (error) {
@@ -380,5 +430,9 @@ export async function waitForConvergence(
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  throw new Error(`Timed out waiting for the two authenticated sync clients to converge: ${lastError}`);
+  throw new Error(
+    `Timed out waiting for the two authenticated sync clients to converge: ${lastError}; ` +
+    `inbound changes android=${syncDiagnostics.androidChanges} observer=${syncDiagnostics.observerChanges}; ` +
+    `apply errors=${JSON.stringify(syncDiagnostics.applyErrors)}`,
+  );
 }

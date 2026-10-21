@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { runUiAction } from "../utils/uiAction";
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView } from "react-native";
 import { showModal } from "src/state/modalState";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -68,7 +69,7 @@ export default function EditFolderScreen() {
     setCustomInput("");
   };
 
-  const handleSave = async () => {
+  const handleSave = () => runUiAction(async () => {
     const trimmed = name.trim();
     if (!trimmed) {
       showModal({ title: "Enter a name" });
@@ -80,7 +81,7 @@ export default function EditFolderScreen() {
     }
     await updateFolderLayout(folderId, layout);
     router.back();
-  };
+  });
 
   const isCustomIcon = icon && !PRESET_ICONS.includes(icon);
 
@@ -144,6 +145,11 @@ export default function EditFolderScreen() {
             <Text style={[styles.layoutSub, layout === "list" && styles.layoutOptionTextSelected]}>Single column</Text>
           </Pressable>
         </View>
+
+        <Pressable accessibilityRole="button" style={styles.layoutOption} onPress={() => router.push({ pathname: "/folder-feed/[id]", params: { id: folderId } })}>
+          <Text style={styles.layoutLabel}>Feed</Text>
+          <Text style={styles.layoutSub}>Manage backend Atom publication separately. Saving this folder never enables a feed.</Text>
+        </Pressable>
 
         <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]} onPress={handleSave}>
           <Text style={styles.saveBtnText}>Save</Text>

@@ -24,7 +24,7 @@
         version = "0.1.0";
         src = ./.;
         fetcherVersion = 3;
-        hash = "sha256-4WcqUKGsB7RsqqzybRVzn3L0X6usP/oode1z7Ujrfew=";
+        hash = "sha256-IsfFl+F8vRZbvKiRpHyctT0WY6xVosXB3YgKNLe9tjI=";
       };
       serverPackage = linux.stdenv.mkDerivation {
         pname = "stash-crsqlite-sync";
@@ -44,7 +44,7 @@
           # Bypass the Nix node-gyp wrapper, which forces npm_config_nodedir to the runtime headers.
           (cd "$better_sqlite3" && node ${linux.node-gyp}/lib/node_modules/node-gyp/bin/node-gyp.js rebuild --release --nodedir=${nodeHeaders24_18})
           node --test test/better-sqlite3-gc.test.mjs
-          pnpm exec tsc --outDir dist
+          pnpm build
           runHook postBuild
         '';
         installPhase = ''
@@ -65,7 +65,9 @@
               pkgs.nodejs_24
               pkgs.pnpm
               pkgs.node-gyp
-              pkgs.python3
+              (pkgs.python3.withPackages (ps: [ ps.feedparser ]))
+              pkgs.caddy
+              pkgs.chromium
               pkgs.unzip
             ];
           };

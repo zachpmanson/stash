@@ -1,6 +1,7 @@
-import { getDb } from './database';
+import type { SQLiteDatabase } from 'expo-sqlite';
+import { assertAppDbGenerationOwned, getAppDbGeneration, withAppDb, withAppDbMutation, assertAppDbWritableOwned } from './database';
 import { StashItem } from '../types';
-import { touchFolder } from './folders';
+import { mirrorLocalItemOwned, mirrorLocalMembershipOwned } from './syncReplica';
 
 interface RawItem {
   id: string;
@@ -22,114 +23,166 @@ interface RawItem {
 }
 
 export async function getItemsInFolder(folderId: string): Promise<StashItem[]> {
-  const db = await getDb();
-  const rows = await db.getAllAsync<RawItem>(
-    `SELECT i.* FROM items i
-     JOIN item_folders if2 ON if2.item_id = i.id
-     WHERE if2.folder_id = ? AND i.archived_at IS NULL
-     ORDER BY i.created_at DESC`,
-    [folderId]
-  );
-  return rows.map(attachFolderIds);
+  return withAppDb(async (db) => {
+    const rows = await db.getAllAsync<RawItem>(
+      `SELECT i.* FROM items i
+       JOIN item_folders if2 ON if2.item_id = i.id
+       WHERE if2.folder_id = ? AND i.archived_at IS NULL
+       ORDER BY i.created_at DESC`,
+      [folderId]
+    );
+    return rows.map(attachFolderIds);
+  });
 }
 
 export async function getArchivedItems(): Promise<StashItem[]> {
-  const db = await getDb();
-  const rows = await db.getAllAsync<RawItem>(
-    'SELECT * FROM items WHERE archived_at IS NOT NULL ORDER BY archived_at DESC'
-  );
-  return rows.map(attachFolderIds);
+  return withAppDb(async (db) => {
+    const rows = await db.getAllAsync<RawItem>(
+      'SELECT * FROM items WHERE archived_at IS NOT NULL ORDER BY archived_at DESC'
+    );
+    return rows.map(attachFolderIds);
+  });
 }
 
 export async function getItemById(id: string): Promise<StashItem | null> {
-  const db = await getDb();
-  const row = await db.getFirstAsync<RawItem>('SELECT * FROM items WHERE id = ?', [id]);
-  if (!row) return null;
-  const item = attachFolderIds(row);
-  const folderRows = await db.getAllAsync<{ folder_id: string }>(
-    'SELECT folder_id FROM item_folders WHERE item_id = ?',
-    [id]
-  );
-  item.folder_ids = folderRows.map(r => r.folder_id);
-  return item;
+  return withAppDb(async (db) => {
+    const row = await db.getFirstAsync<RawItem>('SELECT * FROM items WHERE id = ?', [id]);
+    if (!row) return null;
+    const item = attachFolderIds(row);
+    const folderRows = await db.getAllAsync<{ folder_id: string }>(
+      'SELECT folder_id FROM item_folders WHERE item_id = ?',
+      [id]
+    );
+    item.folder_ids = folderRows.map(r => r.folder_id);
+    return item;
+  });
 }
 
 export async function saveItem(item: Omit<StashItem, 'archived_at'>, folderIds: string[]): Promise<void> {
-  const db = await getDb();
+  const generation = getAppDbGeneration();
+  return withAppDbMutation(async (db) => {
+    assertAppDbGenerationOwned(generation);
+    await saveItemOwned(db, item, folderIds);
+  });
+}
+
+/** Already owns the DB queue; includes all save statements in one transaction. */
+export async function saveItemOwned(db: SQLiteDatabase, item: Omit<StashItem, 'archived_at'>, folderIds: string[]): Promise<void> {
+  await assertAppDbWritableOwned(db);
   const now = Date.now();
-  await db.runAsync(
-    `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json, lat, lng)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
-     item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
-     item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null,
-     item.lat ?? null, item.lng ?? null]
-  );
-  for (const folderId of folderIds) {
+  await db.withTransactionAsync( async () => {
     await db.runAsync(
-      'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
-      [item.id, folderId, now]
+      `INSERT INTO items (id, type, uri, title, description, favicon_url, thumbnail_path, mime_type, created_at, article_text, article_html, recipe_json, lat, lng)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [item.id, item.type, item.uri, item.title ?? null, item.description ?? null,
+       item.favicon_url ?? null, item.thumbnail_path ?? null, item.mime_type ?? null, now,
+       item.article_text ?? null, item.article_html ?? null, item.recipe_json ?? null,
+       item.lat ?? null, item.lng ?? null]
     );
-    await touchFolder(folderId);
-  }
+    for (const folderId of folderIds) {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
+        [item.id, folderId, now]
+      );
+      await mirrorLocalMembershipOwned(db, item.id, folderId);
+    }
+    await mirrorLocalItemOwned(db, item.id);
+    for (const folderId of folderIds) await db.runAsync("UPDATE folders SET last_used_at = ? WHERE id = ?", [now, folderId]);
+  });
 }
 
 export async function addItemToFolder(itemId: string, folderId: string): Promise<void> {
-  const db = await getDb();
-  await db.runAsync(
-    'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
-    [itemId, folderId, Date.now()]
-  );
-  await touchFolder(folderId);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync(
+        'INSERT OR IGNORE INTO item_folders (item_id, folder_id, added_at) VALUES (?, ?, ?)',
+        [itemId, folderId, Date.now()]
+      );
+      await mirrorLocalMembershipOwned(db, itemId, folderId);
+    });
+    await db.runAsync("UPDATE folders SET last_used_at = ? WHERE id = ?", [Date.now(), folderId]);
+  });
 }
 
 export async function removeItemFromFolder(itemId: string, folderId: string): Promise<void> {
-  const db = await getDb();
-  await db.runAsync(
-    'DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?',
-    [itemId, folderId]
-  );
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync(
+        'DELETE FROM item_folders WHERE item_id = ? AND folder_id = ?',
+        [itemId, folderId]
+      );
+      await mirrorLocalMembershipOwned(db, itemId, folderId);
+    });
+  });
 }
 
 export async function archiveItem(id: string): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('UPDATE items SET archived_at = ? WHERE id = ?', [Date.now(), id]);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('UPDATE items SET archived_at = ? WHERE id = ?', [Date.now(), id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function unarchiveItem(id: string): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('UPDATE items SET archived_at = NULL WHERE id = ?', [id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function updateItemTitle(id: string, title: string | null): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('UPDATE items SET title = ? WHERE id = ?', [title, id]);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('UPDATE items SET title = ? WHERE id = ?', [title, id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function updateItemListenedPercent(id: string, percent: number): Promise<void> {
-  const db = await getDb();
-  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-  await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
+  return withAppDbMutation(async (db) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('UPDATE items SET listened_percent = ? WHERE id = ?', [clamped, id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function updateItemRecipeJson(id: string, recipeJson: string | null): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('UPDATE items SET recipe_json = ? WHERE id = ?', [recipeJson, id]);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('UPDATE items SET recipe_json = ? WHERE id = ?', [recipeJson, id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function updateItemArticleHtml(id: string, html: string | null, text?: string | null): Promise<void> {
-  const db = await getDb();
-  if (text !== undefined) {
-    await db.runAsync('UPDATE items SET article_html = ?, article_text = ? WHERE id = ?', [html, text, id]);
-  } else {
-    await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
-  }
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      if (text !== undefined) {
+        await db.runAsync('UPDATE items SET article_html = ?, article_text = ? WHERE id = ?', [html, text, id]);
+      } else {
+        await db.runAsync('UPDATE items SET article_html = ?, article_text = NULL WHERE id = ?', [html, id]);
+      }
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 export async function deleteItem(id: string): Promise<void> {
-  const db = await getDb();
-  await db.runAsync('DELETE FROM item_folders WHERE item_id = ?', [id]);
-  await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+  return withAppDbMutation(async (db) => {
+    await db.withTransactionAsync( async () => {
+      await db.runAsync('DELETE FROM item_folders WHERE item_id = ?', [id]);
+      await db.runAsync('DELETE FROM items WHERE id = ?', [id]);
+      await mirrorLocalItemOwned(db, id);
+    });
+  });
 }
 
 function attachFolderIds(row: RawItem): StashItem {

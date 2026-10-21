@@ -9,6 +9,9 @@ import { Colors } from "../src/theme";
 import { SnackbarHost } from "../src/components/SnackbarHost";
 import { ModalHost } from "../src/components/ModalHost";
 import { isShareLaunch } from "../src/utils/nativeShareIntent";
+import { subscribeStashSyncProjection } from "../src/db/syncClient";
+import { useFolderStore } from "../src/state/folderState";
+import { initializeSettingsFromDatabase } from "../src/state/settingsState";
 
 const SHARE_LAUNCH = isShareLaunch();
 
@@ -43,6 +46,12 @@ function RootLayout() {
   const { resolvedSharedPayloads } = useIncomingShare();
   const handledSigRef = useRef<string | null>(null);
 
+  useEffect(() => { void initializeSettingsFromDatabase().catch(console.error); }, []);
+
+  useEffect(() => subscribeStashSyncProjection(() => {
+    void useFolderStore.getState().refresh();
+  }), []);
+
   useEffect(() => {
     if (resolvedSharedPayloads.length === 0) return;
     const sig = JSON.stringify(resolvedSharedPayloads.map((p: any) => p.contentUri ?? p.value ?? p.text ?? ""));
@@ -64,6 +73,8 @@ function RootLayout() {
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="archive" options={{ title: "Archive" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
+        <Stack.Screen name="settings/sync" options={{ title: "Sync" }} />
+        <Stack.Screen name="folder-feed/[id]" options={{ title: "Folder feed" }} />
         <Stack.Screen name="text-substitutions" options={{ title: "Text Substitutions" }} />
         <Stack.Screen
           name="share"

@@ -1,0 +1,174 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+  line-height: 1.5;
+  background: Canvas;
+  color: CanvasText;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.shell {
+  max-width: 1400px;
+  margin: auto;
+  padding: 1.25rem;
+}
+header {
+  border-bottom: 1px solid GrayText;
+  padding-bottom: 1rem;
+}
+h1,
+h2 {
+  margin: 0.3rem 0;
+}
+header p {
+  margin: 0.3rem 0 1rem;
+}
+.columns {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 2rem;
+}
+main {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr);
+  gap: 2rem;
+}
+aside,
+main {
+  min-width: 0;
+}
+label {
+  display: block;
+  margin: 0.75rem 0;
+}
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+input:not([type="checkbox"]),
+select,
+textarea {
+  display: block;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid GrayText;
+  border-radius: 0.3rem;
+  background: Field;
+  color: FieldText;
+}
+button {
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+  border: 1px solid GrayText;
+  border-radius: 0.3rem;
+  background: ButtonFace;
+  color: ButtonText;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+button[aria-pressed="true"] {
+  border: 2px solid Highlight;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 3px;
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.8rem 0;
+}
+.items {
+  list-style: none;
+  padding: 0;
+}
+.items li {
+  margin: 0.5rem 0;
+}
+.items button {
+  text-align: left;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.items small {
+  display: block;
+  color: GrayText;
+}
+.reader {
+  border-left: 1px solid GrayText;
+  padding-left: 1.5rem;
+  overflow-wrap: anywhere;
+}
+.plaintext {
+  white-space: pre-wrap;
+}
+fieldset {
+  border: 0;
+  margin: 1rem 0;
+  padding: 0;
+}
+legend {
+  font-weight: bold;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.check input {
+  min-width: 20px;
+  min-height: 20px;
+}
+[role="alert"] {
+  border: 2px solid #bb5544;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+[role="status"] {
+  min-height: 1.5em;
+}
+a {
+  color: LinkText;
+}
+aside section,
+aside form {
+  margin: 1.5rem 0;
+}
+@media (max-width: 1000px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+  .reader {
+    border-left: 0;
+    border-top: 1px solid GrayText;
+    padding: 1rem 0;
+  }
+}
+@media (max-width: 650px) {
+  .columns {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .shell {
+    padding: 1rem;
+  }
+  aside {
+    border-bottom: 1px solid GrayText;
+    padding-bottom: 1rem;
+  }
+}

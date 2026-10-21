@@ -1,16 +1,138 @@
 import * as SQLite from "expo-sqlite";
+import { Platform } from "react-native";
+import { File, Paths } from "expo-file-system";
 
 let db: SQLite.SQLiteDatabase | null = null;
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let closeFailure: { error: unknown } | null = null;
+const loadedCrsqliteDatabases = new WeakSet<object>();
+let dbAccessTail: Promise<void> = Promise.resolve();
+let replacementGeneration = 0;
 
-export function getDb(): Promise<SQLite.SQLiteDatabase> {
+/** Capture before asynchronous preparation; validate only while owning the DB. */
+export function getAppDbGeneration(): number {
+  return replacementGeneration;
+}
+
+export function assertAppDbGenerationOwned(expected: number): void {
+  if (expected !== replacementGeneration) {
+    throw new Error("Stash data was replaced while saving. Please retry the save.");
+  }
+}
+
+/** Non-reentrant ownership queue. Acquire before resolving/opening the app DB. */
+async function withAppDbLock<T>(task: () => Promise<T>): Promise<T> {
+  const previous = dbAccessTail;
+  let release!: () => void;
+  dbAccessTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Own the app DB for the entire operation, including opening/schema setup.
+ * Await all statements before returning. Never retain/return the handle, create
+ * detached DB work, or call another ownership-taking API inside this callback.
+ * Raw SQLite types are deliberate: lifetime is a caller contract, not a proxy.
+ */
+export function withAppDb<T>(task: (database: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  return withAppDbLock(async () => task(await getDb()));
+}
+
+export const RESTORE_PENDING_KEY = "restore_merge_pending";
+export const RESTORE_INSTALL_MARKER = "stash-restore-install.json";
+
+export async function isRestorePendingOwned(database: SQLite.SQLiteDatabase): Promise<boolean> {
+  const table = await database.getFirstAsync<{ present: number }>(
+    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_sync_metadata') AS present",
+  );
+  if (!table?.present) return false;
+  const row = await database.getFirstAsync<{ value: string }>(
+    "SELECT value FROM stash_sync_metadata WHERE key = ?", RESTORE_PENDING_KEY,
+  );
+  return row !== null && row !== undefined;
+}
+
+export async function assertAppDbWritableOwned(database: SQLite.SQLiteDatabase): Promise<void> {
+  if (await isRestorePendingOwned(database)) {
+    throw new Error("Restored data is read-only until a full merge with the sync server completes. Connect in Settings.");
+  }
+}
+
+export function withAppDbMutation<T>(task: (database: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  return withAppDb(async (database) => {
+    await assertAppDbWritableOwned(database);
+    return task(database);
+  });
+}
+
+/**
+ * Called only after sync has been stopped/drained. Excludes all app DB access
+ * through close, replacement, reopening and post-restore work. A failure after
+ * closure starts poisons access until restart; filesystem replacement is NOT
+ * atomic and must never fall back to opening a partially replaced database.
+ */
+export function withAppDbReplacement<T>(
+  replace: () => Promise<void>,
+  afterOpen: (database: SQLite.SQLiteDatabase) => Promise<T>,
+  prepare?: (database: SQLite.SQLiteDatabase) => Promise<void>,
+): Promise<T> {
+  return withAppDbLock(async () => {
+    if (closeFailure) throw closeFailure.error;
+    // Invalidate prepared saves before any destructive work (including failures).
+    replacementGeneration++;
+    // Preparation is non-destructive: failure leaves the current handle usable.
+    if (prepare) await prepare(await getDb());
+    try {
+      await closeDbOwned();
+      await replace();
+      return await afterOpen(await getDb(true));
+    } catch (error) {
+      closeFailure = { error };
+      throw error;
+    }
+  });
+}
+
+export const CRSQLITE_SUPPORTED = Platform.OS === "android";
+
+export async function ensureCrsqliteLoaded(database: SQLite.SQLiteDatabase): Promise<void> {
+  if (!CRSQLITE_SUPPORTED) throw new Error("CR-SQLite is currently packaged only for Android.");
+  if (loadedCrsqliteDatabases.has(database)) return;
+  await database.loadExtensionAsync("libcrsqlite.so", "sqlite3_crsqlite_init");
+  loadedCrsqliteDatabases.add(database);
+}
+
+function getDb(installing = false): Promise<SQLite.SQLiteDatabase> {
+  if (closeFailure) return Promise.reject(closeFailure.error);
+  if (!installing && new File(Paths.document, RESTORE_INSTALL_MARKER).exists) {
+    return Promise.reject(new Error("An interrupted restore requires recovery from the private stash-rollback folder before Stash can open."));
+  }
   if (db) return Promise.resolve(db);
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync("stash.db")
+    dbPromise = SQLite.openDatabaseAsync("stash.db", { enableChangeListener: true })
       .then(async (database) => {
-        await initSchema(database);
-        db = database;
-        return db;
+        try {
+          await initSchema(database);
+          const replicaMarker = await database.getFirstAsync<{ value: string }>(
+            "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
+          ).catch(() => null);
+          if (replicaMarker && CRSQLITE_SUPPORTED) await ensureCrsqliteLoaded(database);
+          db = database;
+          return db;
+        } catch (error) {
+          try {
+            await closeTemporaryDatabase(database);
+          } catch (cleanupError) {
+            closeFailure = { error: cleanupError };
+            throw cleanupError;
+          }
+          throw error;
+        }
       })
       .catch((e) => {
         dbPromise = null;
@@ -21,30 +143,24 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
   return dbPromise;
 }
 
-/**
- * Closes the open database connection and resets the cached singleton so the
- * next {@link getDb} call reopens from disk. Used by restore to swap in a
- * fresh database file.
- */
-export async function closeDb(): Promise<void> {
-  const current = db;
+/** Already owns the queue; never call an ownership-taking API here. */
+async function closeDbOwned(): Promise<void> {
+  const current = dbPromise ? await dbPromise : db;
+  if (current && loadedCrsqliteDatabases.has(current)) {
+    await current.execAsync("SELECT crsql_finalize()");
+    loadedCrsqliteDatabases.delete(current);
+  }
+  if (current) await current.closeAsync();
+  // Forget only after certain closure.
   db = null;
   dbPromise = null;
-  if (current) {
-    try {
-      await current.closeAsync();
-    } catch {
-      // ignore close errors; the singleton is already reset
-    }
-  }
 }
 
 /**
  * Flushes the WAL journal into the main database file so the on-disk file is
  * a complete, self-contained copy (required for a valid backup).
  */
-export async function checkpointDb(): Promise<void> {
-  const database = await getDb();
+export async function checkpointDbOwned(database: SQLite.SQLiteDatabase): Promise<void> {
   try {
     await database.execAsync("PRAGMA wal_checkpoint(TRUNCATE);");
   } catch {
@@ -52,7 +168,7 @@ export async function checkpointDb(): Promise<void> {
   }
 }
 
-async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+export async function initSchema(db: SQLite.SQLiteDatabase, seedDefaultInbox = true): Promise<void> {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -135,15 +251,31 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync("ALTER TABLE folders ADD COLUMN layout TEXT NOT NULL DEFAULT 'grid'");
   }
 
-  // Seed default Inbox folder if empty
+  // Seed default Inbox only for local-only databases. A synced account may
+  // intentionally have no live folders after tombstone reconciliation.
   const row = await db.getFirstAsync<{ count: number }>(
     "SELECT COUNT(*) as count FROM folders WHERE archived_at IS NULL",
   );
-  if (!row || row.count === 0) {
+  const syncMarker = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM stash_sync_metadata WHERE key = 'stash_sync_seed_version'",
+  ).catch(() => null);
+  if (seedDefaultInbox && (!row || row.count === 0) && !syncMarker) {
     const now = Date.now();
     await db.runAsync(
       "INSERT OR IGNORE INTO folders (id, name, icon, created_at, last_used_at, layout) VALUES (?, ?, ?, ?, ?, ?)",
       ["inbox", "Inbox", "📥", now, now, "list"],
     );
+  }
+}
+
+/** Exclusive temporary connection only. Always attempt close, even if finalize fails. */
+export async function closeTemporaryDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
+  try {
+    if (loadedCrsqliteDatabases.has(database)) {
+      await database.execAsync("SELECT crsql_finalize()");
+    }
+  } finally {
+    loadedCrsqliteDatabases.delete(database);
+    await database.closeAsync();
   }
 }

@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Linking, ScrollView, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -7,9 +7,12 @@ import VoicePickerModal from "../components/VoicePickerModal";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useVoiceStore } from "../state/voiceState";
 import { useFolderStore } from "../state/folderState";
-import { useSettingsStore } from "../state/settingsState";
+import { changeAuRecipeSetting, useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
+import { subscribeStashSyncStatus } from "../db/syncClient";
+import { withAppDb, isRestorePendingOwned } from "../db/database";
+import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
 import { VoiceMode } from "../utils/readability";
 
 const GITHUB_URL = "https://github.com/zachpmanson/stash";
@@ -17,6 +20,7 @@ const GITHUB_URL = "https://github.com/zachpmanson/stash";
 export default function SettingsScreen() {
   const router = useRouter();
   const [voiceMenu, setVoiceMenu] = useState<VoiceMode | null>(null);
+  const [recoveryPending, setRecoveryPending] = useState(false);
   const [busy, setBusy] = useState(false);
   const selectedId = useVoiceStore((s) => s.selectedVoice);
   const quoteId = useVoiceStore((s) => s.quoteVoice);
@@ -26,7 +30,16 @@ export default function SettingsScreen() {
   const quoteVoice = voices.find((v) => v.identifier === quoteId);
   const quoteVoiceLabel = quoteVoice ? quoteVoice.name : quoteId;
   const auRecipe = useSettingsStore((s) => s.auRecipe);
-  const setAuRecipe = useSettingsStore((s) => s.setAuRecipe);
+
+  useEffect(() => {
+    const refreshPending = () => { void withAppDb(isRestorePendingOwned).then(setRecoveryPending).catch(console.error); };
+    refreshPending();
+    return subscribeStashSyncStatus(refreshPending);
+  }, []);
+
+  const handleAuRecipeChange = (enabled: boolean) => {
+    void changeAuRecipeSetting(enabled).catch((error) => showModal({ title: "Setting not changed", message: String(error) }));
+  };
 
   const handleBackup = async () => {
     if (busy) return;
@@ -44,43 +57,51 @@ export default function SettingsScreen() {
   const handleRestore = async () => {
     if (busy) return;
     setBusy(true);
+    let confirmationOwnsBusy = false;
     try {
       const fileUri = await pickBackupFile();
       if (!fileUri) return;
       showModal({
         title: "Restore backup?",
-        message: "This will replace your current data with the selected backup.",
+        message: "This replaces this device’s data (a private rollback is retained). Synced backups merge with the server, not replace it. Restored synced data is read-only until the first full merge completes.",
         buttons: [
-          { text: "Cancel", style: "cancel" },
+          { text: "Cancel", style: "cancel", onPress: () => setBusy(false) },
           {
             text: "Restore",
             style: "destructive",
             onPress: async () => {
               try {
                 const manifest = await restoreBackup(fileUri);
+                setRecoveryPending(manifest.recoveryPending);
                 await useFolderStore.getState().refresh();
                 showModal({
                   title: "Restored",
-                  message: `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders.`,
+                  message: manifest.recoveryPending
+                    ? "Restored locally; merging with server is required. Browse read-only, then open Settings → Sync to connect. Your backup and private pre-restore rollback are retained."
+                    : `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders locally.`,
                 });
               } catch (e) {
                 showModal({ title: "Restore failed", message: `${e}` });
+              } finally {
+                setBusy(false);
               }
             },
           },
         ],
       });
+      confirmationOwnsBusy = true;
     } catch (e) {
       showModal({ title: "Restore error", message: `${e}` });
     } finally {
-      setBusy(false);
+      if (!confirmationOwnsBusy) setBusy(false);
     }
   };
 
   return (
     <Screen options={{ title: "Settings" }}>
       <VoicePickerModal visible={voiceMenu !== null} mode={voiceMenu ?? "primary"} onClose={() => setVoiceMenu(null)} />
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        {recoveryPending && <Text style={styles.pendingBanner}>Restored locally — read-only until a full server merge completes. {STASH_SYNC_DEV_TOOLS ? "Open Settings → Sync to connect." : "Recovery requires an Android development or explicitly opted-in sync build."}</Text>}
         <Row
           icon="save-alt"
           label="Back up data"
@@ -112,10 +133,11 @@ export default function SettingsScreen() {
           icon="emoji-food-beverage"
           label="Australian recipe ingredients"
           value={auRecipe}
-          onValueChange={setAuRecipe}
+          onValueChange={handleAuRecipeChange}
         />
+        {STASH_SYNC_DEV_TOOLS && <Row icon="sync" label="Sync" onPress={() => router.push("/settings/sync")} />}
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
-      </View>
+      </ScrollView>
     </Screen>
   );
 }
@@ -174,6 +196,7 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     gap: Spacing.sm,
   },
+  pendingBanner: { ...Typography.body, color: Colors.textSecondary, backgroundColor: Colors.surface2, padding: Spacing.md, borderRadius: Radius.md },
   row: {
     flexDirection: "row",
     alignItems: "center",

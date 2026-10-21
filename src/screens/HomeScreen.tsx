@@ -1,6 +1,7 @@
 import IconButton from "@/components/IconButton";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
+import { runUiAction } from "../utils/uiAction";
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { showModal } from "src/state/modalState";
 import { useScrollTopState } from "src/state/scrollTopState";
@@ -13,6 +14,7 @@ import FolderGrid from "src/components/FolderGrid";
 import { isShareLaunch } from "src/utils/nativeShareIntent";
 import AddItemFAB, { AddItemMode } from "src/components/AddItemFAB";
 import AddItemModal from "src/components/AddItemModal";
+import { randomId } from "src/utils/randomId";
 
 export default function HomeScreen() {
   if (isShareLaunch()) {
@@ -40,14 +42,14 @@ export default function HomeScreen() {
     setNewFolderVisible(true);
   }, []);
 
-  const handleNewFolderSubmit = useCallback(async () => {
+  const handleNewFolderSubmit = useCallback(() => runUiAction(async () => {
     const name = newFolderName.trim();
     if (name) {
-      await createFolder(String(Date.now()), name);
-      refresh();
+      await createFolder(randomId(), name);
+      await refresh();
     }
     setNewFolderVisible(false);
-  }, [newFolderName, refresh]);
+  }), [newFolderName, refresh]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

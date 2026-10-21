@@ -7,9 +7,10 @@ import { cryb64 } from "@vlcn.io/ws-common";
 
 const [command, argument] = process.argv.slice(2);
 const dataDir = path.resolve(process.env.DATA_DIR ?? "./data");
-const databasePath = path.join(dataDir, "stash-spike.sqlite");
+const databasePath = path.join(dataDir, "stash-backend");
 const schemaDir = path.resolve(process.env.SCHEMA_DIR ?? "./schemas");
-const expectedVersion = String(cryb64(await readFile(path.join(schemaDir, "stash-spike.sql"), "utf8")));
+const schemaName = "stash-sync-v1.sql";
+const expectedVersion = String(cryb64(await readFile(path.join(schemaDir, schemaName), "utf8")));
 
 function openAndValidate(filename) {
   const db = new Database(filename, { readonly: true, fileMustExist: true });
@@ -18,14 +19,20 @@ function openAndValidate(filename) {
     const integrity = db.pragma("integrity_check", { simple: true });
     assert.equal(integrity, "ok", `SQLite integrity check: ${integrity}`);
     const schema = db.prepare("SELECT value FROM crsql_master WHERE key = 'schema_name'").pluck().get();
-    assert.equal(schema, "stash-spike.sql", `unexpected CR-SQLite schema: ${schema}`);
+    assert.equal(schema, schemaName, `unexpected CR-SQLite schema: ${schema}`);
     const version = db.prepare("SELECT value FROM crsql_master WHERE key = 'schema_version'").safeIntegers(true).pluck().get();
     assert.equal(String(version), expectedVersion, `CR-SQLite schema version mismatch: ${version}`);
-    const crr = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes__crsql_clock'").get();
-    assert.ok(crr, "missing CR-SQLite table metadata");
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (
+      'sync_folders__crsql_clock', 'sync_items__crsql_clock',
+      'sync_item_folders__crsql_clock', 'sync_text_substitutions__crsql_clock',
+      'sync_user_settings__crsql_clock'
+    )`).all();
+    assert.equal(tables.length, 5, "missing one or more Stash CRR tables");
     return { schema, version: String(version) };
   } finally {
-    db.close();
+    // CRSQLite retains internal prepared statements until explicitly finalized;
+    // close alone can leave a read lock that blocks replacement policy writes.
+    try { db.prepare("SELECT crsql_finalize()").get(); } finally { db.close(); }
   }
 }
 
@@ -66,6 +73,19 @@ if (command === "backup") {
   await copyFile(source, replacement);
   await chmod(replacement, 0o600);
   openAndValidate(replacement);
+  // A restored snapshot must never silently republish stale folders. Preserve
+  // stable IDs/hashes/dates but require explicit enable after recovery review.
+  const restored = new Database(replacement, { fileMustExist: true });
+  try {
+    // Commit recovery policy into the replacement file itself, not an adjacent
+    // WAL whose old name would be lost at the atomic rename.
+    restored.pragma("journal_mode = DELETE");
+    restored.loadExtension(extensionPath);
+    if (restored.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_feeds'").get()) {
+      restored.prepare("UPDATE folder_feeds SET enabled=0").run();
+    }
+    restored.prepare("SELECT crsql_finalize()").get();
+  } finally { restored.close(); }
   await rename(replacement, databasePath);
   await Promise.all([
     rm(`${databasePath}-wal`, { force: true }),
