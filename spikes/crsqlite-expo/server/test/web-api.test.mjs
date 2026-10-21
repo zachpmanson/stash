@@ -209,7 +209,7 @@ test(
   "real WS API ↔ actual native replica projection, edits, archives, membership generations and add-wins folder masks",
   { timeout: 45000 },
   async (t) => {
-    const { base, port, api, json } = await launch(t);
+    const { base, port, api, json } = await launch(t, { FEED_BASE_URL: 'https://feeds.example' });
     const h = await createNativeHarness();
     t.after(() => h.cleanup());
     const app = h.load("src/db/database.ts"),
@@ -306,6 +306,10 @@ test(
       content: "Web plaintext <script>alert(1)</script>",
     });
     await json(`/items/${id}/folders/${folderId}`, "PUT", { present: true });
+    const feedPath = `/folders/${folderId}/feed`;
+    const feed = () => fetch(`${base}/feeds/folders/${folderId}.atom`, { headers: { 'X-Auth-User': 'web-test-owner' } });
+    await json(feedPath, 'PUT', { enabled: true });
+    assert.match(await (await feed()).text(), /Web title/);
     await project(async (db) =>
       Boolean(
         await db.getFirstAsync(
@@ -325,6 +329,7 @@ test(
     await items.updateItemTitle(id, "Edited natively");
     await upload();
     assert.equal((await json(`/items/${id}`)).title, "Edited natively");
+    assert.match(await (await feed()).text(), /Edited natively/);
     await items.updateItemTitle(id, "Zulu native conflict");
     await json(`/items/${id}`, "PATCH", { title: "Alpha web conflict" });
     await upload();
@@ -354,6 +359,16 @@ test(
     const nativeCreated = await json("/items/native-created");
     assert.equal(nativeCreated.content, "https://example.com/native");
     assert.deepEqual(nativeCreated.folderIds, [folderId]);
+    assert.match(await (await feed()).text(), /Native link/);
+    // CRR-applied archive transitions must disable even if unarchived before
+    // a reader polls; native backup replay cannot re-enable server enablement.
+    await app.withAppDb(db => db.runAsync('UPDATE sync_folders SET archived_at=123 WHERE id=?', folderId));
+    await upload();
+    await app.withAppDb(db => db.runAsync('UPDATE sync_folders SET archived_at=NULL WHERE id=?', folderId));
+    await upload();
+    assert.equal((await json(feedPath)).enabled, false);
+    assert.equal((await feed()).status, 404);
+    await json(feedPath, 'PUT', { enabled: true });
     await json(`/items/${id}`, "PATCH", {
       content: "Web edit",
       archived: true,
@@ -375,6 +390,7 @@ test(
     );
     assert.equal((await items.getItemById(id)).uri, "Web edit");
     assert.ok((await items.getItemById(id)).archived_at);
+    assert.doesNotMatch(await (await feed()).text(), /Web edit/);
     await items.unarchiveItem(id);
     await upload();
     assert.equal((await json(`/items/${id}`)).archived_at, null);
@@ -388,8 +404,10 @@ test(
     });
     await json(`/items/${id}/folders/${folderId}`, "PUT", { present: false });
     assert.deepEqual((await json(`/items/${id}`)).folderIds, []);
+    assert.doesNotMatch(await (await feed()).text(), /Zulu native conflict/);
     await upload();
     assert.deepEqual((await json(`/items/${id}`)).folderIds, [folderId]);
+    assert.match(await (await feed()).text(), /Zulu native conflict/);
     await json(`/items/${id}/folders/${folderId}`, "PUT", { present: false });
     await json(`/items/${id}/folders/${folderId}`, "PUT", { present: true });
     await project(async (db) => {
@@ -414,6 +432,7 @@ test(
     assert.ok((await json("/folders")).some((f) => f.id === folderId));
     await json(`/folders/${folderId}`, "PATCH", { archived: true });
     assert.ok((await json("/folders"))[0].archived_at);
+    assert.equal((await feed()).status, 404);
     // Native media carries no portable content; legacy bad links stay non-clickable.
     await app.withAppDb(async (db) => {
       await db.runAsync(

@@ -4,6 +4,8 @@ Node 24/TypeScript, Hono HTTP routing, bundled React, and the existing raw Node 
 
 Source baseline: **`9f238df`**, the reviewed but unmerged prerequisite [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58). This branch includes that prerequisite until it integrates; review the new implementation with `git diff 9f238df..HEAD`. Implementation/review used only disposable state and synthetic credentials, with no live service/database/device access. Zach subsequently authorized deployment **after independent review/fixes pass**; activation, exact pin and private backup evidence are tracked on the issue and Nix operational runbook rather than inferred from a successful build. Media sync remains separate under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
+Private folder Atom feeds and Android controls: see [`../../../docs/folder-feeds.md`](../../../docs/folder-feeds.md) for review baseline, API/content/cache/recovery semantics, disposable validation and future owner-approved configuration. Feeds stay behind Caddy Basic authentication; this change is **not deployed**.
+
 ## Trust boundary
 
 - The listener is fixed to `127.0.0.1`; there is no bind-address override or firewall listener. Naboo Caddy is the only ingress.
@@ -25,6 +27,7 @@ Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing th
 | `SCHEMA_DIR` | `./schemas` | Server schema directory (the pinned candidate schema is written at startup) |
 | `AUTH_USER` | `zach` | Exact Caddy-stamped `X-Auth-User` for HTTP API/assets and WS upgrades |
 | `ENABLE_TEST_ENDPOINTS` | unset | Set to `1` only for local integration tests |
+| `FEED_BASE_URL` | unset | Explicit credential-free HTTPS origin for private Atom links; unset → feed operations unavailable. Never inferred from Host. |
 
 Before invoking the upstream database factory or writing a schema file, startup opens any existing database **read-only** and requires its stored schema name/version to match the compiled candidate exactly. Missing/unrecognized metadata also fails closed. An existing resident schema file must match the compiled DDL byte-for-byte; it is never silently overwritten. This prevents the upstream factory's automatic migration from running on a database with an unexpected identity/version. Fresh databases remain supported; current-schema startup then checks all five candidate CRR tables and SQLite `integrity_check` before opening the listener. This is not a general migration policy or a full DDL-drift detector for a database whose metadata has been manually forged; schema changes require a separately reviewed migration/recovery procedure. Rolling back code alone is not a data rollback. `/healthz` reports readiness and the schema version. `/sync/status?clientSiteId=<hex>` requires the Caddy-stamped identity and reports the highest outbound version available to that client (excluding changes the client already originated), plus the highest version received from it and aggregate table counts. The app also compares its tracked version for the server site ID. Together these checks form the two-way completion barrier before destructive projection into Stash's local tables. The high-water marks follow ws-client 0.2.0's `(db_version, 0)` whole-version-group convention. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
 

@@ -14,7 +14,7 @@ export async function waitFor(check) {
   }
   throw new Error("Timed out waiting for isolated test state");
 }
-export async function launch(t) {
+export async function launch(t, env = {}) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "stash-web-test-"));
   const listener = createServer().listen(0, "127.0.0.1");
   await once(listener, "listening");
@@ -35,6 +35,7 @@ export async function launch(t) {
         PORT: String(port),
         AUTH_USER: "web-test-owner",
         ENABLE_TEST_ENDPOINTS: "0",
+        ...env,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

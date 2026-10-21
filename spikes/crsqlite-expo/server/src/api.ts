@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import type { attachWebsocketServer } from "@vlcn.io/ws-server";
 import { DATABASE_ROOM, SCHEMA_NAME } from "../schema.js";
 import type { WebItem, WebFolder } from "./contracts.js";
+import { FeedError, feedSettings, renderFeed } from "./feeds.js";
 
 class ApiError extends Error {
   constructor(
@@ -126,6 +127,7 @@ export function installApi(
   cache: ReturnType<typeof attachWebsocketServer>,
   authUser: string,
   notify: () => void,
+  feedBase: string | null,
 ) {
   const router = new Hono();
   router.use("*", async (c, next) => {
@@ -166,6 +168,7 @@ export function installApi(
     path: string,
     write: boolean,
     fn: (db: Database.Database, req: ApiRequest) => unknown,
+    replicatedWrite = write,
   ) {
     router[method](path, async (c) => {
       let payload: unknown;
@@ -191,10 +194,10 @@ export function installApi(
         const db = peer.getDB();
         // No await inside transactions; WS and HTTP share this extension-loaded handle.
         result = db.transaction(() => {
-          if (write) reconcile(db);
+          if (replicatedWrite) reconcile(db);
           return fn(db, req);
         })();
-        if (write) notify(); // Explicit wakeup after commit; never rely on WAL watcher timing.
+        if (replicatedWrite) notify(); // Explicit wakeup after commit; never rely on WAL watcher timing.
       });
       return c.json(result as object, method === "post" ? 201 : 200);
     });
@@ -341,8 +344,28 @@ export function installApi(
     }
     return { id: itemId };
   });
+  route("get", "/folders/:id/feed", false, (db, req) => {
+    if (Object.keys(req.query).length) fail();
+    return feedSettings(db, id(req.params.id), feedBase);
+  });
+  route("put", "/folders/:id/feed", true, (db, req) => {
+    if (Object.keys(req.query).length) fail();
+    const data = body(req.body, ["enabled"]);
+    if (typeof data.enabled !== "boolean") fail();
+    return feedSettings(db, id(req.params.id), feedBase, data.enabled as boolean);
+  }, false);
+  router.get("/folders/:id/feed/preview", async (c) => {
+    if (Object.keys(c.req.query()).length) fail();
+    let xml = "";
+    await cache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
+      const db = peer.getDB();
+      xml = db.transaction(() => renderFeed(db, id(c.req.param("id")), feedBase, true))().xml;
+    });
+    return c.body(xml, 200, { "Content-Type": "application/atom+xml; charset=utf-8", "X-Content-Type-Options": "nosniff" });
+  });
   router.all("*", (c) => c.json({ error: "API route not found" }, 404));
   router.onError((error, c) => {
+    if (error instanceof FeedError) return c.json({ error: error.message }, error.status);
     if (error instanceof ApiError) {
       switch (error.status) {
         case 400:

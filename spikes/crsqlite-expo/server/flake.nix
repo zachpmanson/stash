@@ -24,7 +24,7 @@
         version = "0.1.0";
         src = ./.;
         fetcherVersion = 3;
-        hash = "sha256-137P1quNpEtp4a51ebjRJvuqrRrXieEA7g37faNfnZA=";
+        hash = "sha256-IsfFl+F8vRZbvKiRpHyctT0WY6xVosXB3YgKNLe9tjI=";
       };
       serverPackage = linux.stdenv.mkDerivation {
         pname = "stash-crsqlite-sync";
@@ -65,7 +65,9 @@
               pkgs.nodejs_24
               pkgs.pnpm
               pkgs.node-gyp
-              pkgs.python3
+              (pkgs.python3.withPackages (ps: [ ps.feedparser ]))
+              pkgs.caddy
+              pkgs.chromium
               pkgs.unzip
             ];
           };

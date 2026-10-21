@@ -24,7 +24,7 @@ function load(file, mocks) {
       if (!(spec in mocks)) throw new Error(`Unexpected import ${spec} in ${file}`);
       return mocks[spec];
     },
-    console, Uint8Array, URL, AbortController, setTimeout, clearTimeout,
+    console, Uint8Array, URL, AbortController, Response, setTimeout, clearTimeout,
     btoa: value => Buffer.from(value).toString('base64'),
     fetch: (...args) => mocks.fetch(...args),
   }, { filename });
@@ -91,7 +91,12 @@ function syncHarness() {
         };
       },
     },
-    fetch: async (url, { signal }) => {
+    fetch: async (url, options) => {
+      const { signal } = options;
+      if (url.pathname.includes('/api/folders/')) {
+        if (!h.options.feedResponse) throw Error('Unexpected feed request');
+        return h.options.feedResponse(url, options);
+      }
       if (url.pathname.endsWith('healthz')) {
         if (healthGate) await healthGate.promise;
         if (h.options.healthError) throw h.options.healthError;
@@ -342,10 +347,12 @@ test('subscribed account is sanitized, immediate on remount, retained across syn
   };
   const unsubscribe=h.sync.subscribeStashSyncStatus(status => {
     statuses.push(status);
-    if (status.phase === 'error') observedError.resolve();
+    if (status.phase === 'error' && /temporary status outage/.test(status.message)) observedError.resolve();
   });
   try {
-    await h.sync.connectStashSync('https://embedded:secret@sync.example/base/?token=secret#fragment',{username:' alice ',password:'password'});
+    await assert.rejects(h.sync.connectStashSync('https://embedded:secret@sync.example/base/',{username:'alice',password:'password'}), /without embedded credentials/);
+    statuses.length = 0;
+    await h.sync.connectStashSync('https://sync.example/base/?token=secret#fragment',{username:' alice ',password:'password'});
     let remounted;
     const unmount=h.sync.subscribeStashSyncStatus(status => { remounted=status; });
     assert.deepEqual(JSON.parse(JSON.stringify(remounted.account)),account);
@@ -505,4 +512,61 @@ test('teardown metadata observers can reenter disconnect without bypassing drain
   gate.resolve(); await read; await reentrantDrain;
   assert.equal(completed,true); assert.deepEqual(phases,['connecting','syncing','stopped']);
   unsubscribe();
+});
+
+function feedReadyHarness() {
+  const h=syncHarness();
+  h.options.statusResponse=async () => ({ok:true,json:async()=>({schema:'test',schemaVersion:'1',serverSiteId:'11'.repeat(16),clientSiteId:'00'.repeat(16),serverVersion:'0',clientSeenVersion:'0'})});
+  return h;
+}
+test('actual session feed helper requires completed sync, scopes credentials and blocks unuploaded enable', async () => {
+  const h=feedReadyHarness(), calls=[];
+  await assert.rejects(h.sync.requestStashFolderFeed('f','status'),/Connect/);
+  h.options.feedResponse=async(url,opts)=>{calls.push({url,opts});return new Response('{"enabled":false}',{headers:{'Content-Type':'application/json'}});};
+  await h.connect(); await tick();
+  try {
+    const response=await h.sync.requestStashFolderFeed('folder/slash','status');
+    assert.equal((await response.json()).enabled,false);
+    assert.equal(calls[0].url.toString(),'http://localhost/api/folders/folder%2Fslash/feed');
+    assert.equal(calls[0].opts.headers.Authorization,'Basic '+Buffer.from('test:test').toString('base64'));
+    assert.equal(calls[0].opts.redirect,'error');
+    await h.sync.requestStashFolderFeed('f',true);
+    assert.equal(calls[1].opts.method,'PUT');assert.deepEqual(JSON.parse(calls[1].opts.body),{enabled:true});
+    await h.sync.requestStashFolderFeed('f','preview');assert.match(calls[2].url.pathname,/\/feed\/preview$/);
+    await h.api.withAppDb(async db=>{const first=db.getFirstAsync;db.getFirstAsync=async(sql,...args)=>sql.includes('FROM crsql_changes')?{version:5}:first(sql,...args);});
+    await assert.rejects(h.sync.requestStashFolderFeed('f',true),/finish syncing/);
+    assert.equal(calls.length,3,'no enable command before outbound barrier');
+  } finally {await h.sync.disconnectStashSyncAndWait();}
+  await assert.rejects(h.sync.requestStashFolderFeed('f',false),/Connect/);
+});
+test('signout aborts and drains actual feed body reads; late success cannot cross into next session', async () => {
+  const h=feedReadyHarness(), body=deferred();let signal;
+  h.options.feedResponse=async(_url,opts)=>{signal=opts.signal;return {status:200,headers:new Headers(),text:()=>body.promise};};
+  await h.connect();await tick();
+  const request=h.sync.requestStashFolderFeed('f',true);const rejected=assert.rejects(request,/cancelled|Session changed/);
+  await tick();let done=false;const stop=h.sync.disconnectStashSyncAndWait().then(()=>{done=true;});
+  await tick();assert.equal(signal.aborted,true);assert.equal(done,false);
+  body.resolve('{"enabled":true}');await rejected;await stop;assert.equal(done,true);
+  await h.connect();await tick();
+  h.options.feedResponse=async()=>new Response('{"enabled":false}');
+  assert.equal((await (await h.sync.requestStashFolderFeed('f','status')).json()).enabled,false);
+  await h.sync.disconnectStashSyncAndWait();
+});
+test('same-signature recovery after a transient outage restores feed controls without reprojection', {timeout:7000}, async () => {
+  const h=feedReadyHarness(), first=h.options.statusResponse, outage=deferred(), recovered=deferred();
+  let polls=0, synced=0, projections=0;
+  h.sync.subscribeStashSyncProjection(()=>projections++);
+  h.options.statusResponse=async()=>{polls++;if(polls===2)throw Error('temporary feed outage');return first();};
+  h.options.feedResponse=async()=>new Response('{}');
+  const unsubscribe=h.sync.subscribeStashSyncStatus(s=>{
+    if(s.phase==='error' && /temporary feed outage/.test(s.message))outage.resolve();
+    if(s.phase==='synced' && ++synced===2)recovered.resolve();
+  });
+  try {
+    await h.connect();await outage.promise;
+    await assert.rejects(h.sync.requestStashFolderFeed('f','status'),/unavailable|incomplete/);
+    await recovered.promise;
+    assert.equal((await h.sync.requestStashFolderFeed('f','status')).status,200);
+    assert.equal(projections,1);
+  } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
 });

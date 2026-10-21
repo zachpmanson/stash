@@ -74,6 +74,7 @@ function RootLayout() {
         <Stack.Screen name="archive" options={{ title: "Archive" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="settings/sync" options={{ title: "Sync" }} />
+        <Stack.Screen name="folder-feed/[id]" options={{ title: "Folder feed" }} />
         <Stack.Screen name="text-substitutions" options={{ title: "Text Substitutions" }} />
         <Stack.Screen
           name="share"

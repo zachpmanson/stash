@@ -30,7 +30,9 @@ function openAndValidate(filename) {
     assert.equal(tables.length, 5, "missing one or more Stash CRR tables");
     return { schema, version: String(version) };
   } finally {
-    db.close();
+    // CRSQLite retains internal prepared statements until explicitly finalized;
+    // close alone can leave a read lock that blocks replacement policy writes.
+    try { db.prepare("SELECT crsql_finalize()").get(); } finally { db.close(); }
   }
 }
 
@@ -71,6 +73,19 @@ if (command === "backup") {
   await copyFile(source, replacement);
   await chmod(replacement, 0o600);
   openAndValidate(replacement);
+  // A restored snapshot must never silently republish stale folders. Preserve
+  // stable IDs/hashes/dates but require explicit enable after recovery review.
+  const restored = new Database(replacement, { fileMustExist: true });
+  try {
+    // Commit recovery policy into the replacement file itself, not an adjacent
+    // WAL whose old name would be lost at the atomic rename.
+    restored.pragma("journal_mode = DELETE");
+    restored.loadExtension(extensionPath);
+    if (restored.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_feeds'").get()) {
+      restored.prepare("UPDATE folder_feeds SET enabled=0").run();
+    }
+    restored.prepare("SELECT crsql_finalize()").get();
+  } finally { restored.close(); }
   await rename(replacement, databasePath);
   await Promise.all([
     rm(`${databasePath}-wal`, { force: true }),

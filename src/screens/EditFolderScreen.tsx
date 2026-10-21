@@ -146,6 +146,11 @@ export default function EditFolderScreen() {
           </Pressable>
         </View>
 
+        <Pressable accessibilityRole="button" style={styles.layoutOption} onPress={() => router.push({ pathname: "/folder-feed/[id]", params: { id: folderId } })}>
+          <Text style={styles.layoutLabel}>Feed</Text>
+          <Text style={styles.layoutSub}>Manage backend Atom publication separately. Saving this folder never enables a feed.</Text>
+        </Pressable>
+
         <Pressable style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.8 }]} onPress={handleSave}>
           <Text style={styles.saveBtnText}>Save</Text>
         </Pressable>

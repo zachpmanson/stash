@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { installApi } from "./api.js";
+import { canonicalFeedBase, initializeFeeds } from "./feeds.js";
+import { installFeedRoutes } from "./feed-routes.js";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { getRequestListener } from "@hono/node-server";
@@ -17,6 +19,7 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "./data");
 const SCHEMA_DIR = path.resolve(process.env.SCHEMA_DIR ?? "./schemas");
 const AUTH_USER = process.env.AUTH_USER ?? "zach";
 const TEST_ENDPOINTS = process.env.ENABLE_TEST_ENDPOINTS === "1";
+const FEED_BASE = canonicalFeedBase(process.env.FEED_BASE_URL);
 
 function parsePort(value: string): number {
   const port = Number(value);
@@ -156,7 +159,8 @@ for (const listener of process.listeners("SIGINT")) {
   if (!signalListenersBeforeAttach.has(listener)) process.removeListener("SIGINT", listener);
 }
 
-installApi(app, dbCache, AUTH_USER, () => fsnotify.notifyChanges(DATABASE_ROOM));
+installApi(app, dbCache, AUTH_USER, () => fsnotify.notifyChanges(DATABASE_ROOM), FEED_BASE);
+installFeedRoutes(app, dbCache, AUTH_USER, FEED_BASE);
 
 // Only these built artifacts are public routes. Never expose the source tree,
 // node_modules, data directory, dotfiles or an SPA fallback for unknown APIs.
@@ -209,6 +213,7 @@ await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
     throw new Error(`Persistent database does not match ${SCHEMA_NAME}@${SCHEMA_VERSION}`);
   }
   const db = peer.getDB();
+  initializeFeeds(db);
   const integrity = db.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);
   const tables = db.prepare(`SELECT name FROM sqlite_master
