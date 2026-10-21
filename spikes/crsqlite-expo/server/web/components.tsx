@@ -128,7 +128,7 @@ export function ItemCard({
           <small>
             {item.mediaUnavailable
               ? "Media · available on device"
-              : item.domain || item.type}
+              : item.domain || (item.type === "text" ? "Note" : "Link")}
           </small>
         </span>
       </button>

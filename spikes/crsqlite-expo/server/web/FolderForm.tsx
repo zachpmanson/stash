@@ -42,8 +42,14 @@ export function FolderForm({
         />
       </label>
       <div className="actions">
-        <button disabled={busy}>
-          {baseline === null ? "Create folder" : "Rename folder"}
+        <button type="submit" className="primary" disabled={busy}>
+          {busy
+            ? baseline === null
+              ? "Creating…"
+              : "Saving…"
+            : baseline === null
+              ? "Create folder"
+              : "Rename folder"}
         </button>
         <button type="button" disabled={busy} onClick={onCancel}>
           Cancel
