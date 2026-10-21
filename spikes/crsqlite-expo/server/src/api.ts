@@ -226,16 +226,32 @@ export function installApi(
       req.query.folderId === undefined ? null : id(req.query.folderId);
     const rows = db
       .prepare(
-        `SELECT ${columns} FROM sync_items i WHERE archived_at IS ${archived === "true" ? "NOT " : ""}NULL
+        `SELECT id, type, title, created_at, archived_at,
+        CASE WHEN type='text' THEN substr(content,1,240)
+          WHEN type='url' AND length(content)<=4096 THEN content ELSE NULL END AS content,
+        NULL AS description, NULL AS article_text
+        FROM sync_items i WHERE archived_at IS ${archived === "true" ? "NOT " : ""}NULL
       AND (? IS NULL OR EXISTS (SELECT 1 FROM sync_item_folders m JOIN sync_folders f ON f.id=m.folder_id
         WHERE m.item_id=i.id AND m.folder_id=? AND ${visibleFolder}))
       ORDER BY created_at DESC, id LIMIT 101 OFFSET ?`,
       )
       .all(folderId, folderId, Number(offset)) as ItemRow[];
     return {
-      items: rows
-        .slice(0, 100)
-        .map((row) => item(db, { ...row, content: null, article_text: null })),
+      items: rows.slice(0, 100).map((row) => {
+        const safe = item(db, row);
+        return {
+          ...safe,
+          content: null,
+          article_text: null,
+          description: null,
+          excerpt:
+            row.type === "text" ? (row.content?.slice(0, 240) ?? null) : null,
+          domain:
+            row.type === "url" && safe.content
+              ? new URL(safe.content).hostname
+              : null,
+        };
+      }),
       hasMore: rows.length > 100,
     };
   });
@@ -255,13 +271,21 @@ export function installApi(
   route("patch", "/folders/:id", true, (db, req) => {
     const folderId = id(req.params.id);
     requireFolder(db, folderId);
-    const data = body(req.body, ["name", "archived"]);
+    const data = body(req.body, ["name", "archived", "layout"]);
     if (!Object.keys(data).length) fail();
     if ("name" in data) {
       const name = text(data.name, 200)?.trim();
       if (!name) fail("Name required");
       db.prepare("UPDATE sync_folders SET name=? WHERE id=?").run(
         name,
+        folderId,
+      );
+    }
+    if ("layout" in data) {
+      if (data.layout !== "grid" && data.layout !== "list")
+        fail("Use grid or list layout");
+      db.prepare("UPDATE sync_folders SET layout=? WHERE id=?").run(
+        data.layout,
         folderId,
       );
     }
@@ -275,7 +299,9 @@ export function installApi(
     return { id: folderId };
   });
   route("post", "/items", true, (db, req) => {
-    const data = body(req.body, ["type", "content", "title"]);
+    const data = body(req.body, ["type", "content", "title", "folderId"]);
+    const folderId = data.folderId === undefined ? null : id(data.folderId);
+    if (folderId) requireFolder(db, folderId);
     if (data.type !== "text" && data.type !== "url")
       fail("Only text and links can be created");
     const content =
@@ -286,6 +312,10 @@ export function installApi(
     db.prepare(
       "INSERT INTO sync_items (id,type,content,title,created_at) VALUES (?,?,?,?,?)",
     ).run(itemId, data.type, content, title, Date.now());
+    if (folderId)
+      db.prepare(
+        "INSERT INTO sync_item_folders (membership_id,item_id,folder_id,added_at) VALUES (?,?,?,?)",
+      ).run(randomUUID(), itemId, folderId, Date.now());
     return { id: itemId };
   });
   route("patch", "/items/:id", true, (db, req) => {

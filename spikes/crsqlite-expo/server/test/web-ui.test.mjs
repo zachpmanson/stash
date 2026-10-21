@@ -124,7 +124,7 @@ test("component flows: loading, read, create, edit, membership, archive, filters
     });
   const buttons = () => renderer.root.findAllByType("button");
   const button = (label) =>
-    buttons().find((node) => node.children.join("") === label);
+    buttons().find((node) => node.props['aria-label'] === label || node.children.join("") === label);
   try {
     let release;
     pending = new Promise((resolve) => {
@@ -137,7 +137,7 @@ test("component flows: loading, read, create, edit, membership, archive, filters
     pending = null;
     await flush(() => release());
     const itemButton = buttons().find(
-      (node) => node.props["aria-pressed"] === false,
+      (node) => node.props["data-item-id"] === 'i1',
     );
     await flush(() => itemButton.props.onClick());
     assert.ok(renderer.root.findByType(ItemReader));
@@ -158,16 +158,19 @@ test("component flows: loading, read, create, edit, membership, archive, filters
           (node) =>
             node.props.type === "checkbox" &&
             node.props.checked === false &&
-            node.props.onChange &&
-            node !== renderer.root.findAllByType("input")[0],
+            node.props.onChange,
         )
         .props.onChange({ target: { checked: true } }),
     );
     assert.deepEqual(item.folderIds, ["f1"]);
     await flush(() => button("Archive item").props.onClick());
     assert.equal(item.archived_at, 1);
+    assert.equal(renderer.root.findAllByType(ItemReader).length, 0);
+    await flush(() => buttons().find(node => node.props['aria-pressed'] === false && node.children.includes('Archive')).props.onClick());
+    await flush(() => buttons().find(node => node.props['data-item-id'] === 'i1').props.onClick());
     assert.ok(button("Unarchive item"));
     await flush(() => button("Unarchive item").props.onClick());
+    await flush(() => buttons().find(node => node.props['aria-pressed'] === true && node.children.includes('Archive')).props.onClick());
     await flush(() => button("New item").props.onClick());
     await flush(() =>
       renderer.root
@@ -193,11 +196,7 @@ test("component flows: loading, read, create, edit, membership, archive, filters
             call.credentials === "same-origin",
         ),
     );
-    await flush(() =>
-      renderer.root
-        .findAllByType("select")[0]
-        .props.onChange({ target: { value: "f1" } }),
-    );
+    await flush(() => buttons().find(node => node.props.title === 'Reading').props.onClick());
     assert.ok(calls.some((call) => call.url.includes("folderId=f1")));
     fail = true;
     await flush(() => button("Refresh").props.onClick());

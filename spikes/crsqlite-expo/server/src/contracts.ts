@@ -18,6 +18,9 @@ export type WebItem = {
   archived_at: number | null;
   folderIds: string[];
   mediaUnavailable: boolean;
+  /** Bounded plaintext preview; list responses never include full content. */
+  excerpt?: string | null;
+  domain?: string | null;
 };
 export type WebItemPage = { items: WebItem[]; hasMore: boolean };
 export type Created = { id: string };

@@ -24,6 +24,7 @@
     "xml-js": "1.6.11"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "4.1.18",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
@@ -31,6 +32,7 @@
     "esbuild": "0.25.12",
     "fast-xml-parser": "5.11.2",
     "react-test-renderer": "19.2.4",
+    "tailwindcss": "4.1.18",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "ws": "8.18.3"

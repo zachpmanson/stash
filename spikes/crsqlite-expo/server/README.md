@@ -85,17 +85,17 @@ The server uses Node 24, `@vlcn.io/ws-server@0.2.3`, `@vlcn.io/ws-common@0.2.0`,
 
 ## Online frontend development
 
-All web source is under this standalone flake's input (`web/`); esbuild bundles React/TS/CSS into `dist/public` with no CDN scripts. `pnpm build` preserves **`dist/src/server.js`** as the package entrypoint. The Nix derivation builds the frontend and CRSQLite/native addon using Node 24, pinned Node headers, the lockfile and `fetchPnpmDeps` hash. Do not run these native addons in the root app's potentially Node 22 devshell. `pnpm build` must precede `pnpm dev`/`pnpm start` so the assets exist. Rebuild after web-source edits; `pnpm dev` watches the service TS only.
+All web source is under this standalone flake's input (`web/`); esbuild bundles React/TS into `dist/public/app.js`; pinned **Tailwind v4.1.18** compiles the single `web/style.css` entry into `dist/public/app.css`. CSS is not imported into esbuild: there is exactly one CSS output pipeline, no CDN, runtime engine or Vite server. `pnpm build` preserves **`dist/src/server.js`** as the package entrypoint. The Nix derivation builds the frontend and CRSQLite/native addon using Node 24, pinned Node headers, the lockfile and `fetchPnpmDeps` hash. Do not run these native addons in the root app's potentially Node 22 devshell. `pnpm build` must precede `pnpm dev`/`pnpm start` so the assets exist. Rebuild after web-source edits; `pnpm dev` watches the service TS only.
 
 Use **fresh disposable directories**, never the Naboo paths:
 
 ```sh
 # From spikes/crsqlite-expo/server; run in foreground.
-AUTH_USER=dev DATA_DIR="$(mktemp -d)" SCHEMA_DIR="$(mktemp -d)" \
+PORT=18787 AUTH_USER=dev DATA_DIR="$(mktemp -d)" SCHEMA_DIR="$(mktemp -d)" \
   nix develop --cores 2 --max-jobs 1 --command pnpm dev
 ```
 
-For a local browser, use a separately started **loopback-only disposable** Caddy instance with Basic authentication protecting every path, proxying to `127.0.0.1:8787` and overwriting `X-Auth-User` with `dev`. Supply a disposable development password hash, not a real credential. Example Caddyfile (replace the placeholder before running):
+For a local browser, use a separately started **loopback-only disposable** Caddy instance with Basic authentication protecting every path, proxying to the disposable port `127.0.0.1:18787` and overwriting `X-Auth-User` with `dev`. Supply a disposable development password hash, not a real credential. Example Caddyfile (replace the placeholder before running):
 
 ```caddyfile
 http://127.0.0.1:8080 {
@@ -103,7 +103,7 @@ http://127.0.0.1:8080 {
   basic_auth {
     dev <disposable-development-password-hash>
   }
-  reverse_proxy 127.0.0.1:8787 {
+  reverse_proxy 127.0.0.1:18787 {
     header_up X-Auth-User dev
   }
 }
@@ -119,10 +119,10 @@ All `/api` paths require the trusted stamped identity. `src/contracts.ts` define
 | --- | --- |
 | `GET /api/folders` | Logical folders, including archived; tombstones hidden unless native add-wins survival applies |
 | `POST /api/folders` | `{name}` (1–200 characters after trimming); server-generated ID |
-| `PATCH /api/folders/:id` | Nonempty subset `{name, archived: boolean}` |
-| `GET /api/items?folderId=…&archived=false&offset=0` | Stable newest-first pages of 100 plus `hasMore`; list content/article text omitted |
+| `PATCH /api/folders/:id` | Nonempty subset `{name, archived: boolean, layout: "grid" | "list"}` |
+| `GET /api/items?folderId=…&archived=false&offset=0` | Stable newest-first pages of 100 plus `hasMore`; content/article/description omitted; text `excerpt` ≤240 characters and credential-free URL `domain` only |
 | `GET /api/items/:id` | Plaintext detail and distinct logical `folderIds`; explicit media-unavailable placeholder |
-| `POST /api/items` | `{type: "text" | "url", content, title?}`; server-generated ID |
+| `POST /api/items` | `{type: "text" | "url", content, title?, folderId?}`; server-generated ID; optional initial membership validated and inserted atomically |
 | `PATCH /api/items/:id` | Nonempty subset `{content, title, archived: boolean}`; type cannot change |
 | `PUT /api/items/:id/folders/:folderId` | `{present: boolean}`; pair-specific observed removal / fresh generation add |
 
@@ -134,6 +134,17 @@ HTTP and native WS borrow the same extension-loaded `DBCache` handle. Transactio
 
 The UI polls every 30 seconds while visible, refreshes on focus, and provides manual Refresh/Retry. Editing pauses background refresh; its observed baseline is frozen and only dirty fields are submitted, so changing a title does not overwrite concurrent native content. Unchanged edits make no write. A deleted selected item or removed folder filter is cleared rather than poisoning later refreshes; writes show pending/error feedback. This is online-only: no optimistic/offline write queue, conflict editor, hard delete, browser Basic signout or media rendering. Folder ordering uses portable creation time, not native-only `last_used_at`. Pagination is offset-based; concurrent creation can move page boundaries, so refresh to reconcile.
 
+## Desktop interface
+
+- Fixed header and independently scrolling folder/collection/reader panes. Below 1200 CSS pixels the reader becomes a focused drawer; below 760 pixels the sidebar becomes a keyboard-contained drawer and the reader replaces the collection with Back. A 200% desktop-zoom-equivalent viewport is tested.
+- All items is virtual and defaults to list. Its layout lives only in browser storage. Real folders use replicated `sync_folders.layout`; changing layout writes only that column, waits for success, and preserves selection/collection scroll. Grid is always exactly two columns, including an unspanned odd final card.
+- Archive is **archived-only**, never mixed and never a bulk mutation. It retains the folder filter, includes active folders plus a separate archived-folder group, and hides creation. Item archive/restore selects the next visible item (or previous/empty) and offers Undo. Folder archive does not cascade.
+- Folder/item/archive/page state is in the URL for refresh, deep links and Back/Forward; record content and credentials are never put there. Draft navigation/unload requires confirmation. Editors freeze their observed baseline and skip unchanged writes; remote item deletion/folder disappearance invalidates editing but preserves unrelated new drafts.
+- New item creation in a selected folder includes its initial membership in the same transaction. Organise changes one explicit membership at a time without replacing others. Card excerpts are escaped plaintext; link cards show safe domain metadata without per-card fetches.
+- Arrow keys move card focus; Enter opens, Escape/Back returns focus. Buttons are labelled and focus is visible. Refresh keeps loaded cards, with separate saving/loading/refresh/error states. No fake Basic-auth logout.
+
+No staging target is defined. This source/build does **not** authorize deploying to the owner-connected production service. Media/thumbnails, offline browser sync, search, drag/drop/bulk actions, resizable splitters and other native feature parity remain deferred under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
+
 ## Added validation and limitations
 
 `pnpm test` runs existing auth/cache/schema/preflight/lifecycle tests plus:
@@ -142,17 +153,18 @@ The UI polls every 30 seconds while visible, refreshes on focus, and provides ma
 - Missing/wrong identities (including unknown API routes), malformed and oversized JSON including chunked bodies, types/unknown fields, URL schemes/credentials, SQL injection, rollback, CSRF, pagination, static traversal/MIME/CSP and test-hooks-off behavior.
 - Explicit same-process notifications with the filesystem watcher stopped, plus patched runtime/source parity.
 - Exact-origin/scheme/proxy/native-no-Origin WS upgrade guards, dirty-field edits across concurrent refresh, unchanged-edit no-op, selected-item404 recovery and removed-folder filter recovery.
-- React component state/interaction tests and static rendering safety checks. `react-test-renderer` currently emits its upstream deprecation warning; these are **not** a real browser/accessibility-engine/physical Android E2E claim.
+- React component state/interaction tests and static rendering safety checks, including guarded new-folder/rename → item-edit transitions, mutually exclusive editors, Back discards, and filter-independent new-folder identity after remote removal (owned renames still invalidate). `react-test-renderer` currently emits its upstream deprecation warning; these are **not** a real browser/accessibility-engine/physical Android E2E claim.
 
 Optional real-browser smoke (provide installed Chromium/Caddy binaries; uses only fresh disposable loopback services/profiles/synthetic credentials and blocks external browser traffic):
 
 ```sh
 CADDY_BIN=/path/to/caddy CHROMIUM_BIN=/path/to/chromium \
   STASH_TEST_SERVER_ENTRY="$package/dist/src/server.js" \
+  STASH_SCREENSHOT_DIR=/tmp/stash-synthetic-screenshots \
   nix develop --cores 2 --max-jobs 1 --command node test/browser-smoke.mjs
 ```
 
-This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, verifies same-origin replication, and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
+This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, exercises real dirty-draft confirmation dialogs, creates a folder and atomically files an item, checks exact two-column CSS/layout persistence/scroll retention/selection/history/archive/Undo, keyboard focus return, narrow drawers and a 200%-zoom-equivalent layout. Optional screenshots contain synthetic examples only. It additionally verifies both folder-draft regressions with real input values/DOM identity/confirmation dialogs, and combined desktop atomic filing/layout with private Atom feeds behind cached Basic authentication. It also verifies same-origin replication and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
 
 The test script sets `NODE_PATH=./node_modules` so the immutable native harness resolves the server's TypeScript without installing the root app dependency tree. To additionally run its existing restore regressions from this server directory:
 
