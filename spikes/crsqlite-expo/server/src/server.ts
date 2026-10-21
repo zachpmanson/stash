@@ -2,8 +2,12 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { installApi } from "./api.js";
 import Database from "better-sqlite3";
-import express from "express";
+import { Hono } from "hono";
+import { getRequestListener } from "@hono/node-server";
+import { readFile } from "node:fs/promises";
 import { attachWebsocketServer, internal } from "@vlcn.io/ws-server";
 import { DATABASE_ROOM, SCHEMA_NAME, SCHEMA_SQL, SCHEMA_VERSION } from "../schema.js";
 
@@ -20,6 +24,27 @@ function parsePort(value: string): number {
     throw new Error(`PORT must be an integer from 1 to 65535 (received ${JSON.stringify(value)})`);
   }
   return port;
+}
+
+// Browser WebSockets reuse cached HTTP Basic credentials across origins. Caddy's
+// identity stamp is necessary but not sufficient: browsers must be same-origin.
+// Native peers may omit Origin; a present opaque/foreign/malformed one is denied.
+function allowedWebSocketOrigin(request: IncomingMessage): boolean {
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite !== undefined && !["same-origin", "same-site", "none"].includes(String(fetchSite))) return false;
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  const host = request.headers.host;
+  const forwarded = request.headers["x-forwarded-proto"];
+  // Caddy overwrites this header. Direct loopback Node HTTP uses http.
+  const protocol = forwarded === undefined ? "http" : forwarded;
+  if (typeof origin !== "string" || !host || !["http", "https"].includes(String(protocol))) return false;
+  try {
+    const source = new URL(origin);
+    const target = new URL(`${protocol}://${host}`);
+    return origin === source.origin && !source.username && !source.password && !source.search && !source.hash &&
+      source.pathname === "/" && source.origin === target.origin;
+  } catch { return false; }
 }
 
 if (!AUTH_USER || /[\r\n]/.test(AUTH_USER)) throw new Error("AUTH_USER must be a non-empty single-line identity");
@@ -51,20 +76,16 @@ function log(level: "info" | "warn" | "error", event: string, fields: Record<str
   process.stdout.write(`${JSON.stringify({ time: new Date().toISOString(), level, event, ...fields })}\n`);
 }
 
-const app = express();
-app.disable("x-powered-by");
-app.use(express.json({ limit: "16kb" }));
-app.get("/healthz", (_request, response) => response.json({ ok: true, bind: HOST, port: PORT, schema: SCHEMA_NAME, schemaVersion: SCHEMA_VERSION.toString() }));
-app.get("/sync/status", async (request, response, next) => {
-  if (request.header("X-Auth-User") !== AUTH_USER) {
-    response.sendStatus(401);
-    return;
-  }
+const app = new Hono();
+app.onError((_error, c) => c.json({ error: "Request failed" }, 500));
 
-  const clientSiteId = request.query.clientSiteId;
+app.get("/healthz", (c) => c.json({ ok: true, bind: HOST, port: PORT, schema: SCHEMA_NAME, schemaVersion: SCHEMA_VERSION.toString() }));
+app.get("/sync/status", async (c) => {
+  if (c.req.header("X-Auth-User") !== AUTH_USER) return c.json({ error: "Unauthorized" }, 401);
+
+  const clientSiteId = c.req.query("clientSiteId");
   if (typeof clientSiteId !== "string" || !/^[0-9a-f]{32}$/i.test(clientSiteId)) {
-    response.status(400).json({ error: "clientSiteId must be a 16-byte hex site ID" });
-    return;
+    return c.json({ error: "clientSiteId must be a 16-byte hex site ID" }, 400);
   }
 
   try {
@@ -99,13 +120,11 @@ app.get("/sync/status", async (request, response, next) => {
         counts,
       };
     });
-    response.json(result);
-  } catch (error) {
-    next(error);
-  }
+    return c.json(result as object);
+  } catch { return c.json({ error: "Request failed" }, 500); }
 });
 
-const server = createServer(app);
+const server = createServer(getRequestListener(app.fetch));
 const sockets = new Set<Socket>();
 server.on("connection", (socket) => {
   sockets.add(socket);
@@ -126,8 +145,9 @@ const dbCache = attachWebsocketServer(
   fsnotify,
   (request: IncomingMessage, _token: string | null, callback: (error: Error | null) => void) => {
     const identity = request.headers["x-auth-user"];
-    if (identity === AUTH_USER) callback(null);
-    else callback(new Error("unauthenticated WebSocket upgrade"));
+    if (identity !== AUTH_USER) callback(new Error("unauthenticated WebSocket upgrade"));
+    else if (!allowedWebSocketOrigin(request)) callback(new Error("cross-origin WebSocket upgrade"));
+    else callback(null);
   },
 );
 // Upstream's eager SIGINT handler destroys database state before connected WS
@@ -136,20 +156,40 @@ for (const listener of process.listeners("SIGINT")) {
   if (!signalListenersBeforeAttach.has(listener)) process.removeListener("SIGINT", listener);
 }
 
+installApi(app, dbCache, AUTH_USER, () => fsnotify.notifyChanges(DATABASE_ROOM));
+
+// Only these built artifacts are public routes. Never expose the source tree,
+// node_modules, data directory, dotfiles or an SPA fallback for unknown APIs.
+const builtPublic = fileURLToPath(new URL("../public/", import.meta.url));
+const publicDir = existsSync(builtPublic) ? builtPublic : fileURLToPath(new URL("../dist/public/", import.meta.url));
+for (const [route, file] of [["/", "index.html"], ["/assets/app.js", "app.js"], ["/assets/app.css", "app.css"]]) {
+  app.get(route, async (c) => {
+    if (c.req.header("X-Auth-User") !== AUTH_USER) return c.json({ error: "Unauthorized" }, 401);
+    const headers = {
+      "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "Referrer-Policy": "no-referrer",
+      "Content-Type": file.endsWith(".js") ? "text/javascript; charset=utf-8" : file.endsWith(".css") ? "text/css; charset=utf-8" : "text/html; charset=utf-8",
+    };
+    try { return c.body(new Uint8Array(await readFile(path.join(publicDir, file))), 200, headers); }
+    catch { return c.notFound(); }
+  });
+}
+
 if (TEST_ENDPOINTS) {
   // Private integration-test hooks; disabled unless explicitly opted in.
-  app.post("/test/offline-write", async (_request, response, next) => {
+  app.post("/test/offline-write", async (c) => {
     try {
       await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
         peer.getDB().prepare(`INSERT OR IGNORE INTO sync_items (id, type, content, title, created_at)
           VALUES (?, 'text', ?, ?, 1)`)
           .run("server-offline-item", "written on the server while the app was offline", "Server offline item");
       });
-      response.json({ ok: true });
-    } catch (error) { next(error); }
+      return c.json({ ok: true });
+    } catch { return c.json({ error: "Request failed" }, 500); }
   });
 
-  app.get("/test/items", async (_request, response, next) => {
+  app.get("/test/items", async (c) => {
     try {
       let items: unknown[] = [];
       await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
@@ -157,8 +197,8 @@ if (TEST_ENDPOINTS) {
           "SELECT id, type, content, title FROM sync_items ORDER BY id",
         ).all();
       });
-      response.json(items);
-    } catch (error) { next(error); }
+      return c.json(items);
+    } catch { return c.json({ error: "Request failed" }, 500); }
   });
 }
 
