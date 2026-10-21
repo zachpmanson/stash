@@ -263,6 +263,7 @@ export function App() {
     if (busy || !discard()) return;
     dirty.current = false;
     setEditor(null);
+    setFolderAction(null);
     setDetail(null);
     writeRoute({ ...route, selected: "" });
     const target =
@@ -514,7 +515,7 @@ export function App() {
           )}
           {folderAction && (
             <FolderForm
-              key={`${folderAction}-${folderId}`}
+              key={folderAction === "new" ? "new" : `rename-${folderId}`}
               initialName={
                 folderAction === "new" ? null : (activeFolder?.name ?? "")
               }
@@ -763,7 +764,9 @@ export function App() {
                         aria-label="Edit item"
                         disabled={busy}
                         onClick={() => {
+                          if (!discard()) return;
                           dirty.current = false;
+                          setFolderAction(null);
                           setEditor("edit");
                         }}
                       >

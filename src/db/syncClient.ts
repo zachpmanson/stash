@@ -47,6 +47,12 @@ export type StashSyncStatus = {
   phase: SyncPhase;
   message?: string;
   projectedAt?: number;
+  /** Established session identity only; no password or URL userinfo. */
+  account?: { username: string; serverUrl: string };
+  /** Stop/cancel requested, but attempt/session.done has not yet drained. */
+  disconnecting?: boolean;
+  /** Teardown failed closed; no further connection is safe before restart. */
+  restartRequired?: boolean;
 };
 type SyncListener = (status: StashSyncStatus) => void;
 type ServerSyncStatus = {
@@ -80,15 +86,67 @@ let connectionAttempt: SyncConnectionAttempt | null = null;
 let syncRestoreInProgress = false;
 // A failed teardown cannot prove that callbacks have stopped. Fail closed until restart.
 let shutdownFailure: { error: unknown } | null = null;
+// UI-only teardown state; ownership and completion remain with attempt/session.done.
+let teardownInProgress = false;
+
+// Only the active authenticated session can issue narrowly scoped feed commands.
+// Never expose Authorization to UI/state/storage or let callers choose a URL.
+const feedRequests = new Set<Promise<Response>>();
+let feedSession: { request: (id: string, action: "status" | "preview" | boolean, signal?: AbortSignal) => Promise<Response> } | null = null;
+export async function requestStashFolderFeed(id: string, action: "status" | "preview" | boolean, signal?: AbortSignal): Promise<Response> {
+  const session = feedSession;
+  if (!session || teardownInProgress || syncRestoreInProgress || shutdownFailure) throw new Error("Connect in Settings → Sync and complete the initial exchange first.");
+  if (!id || id.length > 200 || id.includes("\0")) throw new Error("Invalid folder.");
+  const pending = session.request(id, action, signal);
+  feedRequests.add(pending);
+  try {
+    const response = await pending;
+    if (session !== feedSession || teardownInProgress || signal?.aborted) throw new Error("Session changed. Refresh feed status.");
+    return response;
+  } finally { feedRequests.delete(pending); }
+}
 
 // Observers must never interrupt lifecycle bookkeeping or DB teardown.
 function notifyStatusListener(listener: SyncListener, status: StashSyncStatus): void {
   try { listener(status); } catch (error) { console.warn("Stash sync status listener failed", error); }
 }
 
+function withTeardownStatus(status: StashSyncStatus): StashSyncStatus {
+  const { disconnecting: _disconnecting, restartRequired: _restartRequired, account, ...rest } = status;
+  return {
+    ...rest,
+    ...(!teardownInProgress && !shutdownFailure && account ? { account } : {}),
+    ...(teardownInProgress ? { disconnecting: true } : {}),
+    ...(shutdownFailure ? { restartRequired: true } : {}),
+  };
+}
+
 function publishStatus(status: StashSyncStatus): void {
-  currentStatus = status;
-  for (const listener of statusListeners) notifyStatusListener(listener, status);
+  const next = withTeardownStatus(status);
+  currentStatus = next;
+  for (const listener of statusListeners) {
+    // An earlier observer may synchronously stop/cancel and publish newer state.
+    if (currentStatus !== next) break;
+    notifyStatusListener(listener, next);
+  }
+}
+
+function publishTeardownStatusIfChanged(): void {
+  const next = withTeardownStatus(currentStatus);
+  if (next.disconnecting !== currentStatus.disconnecting || next.restartRequired !== currentStatus.restartRequired || next.account !== currentStatus.account) {
+    publishStatus(next);
+  }
+}
+
+function setTeardownInProgress(pending: boolean): void {
+  teardownInProgress = pending;
+  publishTeardownStatusIfChanged();
+}
+
+function recordShutdownFailure(error: unknown): void {
+  shutdownFailure = { error };
+  teardownInProgress = false;
+  publishTeardownStatusIfChanged();
 }
 
 export function subscribeStashSyncStatus(listener: SyncListener): () => void {
@@ -115,6 +173,7 @@ function normalizedBaseUrl(value: string): URL {
   if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) {
     throw new Error("Basic-auth credentials require HTTPS outside localhost");
   }
+  if (url.username || url.password) throw new Error("Use a server URL without embedded credentials.");
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
   url.search = "";
   url.hash = "";
@@ -414,7 +473,7 @@ export async function connectStashSync(
   if (shutdownFailure) throw shutdownFailure.error;
   if (syncRestoreInProgress) throw new Error("Stash sync cannot connect while a backup restore is in progress.");
   if (activeSession || connectionAttempt) throw new Error("Stash sync is already connected or connecting on this install.");
-  const notifyStatus = (status: StashSyncStatus) => notifyStatusListener(onStatus, status);
+  const notifyStatus = (status: StashSyncStatus) => notifyStatusListener(onStatus, withTeardownStatus(status));
 
   const attempt: SyncConnectionAttempt = {
     cancelled: false,
@@ -423,6 +482,7 @@ export async function connectStashSync(
     cancel: () => {
       attempt.cancelled = true;
       attempt.controller.abort();
+      setTeardownInProgress(true);
     },
   };
   connectionAttempt = attempt;
@@ -434,6 +494,8 @@ export async function connectStashSync(
   // disconnect/restore and wait for this attempt.
   attempt.done = Promise.resolve().then(async () => {
     try {
+      // A synchronous cancel may precede this deferred setup notification.
+      if (attempt.cancelled) return;
       notifyStatus({ phase: "connecting", message: "Checking authenticated Stash sync server…" });
       if (attempt.cancelled) return;
       const base = normalizedBaseUrl(serverUrl);
@@ -482,10 +544,11 @@ export async function connectStashSync(
         // ourselves, then drain outbound reads and queued inbound writes.
         try { syncReplicaRef.current?.close(false); } catch (error) { errors.push(error); }
         cleanup = (async () => {
+          await Promise.allSettled([...feedRequests]);
           await syncReplicaRef.current?.waitForPendingChanges();
           if (errors.length) throw errors[0];
         })();
-        void cleanup.catch((error) => { shutdownFailure = { error }; });
+        void cleanup.catch(recordShutdownFailure);
         return cleanup;
       };
       try {
@@ -513,17 +576,67 @@ export async function connectStashSync(
         throw error;
       }
 
+      // Only expose non-secret identity after authentication and all setup succeed.
+      const displayBase = new URL(base.toString());
+      displayBase.username = "";
+      displayBase.password = "";
+      const account = { username: credentials.username.trim(), serverUrl: displayBase.toString() };
+      let feedReady = false;
+      const notifySessionStatus = (status: StashSyncStatus) => {
+        feedReady = status.phase === "synced";
+        notifyStatus({ ...status, account });
+      };
       let running = true;
       let projectedSignature = "";
+      let lastProjectedAt: number | undefined;
       const replica = syncReplicaRef.current!;
+      const sessionFeed = {
+        request: async (id: string, action: "status" | "preview" | boolean, signal?: AbortSignal) => {
+          if (!running || !feedReady) throw new Error("Sync unavailable or incomplete. Finish syncing before managing feeds.");
+          const controller = new AbortController();
+          const abort = () => controller.abort();
+          attempt.controller.signal.addEventListener("abort", abort);
+          signal?.addEventListener("abort", abort);
+          if (attempt.controller.signal.aborted || signal?.aborted) controller.abort();
+          const timeout = setTimeout(abort, 15000);
+          try {
+            if (action === true) {
+              const remote = await readServerStatus(base, authorization, clientSiteId, controller.signal);
+              const exchange = await isExchanged(replica, clientSiteId, remote);
+              if (!exchange.complete || !running) throw new Error("Wait for folder changes to finish syncing, then retry.");
+            }
+            const endpoint = `api/folders/${encodeURIComponent(id)}/feed${action === "preview" ? "/preview" : ""}`;
+            const response = await fetch(new URL(endpoint, base), {
+              method: typeof action === "boolean" ? "PUT" : "GET",
+              headers: { Authorization: authorization, "X-Stash-Request": "1", "Content-Type": "application/json" },
+              ...(typeof action === "boolean" ? { body: JSON.stringify({ enabled: action }) } : {}),
+              signal: controller.signal,
+              redirect: "error",
+            });
+            // Consume the response under the session/timeout boundary too.
+            const body = await response.text();
+            if (!running || controller.signal.aborted) throw new Error("Feed request cancelled.");
+            return new Response(body, { status: response.status, headers: response.headers });
+          } finally {
+            clearTimeout(timeout);
+            attempt.controller.signal.removeEventListener("abort", abort);
+            signal?.removeEventListener("abort", abort);
+          }
+        },
+      };
       const session: SyncSession = {
         done: Promise.resolve(),
         stop: () => {
           if (!running) return false;
           running = false;
+          feedReady = false;
+          if (feedSession === sessionFeed) feedSession = null;
+          teardownInProgress = true;
           attempt.controller.abort();
           void stopAndDrain();
           notifyStatus({ phase: "stopped", message: "Sync disconnected." });
+          // Custom onStatus callbacks need not publish to the shared subscription.
+          publishTeardownStatusIfChanged();
           return true;
         },
       };
@@ -549,19 +662,24 @@ export async function connectStashSync(
               });
               if (!running) break;
               if (pending) {
-                notifyStatus({ phase: "syncing", message: "Uploading recovery relationship reconciliation…" });
+                notifySessionStatus({ phase: "syncing", message: "Uploading recovery relationship reconciliation…" });
                 continue;
               }
               projectedSignature = exchange.signature;
-              const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: Date.now() };
-              notifyStatus(state);
+              lastProjectedAt = Date.now();
+              const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: lastProjectedAt };
+              notifySessionStatus(state);
               publishProjection();
             } else if (!exchange.complete) {
-              notifyStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
+              notifySessionStatus({ phase: "syncing", message: "Waiting for both replicas to exchange all changes…" });
+            } else if (!feedReady) {
+              // A transient status outage need not change the DB signature.
+              // Recover availability without another projection/replicated write.
+              notifySessionStatus({ phase: "synced", message: "Stash data is in sync.", projectedAt: lastProjectedAt });
             }
           } catch (error) {
             if (!running) break;
-            notifyStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+            notifySessionStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
           }
           if (running) await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_MS));
         }
@@ -571,12 +689,18 @@ export async function connectStashSync(
         async (error) => { await stopAndDrain(); throw error; },
       );
       void session.done.then(
-        () => { if (activeSession === session) activeSession = null; },
-        (error) => { shutdownFailure = { error }; },
+        () => {
+          if (activeSession === session) {
+            activeSession = null;
+            setTeardownInProgress(false);
+          }
+        },
+        recordShutdownFailure,
       );
       activeSession = session;
+      feedSession = sessionFeed;
       result = session;
-      notifyStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
+      notifySessionStatus({ phase: "syncing", message: "Connected; exchanging sync changes…" });
     } catch (error) {
       if (!attempt.cancelled || shutdownFailure) {
         setupFailed = true;
@@ -585,6 +709,7 @@ export async function connectStashSync(
       }
     } finally {
       if (connectionAttempt === attempt) connectionAttempt = null;
+      if (attempt.cancelled && !activeSession) setTeardownInProgress(false);
     }
   });
 

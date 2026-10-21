@@ -4,6 +4,8 @@ Node 24/TypeScript, Hono HTTP routing, bundled React, and the existing raw Node 
 
 Source baseline: **`9f238df`**, the reviewed but unmerged prerequisite [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58). This branch includes that prerequisite until it integrates; review the new implementation with `git diff 9f238df..HEAD`. Implementation/review used only disposable state and synthetic credentials, with no live service/database/device access. Zach subsequently authorized deployment **after independent review/fixes pass**; activation, exact pin and private backup evidence are tracked on the issue and Nix operational runbook rather than inferred from a successful build. Media sync remains separate under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
+Private folder Atom feeds and Android controls: see [`../../../docs/folder-feeds.md`](../../../docs/folder-feeds.md) for review baseline, API/content/cache/recovery semantics, disposable validation and future owner-approved configuration. Feeds stay behind Caddy Basic authentication; this change is **not deployed**.
+
 ## Trust boundary
 
 - The listener is fixed to `127.0.0.1`; there is no bind-address override or firewall listener. Naboo Caddy is the only ingress.
@@ -25,6 +27,7 @@ Malformed WebSocket handshakes are rejected with HTTP 400 instead of throwing th
 | `SCHEMA_DIR` | `./schemas` | Server schema directory (the pinned candidate schema is written at startup) |
 | `AUTH_USER` | `zach` | Exact Caddy-stamped `X-Auth-User` for HTTP API/assets and WS upgrades |
 | `ENABLE_TEST_ENDPOINTS` | unset | Set to `1` only for local integration tests |
+| `FEED_BASE_URL` | unset | Explicit credential-free HTTPS origin for private Atom links; unset → feed operations unavailable. Never inferred from Host. |
 
 Before invoking the upstream database factory or writing a schema file, startup opens any existing database **read-only** and requires its stored schema name/version to match the compiled candidate exactly. Missing/unrecognized metadata also fails closed. An existing resident schema file must match the compiled DDL byte-for-byte; it is never silently overwritten. This prevents the upstream factory's automatic migration from running on a database with an unexpected identity/version. Fresh databases remain supported; current-schema startup then checks all five candidate CRR tables and SQLite `integrity_check` before opening the listener. This is not a general migration policy or a full DDL-drift detector for a database whose metadata has been manually forged; schema changes require a separately reviewed migration/recovery procedure. Rolling back code alone is not a data rollback. `/healthz` reports readiness and the schema version. `/sync/status?clientSiteId=<hex>` requires the Caddy-stamped identity and reports the highest outbound version available to that client (excluding changes the client already originated), plus the highest version received from it and aggregate table counts. The app also compares its tracked version for the server site ID. Together these checks form the two-way completion barrier before destructive projection into Stash's local tables. The high-water marks follow ws-client 0.2.0's `(db_version, 0)` whole-version-group convention. Logs are newline-delimited JSON; the upstream websocket library may also emit its own logs.
 
@@ -150,7 +153,7 @@ No staging target is defined. This source/build does **not** authorize deploying
 - Missing/wrong identities (including unknown API routes), malformed and oversized JSON including chunked bodies, types/unknown fields, URL schemes/credentials, SQL injection, rollback, CSRF, pagination, static traversal/MIME/CSP and test-hooks-off behavior.
 - Explicit same-process notifications with the filesystem watcher stopped, plus patched runtime/source parity.
 - Exact-origin/scheme/proxy/native-no-Origin WS upgrade guards, dirty-field edits across concurrent refresh, unchanged-edit no-op, selected-item404 recovery and removed-folder filter recovery.
-- React component state/interaction tests and static rendering safety checks. `react-test-renderer` currently emits its upstream deprecation warning; these are **not** a real browser/accessibility-engine/physical Android E2E claim.
+- React component state/interaction tests and static rendering safety checks, including guarded new-folder/rename → item-edit transitions, mutually exclusive editors, Back discards, and filter-independent new-folder identity after remote removal (owned renames still invalidate). `react-test-renderer` currently emits its upstream deprecation warning; these are **not** a real browser/accessibility-engine/physical Android E2E claim.
 
 Optional real-browser smoke (provide installed Chromium/Caddy binaries; uses only fresh disposable loopback services/profiles/synthetic credentials and blocks external browser traffic):
 
@@ -161,7 +164,7 @@ CADDY_BIN=/path/to/caddy CHROMIUM_BIN=/path/to/chromium \
   nix develop --cores 2 --max-jobs 1 --command node test/browser-smoke.mjs
 ```
 
-This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, exercises real dirty-draft confirmation dialogs, creates a folder and atomically files an item, checks exact two-column CSS/layout persistence/scroll retention/selection/history/archive/Undo, keyboard focus return, narrow drawers and a 200%-zoom-equivalent layout. Optional screenshots contain synthetic examples only. It also verifies same-origin replication and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
+This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, exercises real dirty-draft confirmation dialogs, creates a folder and atomically files an item, checks exact two-column CSS/layout persistence/scroll retention/selection/history/archive/Undo, keyboard focus return, narrow drawers and a 200%-zoom-equivalent layout. Optional screenshots contain synthetic examples only. It additionally verifies both folder-draft regressions with real input values/DOM identity/confirmation dialogs, and combined desktop atomic filing/layout with private Atom feeds behind cached Basic authentication. It also verifies same-origin replication and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
 
 The test script sets `NODE_PATH=./node_modules` so the immutable native harness resolves the server's TypeScript without installing the root app dependency tree. To additionally run its existing restore regressions from this server directory:
 

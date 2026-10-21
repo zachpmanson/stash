@@ -303,3 +303,82 @@ test("folder rename keeps a frozen baseline and skips unchanged writes after a r
   );
   assert.equal(saved, null);
 });
+
+// Exercise FolderForm's actual change handler, not a synthetic App dirty flag.
+async function typeFolderDraft(h, name) {
+  const previous = globalThis.FormData;
+  globalThis.FormData = class extends Map {
+    constructor(form) { super(Object.entries(form.fields)); }
+  };
+  try {
+    await flush(() => h.renderer.root.findByType(FolderForm)
+      .findByType("form").props.onChange({ currentTarget: { fields: { name } } }));
+  } finally {
+    globalThis.FormData = previous;
+  }
+}
+
+for (const action of ["New folder", "Rename"]) {
+  test(`${action} draft guards item-edit transition and editors are mutually exclusive`, async (t) => {
+    const h = await fixture(t, "/?folder=f1&item=i1");
+    await flush(() => h.button(action).props.onClick());
+    await typeFolderDraft(h, "Unsaved folder draft");
+    const form = h.renderer.root.findByType(FolderForm);
+    await flush(() => h.button("Edit item").props.onClick());
+    assert.equal(h.state.prompts, 1);
+    assert.ok(h.renderer.root.findByType(FolderForm) === form, "folder form must survive rejected navigation");
+    assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
+    await flush(() => h.button("All items").props.onClick());
+    assert.equal(h.state.prompts, 2);
+    assert.equal(h.location.search, "?folder=f1&item=i1");
+    let prevented = false;
+    h.listeners.get("beforeunload")({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    h.state.confirm = true;
+    await flush(() => h.button("Edit item").props.onClick());
+    assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+    assert.equal(h.renderer.root.findByType(ItemEditor).props.item.id, "i1");
+    await flush(() => h.button("All items").props.onClick());
+    assert.equal(h.state.prompts, 3, "accepted discard must not leave a stale folder dirty flag");
+    assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
+  });
+}
+
+test("new-folder form identity and dirty protection survive remote selected-folder removal", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await flush(() => h.button("New folder").props.onClick());
+  await typeFolderDraft(h, "Unrelated new folder draft");
+  const form = h.renderer.root.findByType(FolderForm);
+  h.state.folders = h.state.folders.filter(f => f.id !== "f1");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.location.search, "");
+  assert.ok(h.renderer.root.findByType(FolderForm) === form,
+    "changing the filter must not remount the uncontrolled new-folder input");
+  await flush(() => h.button("Archive").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.ok(h.renderer.root.findByType(FolderForm) === form, "folder form must survive rejected navigation");
+});
+
+test("remote folder removal still invalidates its owned rename draft", async (t) => {
+  const h = await fixture(t);
+  await flush(() => h.button("Rename").props.onClick());
+  await typeFolderDraft(h, "Removed folder rename");
+  h.state.folders = h.state.folders.filter(f => f.id !== "f1");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  await flush(() => h.button("Archive").props.onClick());
+  assert.equal(h.state.prompts, 0);
+});
+
+test("Back to collection guards and explicitly closes a discarded folder draft", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await flush(() => h.button("New folder").props.onClick());
+  await typeFolderDraft(h, "Unsaved folder draft");
+  await flush(() => h.button("Back to collection").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
+  h.state.confirm = true;
+  await flush(() => h.button("Back to collection").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  assert.equal(h.location.search, "?folder=f1");
+});

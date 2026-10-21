@@ -30,7 +30,7 @@ async function freePort() {
 try {
   const { base, json, port, tmp } = await launch({
     after: (fn) => cleanup.push(fn),
-  });
+  }, { FEED_BASE_URL: "https://feeds.example" });
   const created = await json("/items", "POST", {
     type: "text",
     content: "security-synthetic-only",
@@ -314,6 +314,7 @@ try {
     `new URLSearchParams(location.search).get('folder')`,
   );
   assert.ok(folderId);
+  await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
   await click("New item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
   await evaluate(
@@ -372,6 +373,20 @@ try {
     filedId,
   );
   await screenshot("desktop-list-reader");
+  // Desktop layout writes and atomic filing must preserve master's private feeds.
+  const feedPath = `/feeds/folders/${folderId}.atom`;
+  assert.equal((await fetch(`http://127.0.0.1:${proxyPort}${feedPath}`, {
+    headers: { "X-Auth-User": "web-test-owner", "If-None-Match": "*" },
+  })).status, 401, "a forged identity must not bypass Caddy Basic auth for feeds");
+  const feed = await evaluate(`fetch(${JSON.stringify(feedPath)}).then(async r=>({status:r.status,type:r.headers.get('content-type'),cache:r.headers.get('cache-control'),etag:r.headers.get('etag'),body:await r.text()}))`);
+  assert.equal(feed.status, 200);
+  assert.match(feed.type, /application\/atom\+xml/);
+  assert.equal(feed.cache, "private, no-cache");
+  assert.match(feed.body, /A quiet place for ideas/);
+  assert.match(feed.body, /Read something wonderful/);
+  assert.equal((await json(`/folders/${folderId}/feed`)).enabled, true);
+  assert.equal(await evaluate(`fetch(${JSON.stringify(feedPath)},{headers:{'If-None-Match':${JSON.stringify(feed.etag)}}}).then(r=>r.status)`), 304);
+  console.log("PASS combined desktop atomic filing/layout and private Atom feed through cached Basic auth; unauthenticated forged-header request rejected");
   await cdp(
     "Page.navigate",
     {
@@ -389,6 +404,35 @@ try {
       `document.querySelector('button[aria-label="List layout"]').getAttribute('aria-pressed')==='true'`,
     ),
   );
+  // Folder and item editing must not coexist or silently clear dirty protection.
+  for (const action of ["New folder", "Rename"]) {
+    await click(action);
+    await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
+    await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unsaved folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    const editing = click("Edit item");
+    await waitFor(() => !!dialog);
+    assert.match(dialog.message, /unsaved/i);
+    await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
+    await editing;
+    dialog = null;
+    assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unsaved folder draft");
+    assert.equal(await evaluate(`!!document.querySelector('textarea')`), false);
+    const navigating = click("All items");
+    await waitFor(() => !!dialog);
+    await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
+    await navigating;
+    dialog = null;
+    assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unsaved folder draft");
+    const acceptingEdit = click("Edit item");
+    await waitFor(() => !!dialog);
+    await cdp("Page.handleJavaScriptDialog", { accept: true }, sessionId);
+    await acceptingEdit;
+    dialog = null;
+    await waitFor(() => evaluate(`!!document.querySelector('textarea') && !document.querySelector('input[name=name]')`));
+    await click("Cancel");
+    await waitFor(() => evaluate(`!document.querySelector('textarea')`));
+  }
+  console.log("PASS real new-folder/rename drafts guard Edit item and All items; accepted discard opens only the item editor");
   // A real edited draft must survive a rejected navigation confirmation.
   await click("Edit item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
@@ -665,6 +709,38 @@ try {
   await cdp("Page.handleJavaScriptDialog", { accept: true }, sessionId);
   await cancelNew;
   dialog = null;
+  // An unrelated new-folder draft must keep its DOM identity and input value
+  // when its selected filter disappears remotely. Rename remains owner-bound.
+  for (const action of ["New folder", "Rename"]) {
+    const { id: removedFolder } = await json("/folders", "POST", { name: `Disposable filter ${action}` });
+    await cdp("Page.navigate", { url: `http://127.0.0.1:${proxyPort}/?folder=${removedFolder}` }, sessionId);
+    await waitFor(() => evaluate(`document.querySelector('.collection h2')?.textContent===${JSON.stringify(`Disposable filter ${action}`)}`));
+    await click(action);
+    await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
+    await evaluate(`(()=>{const n=document.querySelector('input[name=name]');window.fixtureFolderInput=n;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unrelated new folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    removeFixture("DELETE FROM sync_folders WHERE id=?", removedFolder);
+    await click("Refresh");
+    await waitFor(() => evaluate(`!new URLSearchParams(location.search).get('folder') && document.querySelector('.collection h2')?.textContent==='All items' && !document.querySelector('[role=status]').textContent.includes('Refreshing')`));
+    if (action === "Rename") {
+      assert.equal(await evaluate(`!!document.querySelector('input[name=name]')`), false);
+      continue;
+    }
+    assert.equal(await evaluate(`document.querySelector('input[name=name]')===window.fixtureFolderInput`), true);
+    assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unrelated new folder draft");
+    const leaving = click("Archive");
+    await waitFor(() => !!dialog);
+    await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
+    await leaving;
+    dialog = null;
+    assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unrelated new folder draft");
+    const cancelFolder = click("Cancel");
+    await waitFor(() => !!dialog);
+    await cdp("Page.handleJavaScriptDialog", { accept: true }, sessionId);
+    await cancelFolder;
+    dialog = null;
+    await waitFor(() => evaluate(`!document.querySelector('input[name=name]')`));
+  }
+  console.log("PASS real remote filter removal preserves unrelated new-folder DOM/value/dirty protection and invalidates owned rename");
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",
   );
