@@ -821,12 +821,19 @@ try {
   await cdp('Page.navigate', { url: `http://127.0.0.1:${proxyPort}/?folder=${pageFolder}` }, sessionId);
   await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===100`));
   assert.ok(await evaluate(`document.querySelector('[aria-label="Item pages"]').textContent.includes('Items 1–100') && [...document.querySelectorAll('[aria-label="Item pages"] button')].find(b=>b.textContent==='Previous').disabled`));
+  // Fail only the next synthetic page GET in this disposable browser session.
+  await evaluate(`(()=>{window.fixtureFirstPage=[...document.querySelectorAll('[data-item-id]')].map(b=>b.dataset.itemId);const original=window.fetch;window.fetch=async (...args)=>{const url=new URL(args[0],location.href);if(url.pathname==='/api/items' && url.searchParams.get('offset')==='100' && args[1]?.method==='GET'){window.fetch=original;return Response.json({error:'Synthetic page failed'},{status:503})}return original(...args)}})()`);
   await click('Next');
+  await waitFor(() => evaluate(`document.querySelector('[role=alert]')?.textContent.includes('Synthetic page failed') && document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
+  assert.ok(await evaluate(`new URLSearchParams(location.search).get('offset')==='100' && JSON.stringify([...document.querySelectorAll('[data-item-id]')].map(b=>b.dataset.itemId))===JSON.stringify(window.fixtureFirstPage) && !document.querySelector('[aria-label="Item pages"]').textContent.includes('Items')`));
+  await screenshot('pagination-failed-503');
+  await click('Retry');
   await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===3 && document.querySelector('[aria-label="Item pages"]').textContent.includes('Items 101–103')`));
   assert.ok(await evaluate(`new URLSearchParams(location.search).get('offset')==='100' && [...document.querySelectorAll('[aria-label="Item pages"] button')].find(b=>b.textContent==='Next').disabled && !document.querySelector('[aria-label="Item pages"]').textContent.includes(' of ')`));
   await cdp('Emulation.setDeviceMetricsOverride', { width: 320, height: 740, deviceScaleFactor: 1, mobile: true }, sessionId);
   assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth`));
   await screenshot('320-pagination');
+  console.log('PASS failed Next 503 retains first 100 cards without false range; successful Retry commits Items 101–103');
   await click('Previous');
   await waitFor(() => evaluate(`document.querySelectorAll('.item-card').length===100 && !new URLSearchParams(location.search).has('offset')`));
   await cdp('Page.navigate', { url: `http://127.0.0.1:${proxyPort}/?folder=${pageFolder}&offset=200` }, sessionId);

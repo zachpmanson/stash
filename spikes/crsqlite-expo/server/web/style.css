@@ -111,7 +111,7 @@
     color: white;
   }
   .primary:hover:not(:disabled) {
-    background: #7967ec;
+    background: #725fe5;
   }
   .feedback {
     @apply text-muted text-xs flex items-center gap-3;

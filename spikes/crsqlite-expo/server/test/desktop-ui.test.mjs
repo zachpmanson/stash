@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import React from "react";
 import { act, create } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -36,6 +37,8 @@ async function fixture(t, initial = "/?folder=f1") {
     })),
     calls: [],
     failWrite: false,
+    failPage: () => false,
+    writeGate: null,
     confirm: false,
     prompts: 0,
   };
@@ -70,6 +73,7 @@ async function fixture(t, initial = "/?folder=f1") {
   globalThis.fetch = async (url, options) => {
     state.calls.push({ url, ...options });
     if (options.method !== "GET") {
+      await state.writeGate;
       if (state.failWrite)
         return Response.json(
           { error: "Synthetic write failed" },
@@ -110,6 +114,8 @@ async function fixture(t, initial = "/?folder=f1") {
     if (url === "/api/folders") return Response.json(state.folders);
     if (url.startsWith("/api/items?")) {
       const q = new URL(url, location).searchParams;
+      if (state.failPage(q))
+        return Response.json({ error: "Synthetic page failed" }, { status: 503 });
       const matching = state.items.filter(
         (i) =>
           (i.archived_at !== null) === (q.get("archived") === "true") &&
@@ -536,4 +542,65 @@ test("pagination shows loaded range without invented totals, blank zero range, o
   h.state.items = [];
   await flush(() => h.button("Refresh").props.onClick());
   assert.doesNotMatch(textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" })), /Items|1–0/);
+});
+
+test("failed next page retains cards without a false range, even when mutations clear errors; retry commits its range", async (t) => {
+  const h = await fixture(t);
+  h.state.items = Array.from({ length: 103 }, (_, n) => ({ ...h.state.items[0], id: `page-${n}` }));
+  await flush(() => h.button("Refresh").props.onClick());
+  const range = () => textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" }));
+  const cards = () => h.renderer.root.findAllByType(ItemCard).map(c => c.props.item.id);
+  const firstPage = cards();
+  assert.equal(firstPage.length, 100);
+  assert.match(range(), /Items 1–100/);
+  h.state.failPage = q => q.get("offset") === "100";
+  await flush(() => h.button("Next").props.onClick());
+  assert.equal(h.location.search, "?folder=f1&offset=100");
+  assert.match(textOf(h.renderer.root.findByProps({ role: "alert" })), /Synthetic page failed/);
+  assert.equal(h.button("Refresh").props.disabled, false, "failed fetch has settled");
+  assert.deepEqual(cards(), firstPage, "useful prior cards remain visible");
+  assert.doesNotMatch(range(), /Items/, "old cards must not be labeled 101–200");
+  // Focus/background retries must not accidentally authorize this route's range.
+  await flush(() => h.listeners.get("focus")());
+  assert.doesNotMatch(range(), /Items/);
+  let release;
+  h.state.writeGate = new Promise(resolve => { release = resolve; });
+  await flush(() => h.button("Grid layout").props.onClick());
+  assert.equal(h.renderer.root.findAllByProps({ role: "alert" }).length, 0, "unrelated mutation clears the error");
+  assert.doesNotMatch(range(), /Items/, "range validity must not depend on error text");
+  await flush(() => release());
+  assert.doesNotMatch(range(), /Items/);
+  h.state.failPage = () => false;
+  await flush(() => h.button("Retry").props.onClick());
+  assert.deepEqual(cards(), ["page-100", "page-101", "page-102"]);
+  assert.match(range(), /Items 101–103/);
+  assert.equal(h.location.search, "?folder=f1&offset=100");
+  assert.equal(h.button("Next").props.disabled, true);
+  // A failed refresh of the same page can truthfully describe retained records.
+  h.state.failPage = () => true;
+  await flush(() => h.listeners.get("focus")());
+  assert.match(range(), /Items 101–103/);
+  // Equal offsets in different folder/archive queries are not the same page.
+  h.location.search = "?folder=f2&offset=100";
+  await flush(() => h.listeners.get("popstate")());
+  assert.doesNotMatch(range(), /Items/);
+  h.location.search = "?folder=f1&archive=1&offset=100";
+  await flush(() => h.listeners.get("popstate")());
+  assert.doesNotMatch(range(), /Items/);
+  assert.deepEqual(cards(), ["page-100", "page-101", "page-102"]);
+});
+
+test("primary default and hover colors meet WCAG AA for white normal-size text", async () => {
+  const css = await readFile(new URL("../web/style.css", import.meta.url), "utf8");
+  const luminance = hex => {
+    const rgb = hex.match(/[a-f\d]{2}/gi).map(c => parseInt(c, 16) / 255)
+      .map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  };
+  assert.match(css.match(/\.primary\s*\{([^}]+)\}/)[1], /color:\s*white\s*;/);
+  for (const selector of [/\.primary\s*\{([^}]+)\}/, /\.primary:hover:not\(:disabled\)\s*\{([^}]+)\}/]) {
+    const color = css.match(selector)[1].match(/background:\s*(#[a-f\d]{6})\s*;/i)[1];
+    const ratio = 1.05 / (luminance(color.slice(1)) + 0.05);
+    assert.ok(ratio >= 4.5, `${color} white text contrast ${ratio.toFixed(3)} must be >= 4.5:1`);
+  }
 });

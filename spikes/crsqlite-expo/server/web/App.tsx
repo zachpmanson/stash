@@ -54,6 +54,10 @@ export function App() {
   const { folderId, archived, selected, offset } = route;
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  // Retained cards after a failed refresh still belong to their last successful query.
+  const [loadedPage, setLoadedPage] = useState<
+    Pick<Route, "folderId" | "archived" | "offset"> | null
+  >(null);
   const [hasMore, setHasMore] = useState(false);
   const [detail, setDetail] = useState<Item | null>(null);
   const [editor, setEditor] = useState<"new" | "edit" | null>(null);
@@ -144,6 +148,7 @@ export function App() {
           (!!folderId && !nextDetail.folderIds.includes(folderId)));
       setFolders(nextFolders);
       setItems(nextItems.items);
+      setLoadedPage({ folderId, archived, offset });
       setHasMore(nextItems.hasMore);
       setDetail(missingFolder || incompatible ? null : nextDetail);
       if (missingFolder || incompatible) {
@@ -701,11 +706,15 @@ export function App() {
           </ul>
           {(offset > 0 || hasMore) && (
             <nav aria-label="Item pages" className="actions mt-6">
-              {!loading && items.length > 0 && (
-                <span className="text-muted text-sm">
-                  Items {offset + 1}–{offset + items.length}
-                </span>
-              )}
+              {!loading &&
+                items.length > 0 &&
+                loadedPage?.folderId === folderId &&
+                loadedPage.archived === archived &&
+                loadedPage.offset === offset && (
+                  <span className="text-muted text-sm">
+                    Items {offset + 1}–{offset + items.length}
+                  </span>
+                )}
               <button
                 disabled={!offset || loading || busy}
                 onClick={() =>
