@@ -5,7 +5,7 @@ import { act, create } from 'react-test-renderer';
 import { App, ItemEditor, ItemReader } from '../web/App.tsx';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-const sample = { id: 'i1', type: 'text', title: 'Original title', content: 'Original content', description: null, article_text: null, created_at: 1, archived_at: null, folderIds: [], mediaUnavailable: false };
+const sample = { id: 'i1', type: 'text', title: 'Original title', content: 'Original content', description: null, article_text: null, created_at: 1, archived_at: null, folderIds: ['f1'], mediaUnavailable: false };
 const flush = async fn => act(async () => { await fn?.(); await new Promise(resolve => setImmediate(resolve)); });
 
 async function fixture(t) {
@@ -30,8 +30,8 @@ async function fixture(t) {
   let renderer;
   t.after(async () => { if (renderer) await act(() => renderer.unmount()); Object.assign(globalThis, previous); });
   await flush(() => { renderer = create(React.createElement(App)); });
-  const button = label => renderer.root.findAllByType('button').find(node => node.children.join('') === label);
-  const selectItem = () => flush(() => renderer.root.findAllByType('button').find(node => node.props['aria-pressed'] === false).props.onClick());
+  const button = label => renderer.root.findAllByType('button').find(node => node.props['aria-label'] === label || node.children.join('') === label);
+  const selectItem = () => flush(() => renderer.root.findAllByType('button').find(node => node.props['data-item-id']).props.onClick());
   const submit = fields => flush(() => renderer.root.findByType(ItemEditor).findByType('form').props.onSubmit({ preventDefault() {}, currentTarget: { fields } }));
   return { state, renderer, button, selectItem, submit };
 }
@@ -80,12 +80,12 @@ test('selected item deletion clears detail instead of poisoning every library re
 
 for (const editor of ['edit', 'new']) test(`removed folder clears invalid edit but preserves an unrelated new draft (${editor})`, async t => {
   const h = await fixture(t);
-  await flush(() => h.renderer.root.findAllByType('select')[0].props.onChange({ target: { value: 'f1' } }));
+  await flush(() => h.renderer.root.findAllByType('button').find(node => node.props.title === 'Reading').props.onClick());
   if (editor === 'edit') await h.selectItem();
   await flush(() => h.button(editor === 'edit' ? 'Edit item' : 'New item').props.onClick());
   h.state.folders = [];
   await flush(() => h.button('Refresh').props.onClick());
-  assert.equal(h.renderer.root.findAllByType('select')[0].props.value, '');
+  assert.ok(h.renderer.root.findAllByType('button').some(node => node.children.includes('All items') && node.props['aria-current'] === 'page'));
   assert.ok(!h.state.calls.filter(call => call.url.startsWith('/api/items?')).at(-1).url.includes('folderId='));
   assert.equal(h.renderer.root.findAllByProps({ role: 'alert' }).length, 0);
   assert.equal(h.renderer.root.findAllByType(ItemEditor).length, editor === 'new' ? 1 : 0);

@@ -322,6 +322,32 @@ test(
     assert.deepEqual(Array.from((await items.getItemById(id)).folder_ids), [
       folderId,
     ]);
+    // Start from list so the web grid write really advances its own CRR cell.
+    await json(`/folders/${folderId}`, "PATCH", { layout: "list" });
+    await project(async db => (await db.getFirstAsync("SELECT layout FROM sync_folders WHERE id=?", folderId))?.layout === "list");
+    // Real native concurrent name vs web layout writes touch independent CRR cells.
+    await app.withAppDbMutation(async db => db.withTransactionAsync(async () => {
+      await db.runAsync("UPDATE folders SET name=? WHERE id=?", "Native concurrent name", folderId);
+      await replica.mirrorLocalFolderOwned(db, folderId);
+    }));
+    await json(`/folders/${folderId}`, "PATCH", { layout: "grid" });
+    await upload();
+    await project(async db => (await db.getFirstAsync("SELECT layout FROM sync_folders WHERE id=?", folderId))?.layout === "grid");
+    const roundtrip = (await json('/folders')).find(f => f.id === folderId);
+    assert.equal(roundtrip.name, "Native concurrent name");
+    assert.equal(roundtrip.layout, "grid");
+    assert.equal(await app.withAppDb(async db => (await db.getFirstAsync("SELECT layout FROM folders WHERE id=?", folderId)).layout), "grid");
+    await app.withAppDbMutation(async db => db.withTransactionAsync(async () => {
+      await db.runAsync("UPDATE folders SET layout='list' WHERE id=?", folderId);
+      await replica.mirrorLocalFolderOwned(db, folderId);
+    }));
+    await upload();
+    assert.equal((await json('/folders')).find(f => f.id === folderId).layout, "list");
+    const { id: initiallyFiled } = await json('/items', 'POST', { type: 'text', content: 'Atomic initial membership', folderId });
+    await project(async db => !!await db.getFirstAsync("SELECT 1 FROM sync_item_folders WHERE item_id=? AND folder_id=?", initiallyFiled, folderId));
+    assert.deepEqual(Array.from((await items.getItemById(initiallyFiled)).folder_ids), [folderId]);
+    await items.deleteItem(initiallyFiled);
+    await upload();
     await items.updateItemTitle(id, "Edited natively");
     await upload();
     assert.equal((await json(`/items/${id}`)).title, "Edited natively");
