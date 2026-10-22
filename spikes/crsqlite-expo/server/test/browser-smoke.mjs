@@ -321,7 +321,7 @@ try {
     `new URLSearchParams(location.search).get('folder')`,
   );
   assert.ok(folderId);
-  await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
+  assert.equal((await json(`/folders/${folderId}/feed`)).policy, "always-on");
   assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), "New item");
   // Empty-state creation uses the same guarded transition as the header.
   await click('New folder');

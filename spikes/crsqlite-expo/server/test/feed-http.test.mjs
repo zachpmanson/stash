@@ -16,22 +16,32 @@ async function populate(h) {
 test('HTTP management/auth/cache/HEAD/preview, strict validation and lifecycle', async t=>{
   const h=await launch(t,config), {f,i,route,url}=await populate(h);
   const fetchFeed=(extra={},method='GET')=>fetch(url,{method,headers:{'X-Auth-User':'web-test-owner',...extra}});
-  assert.equal((await h.json(route)).enabled,false);
-  assert.equal((await fetchFeed()).status,404);
+  assert.equal((await h.json(route)).enabled,true);
+  assert.equal((await fetchFeed()).status,200);
   assert.equal((await h.api(route+'/preview')).status,200);
-  assert.equal((await h.json(route)).enabled,false);
+  assert.equal((await h.json(route)).enabled,true);
   for(const target of [url,h.base+'/feeds/folders/missing.atom',h.base+'/feeds/unknown',h.base+'/api/folders/missing/feed',h.base+'/api/folders/missing/feed/preview']) {
     for(const identity of [null,'attacker']) {
       const r=await fetch(target,{headers:{...(identity?{'X-Auth-User':identity}:{}),'If-None-Match':'*'}});
       assert.equal(r.status,401);
     }
   }
+  for(const folder of [f,'missing']) for(const enabled of [true,false]) {
+    const denied=await fetch(h.base+'/api/folders/'+folder+'/feed',{method:'PUT',headers:{'Content-Type':'application/json','X-Stash-Request':'1'},body:JSON.stringify({enabled})});
+    assert.equal(denied.status,401);
+  }
+  assert.equal((await h.api('/folders/missing/feed','PUT',{enabled:false})).status,404);
+  const preview=await h.api(route+'/preview'); assert.equal(preview.headers.get('cache-control'),'no-store');
   for(const data of [{enabled:1},{enabled:'true'},{enabled:true,token:'x'},{},[],null]) assert.equal((await h.api(route,'PUT',data)).status,400);
   assert.equal((await h.api(route,'PUT',{enabled:true},{'X-Stash-Request':''})).status,403);
   assert.equal((await h.api(route,'PUT',{enabled:true},{Origin:'https://evil.example'})).status,403);
   assert.equal((await h.api(route+'?limit=99','PUT',{enabled:true})).status,400);
   assert.equal((await h.api(route,'PUT',{enabled:true,padding:'x'.repeat(70000)})).status,413);
-  const setting=await h.json(route,'PUT',{enabled:true});
+  for (const enabled of [true,false]) {
+    const response=await h.api(route,'PUT',{enabled}); assert.equal(response.status,409);
+    assert.match((await response.json()).error,/read-only/);
+  }
+  const setting=await h.json(route); assert.equal(setting.policy,'always-on');
   assert.equal(setting.url,`https://feeds.example/feeds/folders/${f}.atom`);
   const response=await fetchFeed(), xml=await response.text();
   assert.equal(response.status,200); assert.equal(response.headers.get('content-type'),'application/atom+xml; charset=utf-8');
@@ -44,11 +54,12 @@ test('HTTP management/auth/cache/HEAD/preview, strict validation and lifecycle',
   assert.notEqual((await fetchFeed({'If-None-Match':etag})).status,304);
   await h.json(`/items/${i}`,'PATCH',{content:'Updated note'});
   assert.match(await (await fetchFeed()).text(),/Updated note/);
-  await h.json(route,'PUT',{enabled:false}); assert.equal((await fetchFeed({'If-None-Match':etag})).status,404);
-  await h.json(route,'PUT',{enabled:true}); assert.equal((await h.json(route)).url,setting.url);
+  assert.equal((await h.api(route,'PUT',{enabled:false})).status,409);
+  assert.equal((await fetchFeed()).status,200); assert.equal((await h.json(route)).url,setting.url);
   await h.json(`/folders/${f}`,'PATCH',{archived:true}); assert.equal((await fetchFeed({'If-None-Match':'*'})).status,404);
   assert.equal((await h.api(route,'PUT',{enabled:true})).status,404);
-  await h.json(`/folders/${f}`,'PATCH',{archived:false}); assert.equal((await h.json(route)).enabled,false);
+  await h.json(`/folders/${f}`,'PATCH',{archived:false}); assert.equal((await h.json(route)).enabled,true);
+  assert.equal((await fetchFeed()).status,200);
   assert.doesNotMatch(xml,/Authorization|Basic |password/);
 });
 test('unconfigured backend returns unavailable, not optimistic publish', async t=>{
@@ -56,9 +67,8 @@ test('unconfigured backend returns unavailable, not optimistic publish', async t
   assert.equal((await h.api(route)).status,503); assert.equal((await h.api(route,'PUT',{enabled:true})).status,503);
   assert.equal((await fetch(url)).status,401);
 });
-test('restart retains IDs/times/settings; private backup preserves metadata and recovery disables enablement', async t=>{
+test('restart retains IDs/times/settings; private backup preserves metadata and recovery keeps active feeds automatic', async t=>{
   const h=await launch(t,config), {route,url,f}=await populate(h);
-  await h.json(route,'PUT',{enabled:true});
   const before=await (await fetch(url,{headers:{'X-Auth-User':'web-test-owner'}})).text();
   const exit=once(h.child,'exit'); h.child.kill('SIGTERM'); assert.equal((await exit)[0],0);
   const restarted=await launch(t,{...config,DATA_DIR:h.tmp,SCHEMA_DIR:path.join(h.tmp,'schemas')});
@@ -75,14 +85,13 @@ test('restart retains IDs/times/settings; private backup preserves metadata and 
   admin('backup',backup);
   const snapshot=new Database(backup,{readonly:true});
   const settings=snapshot.prepare('SELECT * FROM folder_feeds').all(), entries=snapshot.prepare('SELECT * FROM feed_entries').all();
-  assert.equal(settings[0].enabled,1); assert.equal(entries.length,1); snapshot.close();
+  assert.equal(settings[0].enabled,0); assert.equal(entries.length,1); snapshot.close();
   admin('restore',backup);
   const restored=new Database(path.join(h.tmp,'stash-backend')); restored.loadExtension(extensionPath);
   assert.deepEqual(restored.prepare('SELECT * FROM feed_entries').all(),entries);
-  assert.deepEqual(restored.prepare('SELECT * FROM folder_feeds').all(),settings.map(s=>({...s,enabled:0})));
+  assert.deepEqual(restored.prepare('SELECT * FROM folder_feeds').all(),settings);
   restored.prepare('SELECT crsql_finalize()').get(); restored.close();
   const recovered=await launch(t,{...config,DATA_DIR:h.tmp,SCHEMA_DIR:path.join(h.tmp,'schemas')});
-  assert.equal((await recovered.json(route)).enabled,false);
-  await recovered.json(route,'PUT',{enabled:true});
+  assert.equal((await recovered.json(route)).enabled,true);
   assert.equal(await (await fetch(`${recovered.base}/feeds/folders/${f}.atom`,{headers:{'X-Auth-User':'web-test-owner'}})).text(),before);
 });

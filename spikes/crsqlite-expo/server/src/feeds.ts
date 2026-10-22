@@ -4,6 +4,8 @@ import { Feed } from "feed";
 import { js2xml, xml2js, type ElementCompact } from "xml-js";
 
 // Server-local state: deliberately NOT CRRs, and not part of native backup replay.
+// Legacy enabled column/triggers remain for non-destructive compatibility;
+// publication depends only on active logical folder eligibility, never flags.
 export function initializeFeeds(db: Database.Database) {
   db.exec(`CREATE TABLE IF NOT EXISTS folder_feeds (
     folder_id TEXT PRIMARY KEY, feed_id TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
@@ -43,10 +45,7 @@ function folder(db: Database.Database, id: string) {
   const f = db.prepare(`SELECT f.name FROM sync_folders f WHERE f.id=? AND f.archived_at IS NULL
     AND (f.deleted=0 OR (f.deleted=1 AND EXISTS (SELECT 1 FROM sync_item_folders m
       JOIN sync_items i ON i.id=m.item_id WHERE m.folder_id=f.id)))`).get(id) as { name: string } | undefined;
-  if (!f) {
-    db.prepare("UPDATE folder_feeds SET enabled=0 WHERE folder_id=? AND enabled<>0").run(id);
-    throw new FeedError(404, "Feed unavailable");
-  }
+  if (!f) throw new FeedError(404, "Feed unavailable");
   return f;
 }
 type State = { feed_id: string; enabled: number; hash: string; updated_at: number };
@@ -69,20 +68,16 @@ const feedUrl = (base: string, id: string) => `${base}/feeds/folders/${encodeURI
 export function feedSettings(db: Database.Database, id: string, base: string | null, enabled?: boolean) {
   if (!base) throw new FeedError(503, "Backend feed hosting is not configured");
   folder(db, id);
-  if (enabled !== undefined) {
-    db.prepare(`INSERT INTO folder_feeds (folder_id,feed_id,enabled,updated_at) VALUES (?,?,?,?)
-      ON CONFLICT(folder_id) DO UPDATE SET enabled=excluded.enabled`).run(id, `urn:uuid:${randomUUID()}`, Number(enabled), Date.now());
-  }
-  return { version: 1, enabled: !!state(db, id)?.enabled, url: feedUrl(base, id), backend: base, limit: 50 };
+  if (enabled !== undefined) throw new FeedError(409, "Folder feeds are always available for active folders and are read-only; enable/disable is no longer supported");
+  return { version: 1, policy: "always-on", enabled: true, url: feedUrl(base, id), backend: base, limit: 50 };
 }
 
 type Row = { id: string; type: string; content: string | null; title: string | null; description: string | null; article_text: string | null; created_at: number };
-export function renderFeed(db: Database.Database, id: string, base: string | null, preview = false) {
+export function renderFeed(db: Database.Database, id: string, base: string | null, _preview = false) {
   if (!base) throw new FeedError(503, "Backend feed hosting is not configured");
   const f = folder(db, id);
   let s = state(db, id);
-  if (!preview && !s?.enabled) throw new FeedError(404, "Feed unavailable");
-  // Preview assigns stable identity/metadata but can never enable publication.
+  // Preview and fetch assign stable metadata lazily without content/CRR writes.
   if (!s) {
     db.prepare("INSERT INTO folder_feeds (folder_id,feed_id,updated_at) VALUES (?,?,?)").run(id, `urn:uuid:${randomUUID()}`, Date.now());
     s = state(db, id)!;

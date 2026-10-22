@@ -31,9 +31,8 @@ test('Atom parses required fields, exact plaintext Unicode/XML controls and no H
   const note='澳洲 & <script> "quotes" 🦆 ]]> ]]> <content type="html"> \u0001\u0000\ud800';
   item('a',note); add();
   db.prepare('UPDATE sync_items SET article_html=?,media_id=?,lat=1,listened_percent=80 WHERE id=?').run('<b>SECRET HTML</b>','/private/device','a');
-  assert.throws(()=>render(), /unavailable/);
   const version=db.prepare('SELECT crsql_db_version()').pluck().get();
-  const output=render(true); assert.equal(feedSettings(db,'f',base).enabled,false);
+  const output=render(true); assert.equal(feedSettings(db,'f',base).enabled,true);
   assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
   const feed=parsed(output.xml), entry=feed.entry;
   assert.equal(feed['@_xmlns'],'http://www.w3.org/2005/Atom');
@@ -42,11 +41,11 @@ test('Atom parses required fields, exact plaintext Unicode/XML controls and no H
   assert.equal(entry.content['#text'],note.replace(/[\u0000\u0001\ud800]/g,''));
   assert.equal(entry.published,'1970-01-01T00:00:00.001Z');
   assert.doesNotMatch(output.xml,/SECRET HTML|private\/device|enclosure|listened|lat>/);
-  feedSettings(db,'f',base,true); assert.equal(render().xml,output.xml);
+  assert.equal(render().xml,output.xml);
   assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
 });
-test('stable IDs, semantic dates/cache, rename, disable/re-enable and no replicated writes', t => {
-  const {db,item,add,render}=fixture(t); item(); add(); feedSettings(db,'f',base,true);
+test('stable IDs, semantic dates/cache, rename, legacy flags and rejected mutations and no replicated writes', t => {
+  const {db,item,add,render}=fixture(t); item(); add();
   const a=render(), first=parsed(a.xml), version=db.prepare('SELECT crsql_db_version()').pluck().get();
   const changes=db.prepare('SELECT total_changes()').pluck().get();
   assert.deepEqual(render(),a); assert.equal(db.prepare('SELECT total_changes()').pluck().get(),changes);
@@ -58,8 +57,9 @@ test('stable IDs, semantic dates/cache, rename, disable/re-enable and no replica
   db.exec("UPDATE sync_items SET content='Edited'");
   const edited=render(), edit=parsed(edited.xml); assert.equal(edit.entry.id,first.entry.id); assert.equal(edit.entry.published,first.entry.published); assert.notEqual(edit.entry.updated,first.entry.updated);
   assert.notEqual(edited.etag,a.etag);
-  feedSettings(db,'f',base,false); assert.throws(()=>render(),/unavailable/);
-  feedSettings(db,'f',base,true); assert.deepEqual(render(),edited);
+  for (const enabled of [false, true]) assert.throws(()=>feedSettings(db,'f',base,enabled),e=>e.status===409 && /read-only/.test(e.message));
+  db.exec('UPDATE folder_feeds SET enabled=0'); assert.deepEqual(render(),edited);
+  db.exec('UPDATE folder_feeds SET enabled=1'); assert.deepEqual(render(),edited);
 });
 test('distinct logical membership, active scope, latest 50 and stable ties, plaintext links and truncation', t => {
   const {db,folder,item,add,render}=fixture(t); folder('other');
@@ -70,7 +70,6 @@ test('distinct logical membership, active scope, latest 50 and stable ties, plai
   item('archived','ARCHIVED SECRET',200); add('archived'); db.exec("UPDATE sync_items SET archived_at=1 WHERE id='archived'");
   item('link','https://example.com/?a=1&b=2',300,'url'); add('link');
   db.exec("UPDATE sync_items SET title='Link <title>',description='Plain & description',article_text='Saved plaintext',article_html='RAW HTML SECRET' WHERE id='link'");
-  feedSettings(db,'f',base,true);
   const output=render(), feed=parsed(output.xml);
   // An unsafe legacy link is omitted from the bounded candidate window.
   assert.equal(feed.entry.length,49);
@@ -83,22 +82,52 @@ test('distinct logical membership, active scope, latest 50 and stable ties, plai
   assert.ok(ids.includes('i00')); assert.ok(!ids.includes('i54')); assert.equal(ids.filter(x=>x==='i00').length,1);
   db.exec("DELETE FROM sync_item_folders WHERE item_id='link'"); assert.doesNotMatch(render().xml,/Saved plaintext/);
 });
-for (const order of ['tombstone-first','membership-first']) test(`add-wins visibility and observed archive/delete disable (${order})`, t => {
+for (const order of ['tombstone-first','membership-first']) test(`add-wins eligibility and automatic archive/unarchive/delete recovery (${order})`, t => {
   const {db,item,add,render}=fixture(t); item();
   if (order==='tombstone-first') { db.exec('UPDATE sync_folders SET deleted=1'); add(); }
   else { add(); db.exec('UPDATE sync_folders SET deleted=1'); }
-  feedSettings(db,'f',base,true); assert.ok(parsed(render().xml).entry);
+  const before=render(); assert.ok(parsed(before.xml).entry);
   db.exec('UPDATE sync_folders SET archived_at=1');
+  assert.throws(()=>render(),e=>e.status===404);
+  assert.throws(()=>feedSettings(db,'f',base),e=>e.status===404);
   db.exec('UPDATE sync_folders SET archived_at=NULL');
-  assert.equal(feedSettings(db,'f',base).enabled,false); assert.throws(()=>render(),/unavailable/);
-  feedSettings(db,'f',base,true); db.exec('DELETE FROM sync_item_folders');
-  add(); assert.equal(feedSettings(db,'f',base).enabled,false);
-  feedSettings(db,'f',base,true); db.exec('DELETE FROM sync_items');
-  item(); add(); assert.equal(feedSettings(db,'f',base).enabled,false);
+  assert.equal(feedSettings(db,'f',base).enabled,true); assert.deepEqual(render(),before);
+  db.exec('DELETE FROM sync_item_folders'); assert.throws(()=>render(),e=>e.status===404);
+  add(); assert.deepEqual(render(),before);
+  db.exec('DELETE FROM sync_items'); assert.throws(()=>render(),e=>e.status===404);
+  item(); add(); assert.deepEqual(render(),before);
 });
-test('empty feed is valid, preview never publishes, orphan memberships do not leak', t => {
+test('empty new feed is automatic, orphan memberships do not leak; deleted/missing unavailable', t => {
   const {db,add,render}=fixture(t); add('missing');
-  const feed=parsed(render(true).xml); assert.equal(feed.entry,undefined); assert.ok(feed.updated); assert.ok(feed.id);
-  assert.equal(feedSettings(db,'f',base).enabled,false);
-  db.exec('DELETE FROM sync_folders'); assert.throws(()=>render(true),/unavailable/);
+  const feed=parsed(render().xml); assert.equal(feed.entry,undefined); assert.ok(feed.updated); assert.ok(feed.id);
+  assert.deepEqual(feedSettings(db,'f',base),{version:1,policy:'always-on',enabled:true,url:base+'/feeds/folders/f.atom',backend:base,limit:50});
+  db.exec('UPDATE sync_folders SET deleted=1'); assert.throws(()=>render(),e=>e.status===404);
+  db.exec('DELETE FROM sync_folders'); assert.throws(()=>render(true),e=>e.status===404);
+  assert.throws(()=>feedSettings(db,'missing',base),e=>e.status===404);
+});
+test('existing disabled feed metadata survives initialization and policy change without clock or CRR writes', t => {
+  const {db,item,add,render}=fixture(t); item(); add();
+  db.prepare('INSERT INTO folder_feeds VALUES (?,?,?,?,?)').run('f','urn:uuid:existing',0,'',100);
+  const first=render(); const metadata=db.prepare('SELECT * FROM folder_feeds').get();
+  const version=db.prepare('SELECT crsql_db_version()').pluck().get();
+  initializeFeeds(db);
+  const changes=db.prepare('SELECT total_changes()').pluck().get();
+  assert.equal(feedSettings(db,'f',base).enabled,true);
+  assert.deepEqual(render(),first); assert.match(first.xml,/urn:uuid:existing/);
+  assert.deepEqual(db.prepare('SELECT * FROM folder_feeds').get(),metadata);
+  assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
+  assert.equal(db.prepare('SELECT total_changes()').pluck().get(),changes);
+});
+test('clock rollback preserves publication dates and advances semantic updates monotonically', t => {
+  const {db,item,add,render}=fixture(t); item('a','Initial',Number.MAX_SAFE_INTEGER); add();
+  const original=Date.now; let now=10000; Date.now=()=>now;
+  t.after(()=>{Date.now=original;});
+  const first=parsed(render().xml);
+  assert.equal(Date.parse(first.entry.published),10000,'invalid future creation time is not published into the future');
+  now=1000; db.exec("UPDATE sync_items SET content='Changed after clock rollback'");
+  const second=parsed(render().xml);
+  assert.equal(second.entry.id,first.entry.id); assert.equal(second.entry.published,first.entry.published);
+  assert.ok(Date.parse(second.entry.updated)>Date.parse(first.entry.updated));
+  assert.ok(Date.parse(second.updated)>Date.parse(first.updated));
+  const stable=render(); now=500; assert.deepEqual(render(),stable);
 });

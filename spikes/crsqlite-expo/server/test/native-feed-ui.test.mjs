@@ -10,15 +10,15 @@ import { create, act } from 'react-test-renderer';
 import ts from 'typescript';
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
-const settings=(enabled=false,backend='https://feeds.example')=>new Response(JSON.stringify({version:1,enabled,backend,url:backend+'/feeds/folders/f.atom',limit:50}),{headers:{'Content-Type':'application/json'}});
+const settings=(enabled=true,backend='https://feeds.example',policy='always-on')=>new Response(JSON.stringify({version:1,policy,enabled,backend,url:backend+'/feeds/folders/f.atom',limit:50}),{headers:{'Content-Type':'application/json'}});
 const active=(serverUrl='https://feeds.example/')=>({phase:'synced',account:{username:'owner',serverUrl}});
 async function harness(t,{dev=true,optIn=false,platform='android',initial={phase:'stopped'}}={}) {
-  let listener; const calls=[],copies=[],nav=[];
+  let listener,folderId='f'; const calls=[],copies=[],nav=[];
   const req=async(id,action,signal)=>{const d=deferred(); calls.push({id,action,signal,...d});return d.promise;};
   const mock={
     react:React,
     'react-native':{Pressable:'Pressable',ScrollView:'ScrollView',Text:'Text',Platform:{OS:platform},StyleSheet:{create:x=>x}},
-    'expo-router':{useLocalSearchParams:()=>({id:'f'}),useRouter:()=>({push:x=>nav.push(x)})},
+    'expo-router':{useLocalSearchParams:()=>({id:folderId}),useRouter:()=>({push:x=>nav.push(x)})},
     'expo-clipboard':{setStringAsync:async x=>copies.push(x)},
     '../components/Screen':{__esModule:true,default:'Screen'},
     '../theme':{Colors:{},Spacing:{},Typography:{}},
@@ -41,46 +41,73 @@ async function harness(t,{dev=true,optIn=false,platform='android',initial={phase
   const click=async label=>{await act(async()=>{button(label).props.onPress();});};
   const status=async s=>{await act(async()=>listener?.(s));};
   const reply=async(response,n=calls.length-1)=>{await act(async()=>{calls[n].resolve(response);});};
-  return {calls,copies,nav,text,button,click,status,reply};
+  const folder=async id=>{folderId=id;await act(async()=>renderer.update(React.createElement(Screen)));};
+  const unmount=async()=>act(()=>renderer.unmount());
+  return {calls,copies,nav,text,button,click,status,reply,folder,unmount};
 }
 for(const config of [{dev:false,optIn:false,platform:'android'},{dev:true,platform:'ios'}]) test('feed controls preserve sync build gate '+JSON.stringify(config),async t=>{
   const h=await harness(t,{...config,initial:active()});
   assert.match(h.text(),/requires? an Android|require an Android/); assert.equal(h.calls.length,0);
-  assert.equal(h.button('Preview (does not enable)').props.disabled,true);
+  assert.equal(h.button('Preview Atom XML').props.disabled,true);
   await h.click('Settings → Sync');assert.deepEqual(h.nav,['/settings/sync']);
 });
-test('actual handlers: unavailable, status pending, disabled, explicit enable success, clean copy and non-WebView preview',async t=>{
+test('actual read-only handlers: unavailable, pending, automatic private status, clean copy and non-WebView preview',async t=>{
   const h=await harness(t);
   assert.match(h.text(),/Unavailable/); assert.equal(h.calls.length,0);
   await h.status(active()); assert.match(h.text(),/Pending/); assert.equal(h.calls[0].action,'status');
-  await h.reply(settings()); assert.match(h.text(),/Disabled/); assert.equal(h.calls.length,1,'opening never publishes');
-  await h.click('Enable feed');assert.equal(h.calls[1].action,true);assert.match(h.text(),/Pending/); assert.equal(h.button('Enable feed').props.disabled,true);
-  await h.reply(settings(true));assert.match(h.text(),/Enabled/);
+  await h.reply(settings()); assert.match(h.text(),/Available — private authenticated feed/); assert.equal(h.calls.length,1);
+  assert.doesNotMatch(h.text(),/Enable feed|Disable feed/);
   await h.click('Copy Atom URL');assert.deepEqual(h.copies,['https://feeds.example/feeds/folders/f.atom']);
-  await h.click('Preview (does not enable)');assert.equal(h.calls[2].action,'preview');
+  await h.click('Preview Atom XML');assert.equal(h.calls[1].action,'preview');
   await h.reply(new Response('<feed>preview &lt;text&gt;</feed>',{headers:{'Content-Type':'application/atom+xml; charset=utf-8'}}));
   assert.match(h.text(),/plaintext XML/);assert.match(h.text(),/preview &lt;text&gt;/);assert.doesNotMatch(h.text(),/"type":"WebView"/);
   assert.match(h.text(),/reader caches cannot be recalled/);
+  await h.click('Refresh / Retry');await h.reply(settings());
+  assert.ok(h.calls.every(c=>c.action==='status'||c.action==='preview'),'no toggle mutations');
 });
-test('backend errors/unsupported are truthful and retryable; enabling is not optimistic',async t=>{
-  const h=await harness(t,{initial:active()});await h.reply(settings());
-  await h.click('Enable feed');await h.reply(new Response('{}',{status:503}));
-  assert.match(h.text(),/Unavailable/);assert.match(h.text(),/not configured/);assert.doesNotMatch(h.text(),/"Enabled"/);
-  await h.click('Refresh / Retry');await h.reply(new Response('{}',{status:404}));assert.match(h.text(),/backend lacks feed controls/);
-  await h.click('Refresh / Retry');await h.reply(new Response(JSON.stringify({version:99})));assert.match(h.text(),/incompatible/);
-  await h.click('Refresh / Retry');await h.reply(settings());assert.match(h.text(),/Disabled/);
+test('backend errors/unsupported are truthful and retryable, including old enabled backends',async t=>{
+  const h=await harness(t,{initial:active()});await h.reply(new Response('{}',{status:503}));
+  assert.match(h.text(),/Unavailable/);assert.match(h.text(),/not configured/);assert.doesNotMatch(h.text(),/Available — private/);
+  await h.click('Refresh / Retry');await h.reply(new Response('{}',{status:404}));assert.match(h.text(),/backend lacks automatic private feeds/);
+  for (const response of [new Response(JSON.stringify({version:99})),settings(false)]) {
+    await h.click('Refresh / Retry');
+    await h.reply(response); assert.match(h.text(),/does not support automatic/);
+  }
+  await h.click('Refresh / Retry');await h.reply(new Response(JSON.stringify({version:1,enabled:true,backend:'https://feeds.example',url:'https://feeds.example/feeds/folders/f.atom',limit:50})));
+  assert.match(h.text(),/does not support automatic/);assert.doesNotMatch(h.text(),/Copy Atom URL/);
+  await h.click('Refresh / Retry');await h.reply(settings());assert.match(h.text(),/Available — private/);
 });
 for(const next of [{phase:'stopped'},{phase:'syncing',account:active().account},{phase:'error',account:active().account},{...active(),disconnecting:true},{...active(),restartRequired:true},active('https://new.example/')]) test('late responses cannot publish UI after stop/recovery/offline/teardown/server switch '+JSON.stringify(next),async t=>{
   const h=await harness(t,{initial:active()});await h.reply(settings(true));
-  await h.click('Disable feed');const pending=h.calls.length-1;
+  await h.click('Refresh / Retry');const pending=h.calls.length-1;
   await h.status(next);assert.equal(h.calls[pending].signal.aborted,true);
-  await h.reply(settings(false),pending);assert.doesNotMatch(h.text(),/"Disabled"|"Enabled"/);
+  await h.reply(settings(false),pending);assert.doesNotMatch(h.text(),/Available — private/);
   if(next.account?.serverUrl==='https://new.example/') {
-    assert.equal(h.calls.at(-1).action,'status');await h.reply(settings(false,'https://new.example'));assert.match(h.text(),/Disabled/);assert.doesNotMatch(h.text(),/feeds.example\/feeds/);
+    assert.equal(h.calls.at(-1).action,'status');await h.reply(settings(true,'https://new.example'));assert.match(h.text(),/Available — private/);assert.doesNotMatch(h.text(),/feeds.example\/feeds/);
   }
 });
 test('unsafe URL is never copied, shown or sent to WebView',async t=>{
   const h=await harness(t,{initial:active()});
-  await h.reply(new Response(JSON.stringify({version:1,limit:50,enabled:true,backend:'https://feeds.example',url:'https://user:password@feeds.example/feeds/folders/f.atom'})));
+  await h.reply(new Response(JSON.stringify({version:1,policy:"always-on",limit:50,enabled:true,backend:'https://feeds.example',url:'https://user:password@feeds.example/feeds/folders/f.atom'})));
   assert.match(h.text(),/unsafe feed URL/);assert.doesNotMatch(h.text(),/user:password/);assert.equal(h.copies.length,0);
+});
+
+test('folder navigation and unmount abort pending reads and ignore stale results',async t=>{
+  const h=await harness(t,{initial:active()});const first=h.calls[0];
+  await h.folder('other');assert.equal(first.signal.aborted,true);assert.equal(h.calls[1].id,'other');
+  await h.reply(settings(),0);assert.doesNotMatch(h.text(),/Available — private/);
+  await h.reply(settings());assert.match(h.text(),/different folder/);assert.doesNotMatch(h.text(),/Copy Atom URL/);
+  await h.click('Refresh / Retry');const last=h.calls.at(-1);await h.unmount();assert.equal(last.signal.aborted,true);
+  await h.reply(settings());assert.equal(h.copies.length,0);
+});
+test('preview errors and oversized/plaintext validation remain honest',async t=>{
+  const h=await harness(t,{initial:active()});await h.reply(settings());
+  for(const response of [new Response('<html>not XML</html>',{headers:{'Content-Type':'text/html'}}),new Response('x'.repeat(6000001),{headers:{'Content-Type':'application/atom+xml'}}),new Response('{}',{status:401})]) {
+    await h.click('Preview Atom XML');await h.reply(response);assert.match(h.text(),/Unavailable/);
+    assert.match(h.text(),/incompatible|too large|HTTP 401/);assert.doesNotMatch(h.text(),/Copy Atom URL/);
+  }
+});
+for(const url of ['http://feeds.example/feeds/folders/f.atom','https://feeds.example/feeds/folders/f.atom?token=x','https://feeds.example/feeds/folders/other.atom','https://other.example/feeds/folders/f.atom']) test('unsafe or mismatched URL unavailable: '+url,async t=>{
+  const h=await harness(t,{initial:active()});await h.reply(new Response(JSON.stringify({version:1,policy:'always-on',enabled:true,backend:'https://feeds.example',url,limit:50})));
+  assert.match(h.text(),/unsafe|different folder/);assert.doesNotMatch(h.text(),/Copy Atom URL/);assert.equal(h.copies.length,0);
 });

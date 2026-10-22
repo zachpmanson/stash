@@ -20,7 +20,7 @@ serves the matching authenticated backend; the owner reported successful debug-a
 connection and initial sync. See `progress.md` for evidence and limitations. Normal
 release-app sync remains disabled; network media transfer is not implemented.
 
-Private folder Atom feeds are a **review candidate, not deployed**: Edit Folder → Feed manages backend-confirmed publication separately from local folder saves. The existing authenticated backend hosts feeds after sync; Caddy still owns Basic authentication. See [folder feed configuration, recovery and validation](docs/folder-feeds.md). Normal builds retain the existing sync opt-in gates.
+Private folder Atom feeds are a **review candidate, not deployed**: Every active folder automatically has a private authenticated feed after sync; Edit Folder → Feed provides read-only status, clean URL copy and XML preview. The existing authenticated backend hosts feeds after sync; Caddy still owns Basic authentication. See [folder feed configuration, recovery and validation](docs/folder-feeds.md). Normal builds retain the existing sync opt-in gates.
 
 Android CR-SQLite libraries are pinned to v0.16.3. Recreate them with
 `nix develop --command ./scripts/prepare-crsqlite-android.sh`; arm64 is fetched

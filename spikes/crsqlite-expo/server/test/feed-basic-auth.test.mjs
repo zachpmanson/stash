@@ -11,7 +11,6 @@ test('real disposable Caddy Basic boundary and actual feedparser fetcher, no cre
   const {id:f}=await h.json('/folders','POST',{name:'Private feed'});
   const {id:i}=await h.json('/items','POST',{type:'text',content:'Synthetic Basic parser note'});
   await h.json(`/items/${i}/folders/${f}`,'PUT',{present:true});
-  await h.json(`/folders/${f}/feed`,'PUT',{enabled:true});
   const listener=createServer().listen(0,'127.0.0.1'); await once(listener,'listening');
   const port=listener.address().port; await new Promise(r=>listener.close(r));
   const caddy=process.env.CADDY_BIN || 'caddy';
@@ -47,7 +46,9 @@ assert feed.entries[0].content[0].value == 'Synthetic Basic parser note'
 print(json.dumps({'version':feed.version,'entries':len(feed.entries)}))`,url,credentials],{encoding:'utf8',timeout:10000});
   assert.equal(reader.status,0,reader.stderr||reader.error?.message);
   assert.equal(JSON.parse(reader.stdout).version,'atom10');
-  await h.json(`/folders/${f}/feed`,'PUT',{enabled:false});
+  assert.equal((await h.api(`/folders/${f}/feed`,'PUT',{enabled:false})).status,409);
+  assert.equal((await fetch(url,{headers:{Authorization:'Basic '+credentials,'If-None-Match':response.headers.get('etag')}})).status,304);
+  await h.json(`/folders/${f}`,'PATCH',{archived:true});
   assert.equal((await fetch(url,{headers:{Authorization:'Basic '+credentials,'If-None-Match':response.headers.get('etag')}})).status,404);
   await stop();
 });
