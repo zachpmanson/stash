@@ -1,3 +1,4 @@
+import { Button } from "./components/controls.js";
 import React, { useId, useState } from "react";
 
 import type { WebItem as Item } from "../src/contracts.js";
@@ -187,12 +188,12 @@ export function ItemEditor({
           Content is required. For links, paste a full http:// or https:// address.
         </p>
         <div className="actions">
-          <button type="submit" className="primary">
+          <Button type="submit" className="primary">
             {busy ? "Saving…" : "Save item"}
-          </button>
-          <button type="button" onClick={onCancel}>
+          </Button>
+          <Button type="button" onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         </div>
       </fieldset>
     </form>

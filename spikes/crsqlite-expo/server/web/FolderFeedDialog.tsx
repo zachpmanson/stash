@@ -1,3 +1,4 @@
+import { Button } from "./components/controls.js";
 import React, { useEffect, useState } from "react";
 import { CompactDialog } from "./CompactDialog.js";
 import { Spinner } from "./Spinner.js";
@@ -47,16 +48,16 @@ export function FolderFeedDialog({ id, name, returnFocus, onClose }: {
     {error && <p role="alert">{error}</p>}
     {url && <label>Atom feed URL<input name="feed-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></label>}
     <div className="actions">
-      {url && <button disabled={copying} onClick={async () => {
+      {url && <Button disabled={copying} onClick={async () => {
         setCopying(true);
         setCopied(false);
         setError("");
         try { await navigator.clipboard.writeText(url); setCopied(true); }
         catch { setError("Could not copy. Select the URL and copy it manually."); }
         finally { setCopying(false); }
-      }}>{copying ? <><Spinner /> Copying…</> : "Copy URL"}</button>}
-      {!loading && !url && <button onClick={() => setAttempt((n) => n + 1)}>Retry</button>}
-      <button autoFocus onClick={onClose}>Close</button>
+      }}>{copying ? <><Spinner /> Copying…</> : "Copy URL"}</Button>}
+      {!loading && !url && <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>}
+      <Button autoFocus onClick={onClose}>Close</Button>
     </div>
     <p role="status" aria-live="polite">{copied ? "Copied URL." : ""}</p>
   </CompactDialog>;

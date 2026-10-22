@@ -1,12 +1,23 @@
+import { Button } from "./components/controls.js";
+import { AppHeader } from "./components/AppHeader.js";
+import { FolderSidebar } from "./components/FolderSidebar.js";
+import { ItemCollection } from "./components/ItemCollection.js";
+import { ReaderPane } from "./components/ReaderPane.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useWebRoute,
+  readRoute,
+  routeUrl,
+  type Route,
+} from "./hooks/useWebRoute.js";
+import { useLayoutPreference } from "./hooks/useLayoutPreference.js";
+export { readRoute, routeUrl } from "./hooks/useWebRoute.js";
 import type {
   WebFolder as Folder,
   WebItem as Item,
   WebItemPage,
 } from "../src/contracts.js";
-import { ApiResponseError, ItemEditor, ItemReader, request } from "./items.js";
-import { FolderNavigation, Icon, ItemCard } from "./components.js";
-import { FolderForm } from "./FolderForm.js";
+import { ApiResponseError, request } from "./items.js";
 import { FolderDialog } from "./FolderDialog.js";
 import { FolderMenu, type FolderMenuTarget } from "./FolderMenu.js";
 import { FolderFeedDialog } from "./FolderFeedDialog.js";
@@ -19,49 +30,16 @@ export {
   safeLink,
 } from "./items.js";
 
-type Route = {
-  folderId: string;
-  archived: boolean;
-  selected: string;
-  offset: number;
-};
-export function readRoute(): Route {
-  const q = new URLSearchParams(window.location?.search ?? "");
-  return {
-    folderId: q.get("folder") ?? "",
-    archived: q.get("archive") === "1",
-    selected: q.get("item") ?? "",
-    offset: Math.trunc(
-      Math.max(0, Math.min(99999900, Number(q.get("offset")) || 0)),
-    ),
-  };
-}
-export function routeUrl(route: Route) {
-  const q = new URLSearchParams();
-  if (route.folderId) q.set("folder", route.folderId);
-  if (route.archived) q.set("archive", "1");
-  if (route.selected) q.set("item", route.selected);
-  if (route.offset) q.set("offset", String(route.offset));
-  return `${window.location?.pathname ?? "/"}${q.size ? `?${q}` : ""}`;
-}
-function localLayout(): "grid" | "list" {
-  try {
-    return window.localStorage.getItem("stash.all.layout") === "grid"
-      ? "grid"
-      : "list";
-  } catch {
-    return "list";
-  }
-}
 export function App() {
-  const [route, setRoute] = useState(readRoute);
+  const { route, setRoute, writeRoute } = useWebRoute();
   const { folderId, archived, selected, offset } = route;
   const [folders, setFolders] = useState<Folder[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   // Retained cards after a failed refresh still belong to their last successful query.
-  const [loadedPage, setLoadedPage] = useState<
-    Pick<Route, "folderId" | "archived" | "offset"> | null
-  >(null);
+  const [loadedPage, setLoadedPage] = useState<Pick<
+    Route,
+    "folderId" | "archived" | "offset"
+  > | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [detail, setDetail] = useState<Item | null>(null);
   const [editor, setEditor] = useState<"new" | "edit" | null>(null);
@@ -69,18 +47,27 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [allLayout, setAllLayout] = useState(localLayout);
+  const [allLayout, setAllLayout] = useLayoutPreference();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [folderAction, setFolderAction] = useState<"new" | null>(
-    null,
+  const [folderAction, setFolderAction] = useState<"new" | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    name: string;
+    archived: boolean;
+    trigger: HTMLElement;
+  } | null>(null);
+  const [feedTarget, setFeedTarget] = useState<{
+    id: string;
+    trigger: HTMLElement;
+  } | null>(null);
+  const feedFolder = folders.find(
+    (f) => f.id === feedTarget?.id && f.archived_at === null,
   );
-  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; archived: boolean; trigger: HTMLElement } | null>(null);
-  const [feedTarget, setFeedTarget] = useState<{ id: string; trigger: HTMLElement } | null>(null);
-  const feedFolder = folders.find((f) => f.id === feedTarget?.id && f.archived_at === null);
   const [menuTarget, setMenuTarget] = useState<FolderMenuTarget | null>(null);
   const menuFolder = folders.find((f) => f.id === menuTarget?.id);
   function closeMenu() {
-    if (menuTarget?.trigger.isConnected) menuTarget.trigger.focus({ preventScroll: true });
+    if (menuTarget?.trigger.isConnected)
+      menuTarget.trigger.focus({ preventScroll: true });
     setMenuTarget(null);
   }
   function closeRename() {
@@ -108,16 +95,6 @@ export function App() {
     : allLayout;
   const discard = () =>
     !dirty.current || window.confirm("Discard unsaved changes?");
-  function writeRoute(next: Route, replace = false) {
-    const url = routeUrl(next);
-    if (
-      replace ||
-      `${window.location?.pathname ?? "/"}${window.location?.search ?? ""}` !==
-        url
-    )
-      window.history?.[replace ? "replaceState" : "pushState"](null, "", url);
-    setRoute(next);
-  }
   function navigate(change: Partial<Route>) {
     if (busy || !discard()) return;
     dirty.current = false;
@@ -168,10 +145,26 @@ export function App() {
           (nextDetail.archived_at !== null) !== archived ||
           (!!folderId && !nextDetail.folderIds.includes(folderId)));
       setFolders(nextFolders);
-      setFeedTarget((current) => current && nextFolders.some((f) => f.id === current.id && f.archived_at === null) ? current : null);
-      setMenuTarget((current) => current && nextFolders.some((f) => f.id === current.id) ? current : null);
+      setFeedTarget((current) =>
+        current &&
+        nextFolders.some((f) => f.id === current.id && f.archived_at === null)
+          ? current
+          : null,
+      );
+      setMenuTarget((current) =>
+        current && nextFolders.some((f) => f.id === current.id)
+          ? current
+          : null,
+      );
       setRenameTarget((current) => {
-        if (current && !nextFolders.some((f) => f.id === current.id && (f.archived_at !== null) === current.archived)) {
+        if (
+          current &&
+          !nextFolders.some(
+            (f) =>
+              f.id === current.id &&
+              (f.archived_at !== null) === current.archived,
+          )
+        ) {
           dirty.current = false;
           return null;
         }
@@ -349,11 +342,6 @@ export function App() {
       );
     else {
       setAllLayout(next);
-      try {
-        window.localStorage.setItem("stash.all.layout", next);
-      } catch {
-        /* Storage may be disabled. */
-      }
     }
   }
   const readerOpen = !!selected || !!editor;
@@ -361,7 +349,13 @@ export function App() {
     <div
       className="shell"
       onKeyDown={(e) => {
-        if (e.key === "Tab" && sidebarOpen && !renameTarget && !menuTarget && !feedTarget) {
+        if (
+          e.key === "Tab" &&
+          sidebarOpen &&
+          !renameTarget &&
+          !menuTarget &&
+          !feedTarget
+        ) {
           const controls = [
             ...(document.querySelectorAll<HTMLElement>(
               ".sidebar button:not(:disabled), .sidebar input:not(:disabled)",
@@ -389,52 +383,19 @@ export function App() {
         else if (readerOpen) closeReader();
       }}
     >
-      <header className="app-header flex items-center gap-3 px-3 md:px-4">
-        <button
-          className="sidebar-toggle"
-          aria-label="Open folders"
-          aria-expanded={sidebarOpen}
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          ref={folderButton}
-        >
-          <Icon name="menu" />
-        </button>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Stash
-        </h1>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            aria-label="Archive"
-            aria-pressed={archived}
-            disabled={busy}
-            onClick={() =>
-              navigate({ archived: !archived, selected: "", offset: 0 })
-            }
-          >
-            <Icon name="archive" />
-            <span className="hidden min-[381px]:inline">Archive</span>
-          </button>
-          <button
-            aria-label="Refresh"
-            disabled={loading || busy}
-            onClick={() => void refresh()}
-          >
-            <Spinner active={loading} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          {!archived && (
-            <button
-              className="primary"
-              aria-label="New item"
-              disabled={busy}
-              onClick={startNew}
-            >
-              <Icon name="plus" />
-              New item
-            </button>
-          )}
-        </div>
-      </header>
+      <AppHeader
+        sidebarOpen={sidebarOpen}
+        folderButton={folderButton}
+        archived={archived}
+        busy={busy}
+        loading={loading}
+        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onToggleArchive={() =>
+          navigate({ archived: !archived, selected: "", offset: 0 })
+        }
+        onRefresh={() => void refresh()}
+        onNew={startNew}
+      />
       <div className="feedback px-4" role="status" aria-live="polite">
         {(busy || loading) && <Spinner />}
         {busy
@@ -445,7 +406,7 @@ export function App() {
               : "Loading…"
             : notice}
         {undo && (
-          <button
+          <Button
             disabled={busy}
             onClick={() =>
               void mutate(
@@ -460,20 +421,20 @@ export function App() {
             }
           >
             Undo
-          </button>
+          </Button>
         )}
       </div>
       {error && !renameTarget && (
         <div role="alert" className="error px-4">
           {error}{" "}
-          <button disabled={loading || busy} onClick={() => void refresh()}>
+          <Button disabled={loading || busy} onClick={() => void refresh()}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
       <div className={`workspace ${readerOpen ? "reader-open" : ""}`}>
         {sidebarOpen && (
-          <button
+          <Button
             className="sidebar-shade"
             aria-label="Close folders"
             onClick={() => {
@@ -482,435 +443,270 @@ export function App() {
             }}
           />
         )}
-        <aside
-          className={`sidebar ${sidebarOpen ? "is-open" : ""}`}
-          aria-label="Library filters"
-        >
-          <div className="sidebar-heading">
-            <button
-              className="sidebar-toggle"
-              aria-label="Close folders"
-              onClick={() => {
-                setSidebarOpen(false);
-                folderButton.current?.focus();
-              }}
-            >
-              <Icon name="back" />
-            </button>
-          </div>
-          <FolderNavigation
-            folders={folders}
-            selected={folderId}
-            archived={archived}
-            busy={busy}
-            onMenu={(id, trigger, point) => {
-              if (busy) return;
-              const box = trigger.getBoundingClientRect();
-              setMenuTarget({ id, trigger, x: point?.x ?? box.left, y: point?.y ?? box.bottom });
-            }}
-            onSelect={(id) =>
-              navigate({ folderId: id, offset: 0, selected: "" })
-            }
-          />
-          {!archived && (
-            <button
-              className="new-folder"
-              disabled={busy}
-              onClick={() =>
-                openFolderForm(folderAction === "new" ? null : "new")
-              }
-            >
-              <Icon name="plus" />
-              New folder
-            </button>
-          )}
-          {folderAction === "new" && (
-            <FolderForm key="new" initialName={null} busy={busy}
-              onDirty={(value) => { dirty.current = value; }}
-              onCancel={() => openFolderForm(null)}
-              onSave={(name) => {
-                if (busy || name === null) return;
-                void mutate(() => request<{ id: string }>("/folders", "POST", { name }), (result) => {
+        <FolderSidebar
+          sidebarOpen={sidebarOpen}
+          folders={folders}
+          selected={folderId}
+          archived={archived}
+          busy={busy}
+          creating={folderAction === "new"}
+          onClose={() => {
+            setSidebarOpen(false);
+            folderButton.current?.focus();
+          }}
+          onMenu={(id, trigger, point) => {
+            if (busy) return;
+            const box = trigger.getBoundingClientRect();
+            setMenuTarget({
+              id,
+              trigger,
+              x: point?.x ?? box.left,
+              y: point?.y ?? box.bottom,
+            });
+          }}
+          onSelect={(id) => navigate({ folderId: id, offset: 0, selected: "" })}
+          onToggleNew={() =>
+            openFolderForm(folderAction === "new" ? null : "new")
+          }
+          formProps={{
+            onDirty: (value) => {
+              dirty.current = value;
+            },
+            onCancel: () => openFolderForm(null),
+            onSave: (name) => {
+              if (busy || name === null) return;
+              void mutate(
+                () => request<{ id: string }>("/folders", "POST", { name }),
+                (result) => {
                   dirty.current = false;
                   setFolderAction(null);
                   setSidebarOpen(false);
                   setEditor(null);
                   setDetail(null);
-                  writeRoute({ ...route, folderId: result.id, selected: "", offset: 0 });
-                });
-              }} />
-          )}
-        </aside>
-        <main className="collection" aria-label="Items" aria-busy={loading}>
-          <div className="collection-heading">
-            <h2 title={activeFolder?.name || (archived ? "Archived items" : "All items")}>
-              {activeFolder?.name || (archived ? "Archived items" : "All items")}
-              {archived && <span className="sr-only"> · Archived items only</span>}
-            </h2>
-            <div
-              className="layout-toggle ml-auto"
-              role="group"
-              aria-label="Collection layout"
-            >
-              <button
-                title="List layout"
-                aria-label="List layout"
-                aria-pressed={layout === "list"}
-                disabled={busy}
-                onClick={() => changeLayout("list")}
-              >
-                <Icon name="list" />
-              </button>
-              <button
-                title="Grid layout"
-                aria-label="Grid layout"
-                aria-pressed={layout === "grid"}
-                disabled={busy}
-                onClick={() => changeLayout("grid")}
-              >
-                <Icon name="grid" />
-              </button>
-            </div>
-          </div>
-          {!loading && !items.length && (
-            <div className="empty">
-              <Icon name={archived ? "archive" : "folder"} />
-              <h3>
-                {archived
-                  ? "Nothing archived here"
-                  : "No items yet"}
-              </h3>
-              <p>
-                {archived
-                  ? "Archived items will appear here."
-                  : "Add a text or link to start this collection."}
-              </p>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  archived
-                    ? navigate({ archived: false, selected: "", offset: 0 })
-                    : startNew()
-                }
-              >
-                {archived ? "Back to collection" : "New item"}
-              </button>
-            </div>
-          )}
-          <ul
-            className={`items ${layout === "grid" ? "grid grid-cols-2 gap-2" : "flex flex-col"}`}
-            onFocusCapture={(event) => {
-              // Native focus scrolling does not account for the sticky heading.
-              const pane = event.currentTarget.parentElement!;
-              const heading = pane.querySelector(".collection-heading")!;
-              const overlap =
-                heading.getBoundingClientRect().bottom + 6 -
-                event.target.getBoundingClientRect().top;
-              if (overlap > 0) pane.scrollTop -= overlap;
-            }}
-          >
-            {items.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                selected={selected === item.id}
-                onSelect={() => {
-                  if (busy) return;
-                  lastItemButton.current =
-                    [
-                      ...(document.querySelectorAll?.<HTMLButtonElement>(
-                        "[data-item-id]",
-                      ) ?? []),
-                    ].find((button) => button.dataset.itemId === item.id) ??
-                    null;
-                  navigate({ selected: item.id });
-                }}
-                onKeyDown={(e) => {
-                  if (
-                    [
-                      "ArrowDown",
-                      "ArrowUp",
-                      "ArrowRight",
-                      "ArrowLeft",
-                    ].includes(e.key)
-                  ) {
-                    e.preventDefault();
-                    const buttons = [
-                      ...e.currentTarget
-                        .closest("ul")!
-                        .querySelectorAll<HTMLButtonElement>("button"),
-                    ];
-                    const delta =
-                      e.key === "ArrowUp"
-                        ? layout === "grid"
-                          ? -2
-                          : -1
-                        : e.key === "ArrowDown"
-                          ? layout === "grid"
-                            ? 2
-                            : 1
-                          : e.key === "ArrowLeft"
-                            ? -1
-                            : 1;
-                    buttons[
-                      Math.max(
-                        0,
-                        Math.min(
-                          buttons.length - 1,
-                          buttons.indexOf(e.currentTarget) + delta,
-                        ),
-                      )
-                    ]?.focus();
-                  }
-                }}
-              />
-            ))}
-          </ul>
-          {(offset > 0 || hasMore) && (
-            <nav aria-label="Item pages" className="actions mt-6">
-              {!loading &&
-                items.length > 0 &&
-                loadedPage?.folderId === folderId &&
-                loadedPage.archived === archived &&
-                loadedPage.offset === offset && (
-                  <span className="text-muted text-sm">
-                    Items {offset + 1}–{offset + items.length}
-                  </span>
-                )}
-              <button
-                disabled={!offset || loading || busy}
-                onClick={() =>
-                  navigate({ offset: Math.max(0, offset - 100), selected: "" })
-                }
-              >
-                Previous
-              </button>
-              <button
-                disabled={!hasMore || loading || busy}
-                onClick={() => navigate({ offset: offset + 100, selected: "" })}
-              >
-                Next
-              </button>
-            </nav>
-          )}
-        </main>
-        <section
-          className="reader"
-          aria-label="Selected item"
-          tabIndex={-1}
-          ref={readerRef}
-        >
-          {readerOpen && (
-            <button
-              className="back-button mb-3"
-              disabled={busy}
-              onClick={closeReader}
-            >
-              <Icon name="back" />
-              Back to collection
-            </button>
-          )}
-          {editor ? (
-            <ItemEditor
-              key={editor === "new" ? "new" : selected}
-              item={editor === "edit" ? detail : null}
-              busy={busy}
-              onDirty={(value) => {
-                dirty.current = value;
-              }}
-              onCancel={cancelEditor}
-              onSave={(data) => {
-                if (editor === "edit" && !Object.keys(data).length) {
-                  dirty.current = false;
-                  setEditor(null);
-                  return;
-                }
-                void mutate(
-                  () =>
-                    request<{ id: string }>(
-                      editor === "new"
-                        ? "/items"
-                        : `/items/${encodeURIComponent(selected)}`,
-                      editor === "new" ? "POST" : "PATCH",
-                      {
-                        ...data,
-                        ...(editor === "new" && folderId ? { folderId } : {}),
-                      },
-                    ),
-                  (result) => {
-                    dirty.current = false;
-                    setEditor(null);
-                    writeRoute({
-                      ...route,
-                      selected: result.id,
-                      offset: editor === "new" ? 0 : offset,
-                    });
-                  },
-                );
-              }}
-            />
-          ) : detail ? (
-            <div className="reader-content">
-              <p className="eyebrow">
-                {detail.type === "url"
-                  ? "Saved link"
-                  : detail.type === "text"
-                    ? "Note"
-                    : "On your device"}
-              </p>
-              <ItemReader
-                item={detail}
-                actions={
-                  !detail.mediaUnavailable && (
-                    <div className="actions my-3">
-                      <button
-                        aria-label="Edit item"
-                        disabled={busy}
-                        onClick={() => {
-                          if (!discard()) return;
-                          dirty.current = false;
-                          setFolderAction(null);
-      setRenameTarget(null);
-      setMenuTarget(null);
-                          setEditor("edit");
-                        }}
-                      >
-                        Edit item
-                      </button>
-                      <button
-                        disabled={busy}
-                        onClick={() => {
-                          const index = items.findIndex(
-                            (i) => i.id === detail.id,
-                          );
-                          const next = items[index + 1] ?? items[index - 1];
-                          void mutate(
-                            () =>
-                              request(
-                                `/items/${encodeURIComponent(detail.id)}`,
-                                "PATCH",
-                                { archived: detail.archived_at === null },
-                              ),
-                            () => {
-                              setUndo({
-                                id: detail.id,
-                                archived: detail.archived_at !== null,
-                              });
-                              writeRoute({
-                                ...route,
-                                selected: next?.id ?? "",
-                              });
-                              setNotice(
-                                detail.archived_at === null
-                                  ? "Item archived."
-                                  : "Item restored.",
-                              );
-                            },
-                          );
-                        }}
-                      >
-                        {detail.archived_at === null
-                          ? "Archive item"
-                          : "Unarchive item"}
-                      </button>
-                    </div>
-                  )
-                }
-              />
-              {!detail.mediaUnavailable && (
-                <>
-                  <details className="organise">
-                    <summary>
-                      <span className="sr-only">Folder membership: </span>
-                      Organise · {membershipCount === 0
-                        ? "No folders"
-                        : `${membershipCount} ${membershipCount === 1 ? "folder" : "folders"}`}
-                    </summary>
-                    <fieldset disabled={busy}>
-                      <legend className="sr-only">Folder membership</legend>
-                      {folders.map((f) => (
-                        <label className="check" key={f.id}>
-                          <input
-                            type="checkbox"
-                            checked={detail.folderIds.includes(f.id)}
-                            onChange={(e) =>
-                              void mutate(() =>
-                                request(
-                                  `/items/${encodeURIComponent(detail.id)}/folders/${encodeURIComponent(f.id)}`,
-                                  "PUT",
-                                  { present: e.target.checked },
-                                ),
-                              )
-                            }
-                          />
-                          {f.name}
-                          {f.archived_at !== null ? " (archived)" : ""}
-                        </label>
-                      ))}
-                      {!folders.length && (
-                        <p>Create a folder to organize this item.</p>
-                      )}
-                    </fieldset>
-                  </details>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="reader-placeholder">
-              <Icon name="text" />
-              <h2>
-                {selected && loading ? "Loading item…" : "No item selected"}
-              </h2>
-              <p>Choose an item to read it.</p>
-            </div>
-          )}
-        </section>
-      </div>
-      {menuTarget && menuFolder && <FolderMenu target={menuTarget} folder={menuFolder} busy={busy}
-        onClose={closeMenu}
-        onFeed={() => {
-          if (busy || menuFolder.archived_at !== null) return;
-          // Viewing a URL is not consent to discard any underlying draft.
-          setFeedTarget({ id: menuFolder.id, trigger: menuTarget.trigger });
-          setMenuTarget(null);
-        }}
-        onRename={() => {
-          if (busy || !discard()) return;
-          dirty.current = false;
-          setEditor(null);
-          setFolderAction(null);
-          setRenameTarget({ id: menuFolder.id, name: menuFolder.name,
-            archived: menuFolder.archived_at !== null, trigger: menuTarget.trigger });
-          setMenuTarget(null);
-        }}
-        onArchive={() => {
-          if (busy || !discard()) return;
-          // A discarded editor must not remain mounted with a stale dirty flag.
-          dirty.current = false;
-          setEditor(null);
-          setFolderAction(null);
-          closeMenu();
-          void mutate(() => request(`/folders/${encodeURIComponent(menuFolder.id)}`, "PATCH", {
-            archived: menuFolder.archived_at === null,
-          }));
-        }} />}
-      {feedTarget && feedFolder && <FolderFeedDialog key={feedTarget.id} id={feedFolder.id} name={feedFolder.name}
-        returnFocus={feedTarget.trigger} onClose={() => setFeedTarget(null)} />}
-      {renameTarget && <FolderDialog key={renameTarget.id} name={renameTarget.name} busy={busy} error={error}
-        returnFocus={renameTarget.trigger} onCancel={closeRename}
-        onDirty={(value) => { dirty.current = value; }}
-        onSave={(name) => {
-          if (busy || !folders.some((f) => f.id === renameTarget.id && (f.archived_at !== null) === renameTarget.archived)) return;
-          if (name === null) {
-            dirty.current = false;
-            setRenameTarget(null);
-            return;
+                  writeRoute({
+                    ...route,
+                    folderId: result.id,
+                    selected: "",
+                    offset: 0,
+                  });
+                },
+              );
+            },
+          }}
+        />
+        <ItemCollection
+          folderName={activeFolder?.name}
+          folderId={folderId}
+          archived={archived}
+          selected={selected}
+          offset={offset}
+          items={items}
+          loadedPage={loadedPage}
+          hasMore={hasMore}
+          loading={loading}
+          busy={busy}
+          layout={layout}
+          onLayout={changeLayout}
+          onUnarchive={() =>
+            navigate({ archived: false, selected: "", offset: 0 })
           }
-          void mutate(() => request(`/folders/${encodeURIComponent(renameTarget.id)}`, "PATCH", { name }), () => {
+          onNew={startNew}
+          onSelect={(id) => {
+            if (busy) return;
+            lastItemButton.current =
+              [
+                ...(document.querySelectorAll?.<HTMLButtonElement>(
+                  "[data-item-id]",
+                ) ?? []),
+              ].find((button) => button.dataset.itemId === id) ?? null;
+            navigate({ selected: id });
+          }}
+          onPage={(offset) => navigate({ offset, selected: "" })}
+        />
+        <ReaderPane
+          readerRef={readerRef}
+          readerOpen={readerOpen}
+          selected={selected}
+          editor={editor}
+          detail={detail}
+          busy={busy}
+          loading={loading}
+          folders={folders}
+          membershipCount={membershipCount}
+          onClose={closeReader}
+          onDirty={(value) => {
+            dirty.current = value;
+          }}
+          onCancel={cancelEditor}
+          onSave={(data) => {
+            if (editor === "edit" && !Object.keys(data).length) {
+              dirty.current = false;
+              setEditor(null);
+              return;
+            }
+            void mutate(
+              () =>
+                request<{ id: string }>(
+                  editor === "new"
+                    ? "/items"
+                    : `/items/${encodeURIComponent(selected)}`,
+                  editor === "new" ? "POST" : "PATCH",
+                  {
+                    ...data,
+                    ...(editor === "new" && folderId ? { folderId } : {}),
+                  },
+                ),
+              (result) => {
+                dirty.current = false;
+                setEditor(null);
+                writeRoute({
+                  ...route,
+                  selected: result.id,
+                  offset: editor === "new" ? 0 : offset,
+                });
+              },
+            );
+          }}
+          onEdit={() => {
+            if (!discard()) return;
             dirty.current = false;
+            setFolderAction(null);
             setRenameTarget(null);
-          });
-        }} />}
+            setMenuTarget(null);
+            setEditor("edit");
+          }}
+          onArchive={() => {
+            if (!detail) return;
+            const index = items.findIndex((i) => i.id === detail.id);
+            const next = items[index + 1] ?? items[index - 1];
+            void mutate(
+              () =>
+                request(`/items/${encodeURIComponent(detail.id)}`, "PATCH", {
+                  archived: detail.archived_at === null,
+                }),
+              () => {
+                setUndo({
+                  id: detail.id,
+                  archived: detail.archived_at !== null,
+                });
+                writeRoute({
+                  ...route,
+                  selected: next?.id ?? "",
+                });
+                setNotice(
+                  detail.archived_at === null
+                    ? "Item archived."
+                    : "Item restored.",
+                );
+              },
+            );
+          }}
+          onMembership={(id, present) => {
+            if (!detail) return;
+            void mutate(() =>
+              request(
+                `/items/${encodeURIComponent(detail.id)}/folders/${encodeURIComponent(id)}`,
+                "PUT",
+                { present },
+              ),
+            );
+          }}
+        />
+      </div>
+      {menuTarget && menuFolder && (
+        <FolderMenu
+          target={menuTarget}
+          folder={menuFolder}
+          busy={busy}
+          onClose={closeMenu}
+          onFeed={() => {
+            if (busy || menuFolder.archived_at !== null) return;
+            // Viewing a URL is not consent to discard any underlying draft.
+            setFeedTarget({ id: menuFolder.id, trigger: menuTarget.trigger });
+            setMenuTarget(null);
+          }}
+          onRename={() => {
+            if (busy || !discard()) return;
+            dirty.current = false;
+            setEditor(null);
+            setFolderAction(null);
+            setRenameTarget({
+              id: menuFolder.id,
+              name: menuFolder.name,
+              archived: menuFolder.archived_at !== null,
+              trigger: menuTarget.trigger,
+            });
+            setMenuTarget(null);
+          }}
+          onArchive={() => {
+            if (busy || !discard()) return;
+            // A discarded editor must not remain mounted with a stale dirty flag.
+            dirty.current = false;
+            setEditor(null);
+            setFolderAction(null);
+            closeMenu();
+            void mutate(() =>
+              request(
+                `/folders/${encodeURIComponent(menuFolder.id)}`,
+                "PATCH",
+                {
+                  archived: menuFolder.archived_at === null,
+                },
+              ),
+            );
+          }}
+        />
+      )}
+      {feedTarget && feedFolder && (
+        <FolderFeedDialog
+          key={feedTarget.id}
+          id={feedFolder.id}
+          name={feedFolder.name}
+          returnFocus={feedTarget.trigger}
+          onClose={() => setFeedTarget(null)}
+        />
+      )}
+      {renameTarget && (
+        <FolderDialog
+          key={renameTarget.id}
+          name={renameTarget.name}
+          busy={busy}
+          error={error}
+          returnFocus={renameTarget.trigger}
+          onCancel={closeRename}
+          onDirty={(value) => {
+            dirty.current = value;
+          }}
+          onSave={(name) => {
+            if (
+              busy ||
+              !folders.some(
+                (f) =>
+                  f.id === renameTarget.id &&
+                  (f.archived_at !== null) === renameTarget.archived,
+              )
+            )
+              return;
+            if (name === null) {
+              dirty.current = false;
+              setRenameTarget(null);
+              return;
+            }
+            void mutate(
+              () =>
+                request(
+                  `/folders/${encodeURIComponent(renameTarget.id)}`,
+                  "PATCH",
+                  { name },
+                ),
+              () => {
+                dirty.current = false;
+                setRenameTarget(null);
+              },
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
