@@ -173,7 +173,7 @@ test("folder layout persists only after success; All items preference remains br
   assert.equal(h.button("Grid layout").props["aria-pressed"], true);
   assert.equal(h.state.folders[0].layout, "grid");
   const ul = h.renderer.root.findByProps({
-    className: "items grid grid-cols-2 gap-3",
+    className: "items grid grid-cols-2 gap-2",
   });
   assert.equal(ul.children.length, 3);
   await h.select("i1");
@@ -471,6 +471,7 @@ test("item and folder forms have one primary submit, secondary Cancel and disabl
         assert.match(textOf(title.parent), /Title \(optional\)/);
         assert.equal(title.props.required, undefined);
         assert.equal(content.props.required, true);
+        assert.equal(content.props.rows, 6, "compact initial editor remains vertically resizable");
         const help = renderer.root.findByProps({ id: content.props["aria-describedby"] });
         assert.match(textOf(help), /required.*http:\/\/ or https:\/\//);
         assert.equal(content.props.maxLength, extra.item ? 4096 : 48000);
@@ -501,7 +502,7 @@ test("card labels are human Note/Link, while domains, untitled fallback and devi
     [{ type: "image", mediaUnavailable: true }, "Media · available on device"],
   ]) {
     const html = renderToStaticMarkup(React.createElement(ItemCard, { item: { id: "label", ...item }, onSelect() {}, onKeyDown() {} }));
-    assert.match(html, new RegExp(`<small>${expected}</small>`));
+    assert.match(html, new RegExp(`<small><span class="card-kind">${expected}</span></small>`));
     if (item.type === "text") assert.match(html, /Untitled text/);
   }
 });
@@ -603,4 +604,31 @@ test("primary default and hover colors meet WCAG AA for white normal-size text",
     const ratio = 1.05 / (luminance(color.slice(1)) + 0.05);
     assert.ok(ratio >= 4.5, `${color} white text contrast ${ratio.toFixed(3)} must be >= 4.5:1`);
   }
+});
+
+test("compact chrome removes slogans, keeps a mounted live region and bounded two-line card hierarchy", async (t) => {
+  const h = await fixture(t);
+  const status = h.renderer.root.findByProps({ role: "status" });
+  assert.equal(status.props["aria-live"], "polite");
+  assert.equal(textOf(status), "");
+  const header = h.renderer.root.findByType("header");
+  assert.doesNotMatch(textOf(header), /little space|later/);
+  const heading = h.renderer.root.findByProps({ className: "collection-heading" });
+  assert.equal(heading.findAllByType("h2").length, 1);
+  assert.equal(heading.findAllByType("p").length, 0, "no duplicate eyebrow or slogan");
+  assert.doesNotMatch(h.renderer.root.findByType("ul").props.className, /gap-/);
+  assert.equal(h.button("Archive").props["aria-label"], "Archive");
+
+  let card;
+  await flush(() => { card = create(React.createElement(ItemCard, {
+    item: { id: "preview", type: "text", title: "Full title", excerpt: "Useful bounded preview" },
+    selected: true, onSelect() {}, onKeyDown() {},
+  })); });
+  t.after(() => act(() => card.unmount()));
+  const title = card.root.findByProps({ className: "card-title" });
+  assert.equal(title.props.title, "Full title");
+  const preview = card.root.findByProps({ className: "card-excerpt" });
+  assert.equal(preview.parent.type, "small", "preview shares the metadata line instead of a third block");
+  assert.equal(textOf(preview), "Useful bounded preview");
+  assert.equal(card.root.findByType("button").props["aria-pressed"], true);
 });

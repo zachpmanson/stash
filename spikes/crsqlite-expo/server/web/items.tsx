@@ -179,7 +179,7 @@ export function ItemEditor({
             aria-describedby={contentHelpId}
             name="content"
             maxLength={item?.type === "url" ? 4096 : 48000}
-            rows={10}
+            rows={6}
             defaultValue={initial?.content ?? ""}
           />
         </label>

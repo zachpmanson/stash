@@ -60,7 +60,7 @@ export function FolderNavigation({
         </button>
       ));
   return (
-    <nav aria-label="Folders" className="space-y-1">
+    <nav aria-label="Folders" className="folder-nav">
       <button
         className="folder-link"
         aria-current={!selected ? "page" : undefined}
@@ -121,14 +121,18 @@ export function ItemCard({
           />
         </span>
         <span className="min-w-0 flex-1">
-          <strong className="card-title">{title}</strong>
-          {item.title && item.excerpt && (
-            <span className="card-excerpt">{item.excerpt}</span>
-          )}
+          <strong className="card-title" title={title}>
+            {title}
+          </strong>
           <small>
-            {item.mediaUnavailable
-              ? "Media · available on device"
-              : item.domain || (item.type === "text" ? "Note" : "Link")}
+            <span className="card-kind">
+              {item.mediaUnavailable
+                ? "Media · available on device"
+                : item.domain || (item.type === "text" ? "Note" : "Link")}
+            </span>
+            {item.title && item.excerpt && (
+              <span className="card-excerpt">{item.excerpt}</span>
+            )}
           </small>
         </span>
       </button>

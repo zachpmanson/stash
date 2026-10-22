@@ -359,7 +359,7 @@ export function App() {
         else if (readerOpen) closeReader();
       }}
     >
-      <header className="app-header flex items-center gap-4 px-4 md:px-6">
+      <header className="app-header flex items-center gap-3 px-3 md:px-4">
         <button
           className="sidebar-toggle"
           aria-label="Open folders"
@@ -372,11 +372,9 @@ export function App() {
         <h1 className="text-xl font-semibold tracking-tight">
           Stash<span className="brand-dot">.</span>
         </h1>
-        <span className="header-caption hidden lg:block">
-          A little space for later.
-        </span>
         <div className="ml-auto flex items-center gap-2">
           <button
+            aria-label="Archive"
             aria-pressed={archived}
             disabled={busy}
             onClick={() =>
@@ -384,7 +382,7 @@ export function App() {
             }
           >
             <Icon name="archive" />
-            Archive
+            <span className="hidden min-[381px]:inline">Archive</span>
           </button>
           <button
             aria-label="Refresh"
@@ -457,7 +455,7 @@ export function App() {
           className={`sidebar ${sidebarOpen ? "is-open" : ""}`}
           aria-label="Library filters"
         >
-          <div className="flex items-center justify-between mb-4">
+          <div className="sidebar-heading">
             <h2 className="nav-label">Library</h2>
             <button
               className="sidebar-toggle"
@@ -492,7 +490,7 @@ export function App() {
           )}
           {activeFolder && (
             <div
-              className="folder-actions mt-4 pt-4 border-t border-line flex flex-wrap gap-2"
+              className="folder-actions mt-2 pt-2 border-t border-line flex flex-wrap gap-2"
               aria-label="Folder actions"
             >
               <button
@@ -564,50 +562,36 @@ export function App() {
               }}
             />
           )}
-          <p className="sidebar-note">
-            Text and links, in sync.
-            <br />
-            Media stays on your devices.
-          </p>
         </aside>
         <main className="collection" aria-label="Items" aria-busy={loading}>
           <div className="collection-heading">
-            <p className="eyebrow">
-              {archived ? "Archive · archived items only" : "Your collection"}
-            </p>
-            <h2 title={activeFolder?.name || "All items"}>
-              {activeFolder?.name || "All items"}
+            <h2 title={activeFolder?.name || (archived ? "Archived items" : "All items")}>
+              {activeFolder?.name || (archived ? "Archived items" : "All items")}
+              {archived && <span className="sr-only"> · Archived items only</span>}
             </h2>
-            <div className="actions mt-4">
-              <span className="text-muted text-sm">
-                {archived
-                  ? "Saved for another day"
-                  : "Keep what catches your eye"}
-              </span>
-              <div
-                className="layout-toggle ml-auto"
-                role="group"
-                aria-label="Collection layout"
+            <div
+              className="layout-toggle ml-auto"
+              role="group"
+              aria-label="Collection layout"
+            >
+              <button
+                title="List layout"
+                aria-label="List layout"
+                aria-pressed={layout === "list"}
+                disabled={busy}
+                onClick={() => changeLayout("list")}
               >
-                <button
-                  title="List layout"
-                  aria-label="List layout"
-                  aria-pressed={layout === "list"}
-                  disabled={busy}
-                  onClick={() => changeLayout("list")}
-                >
-                  <Icon name="list" />
-                </button>
-                <button
-                  title="Grid layout"
-                  aria-label="Grid layout"
-                  aria-pressed={layout === "grid"}
-                  disabled={busy}
-                  onClick={() => changeLayout("grid")}
-                >
-                  <Icon name="grid" />
-                </button>
-              </div>
+                <Icon name="list" />
+              </button>
+              <button
+                title="Grid layout"
+                aria-label="Grid layout"
+                aria-pressed={layout === "grid"}
+                disabled={busy}
+                onClick={() => changeLayout("grid")}
+              >
+                <Icon name="grid" />
+              </button>
             </div>
           </div>
           {!loading && !items.length && (
@@ -616,7 +600,7 @@ export function App() {
               <h3>
                 {archived
                   ? "Nothing archived here"
-                  : "A little room for something good"}
+                  : "No items yet"}
               </h3>
               <p>
                 {archived
@@ -636,7 +620,7 @@ export function App() {
             </div>
           )}
           <ul
-            className={`items ${layout === "grid" ? "grid grid-cols-2 gap-3" : "flex flex-col gap-2"}`}
+            className={`items ${layout === "grid" ? "grid grid-cols-2 gap-2" : "flex flex-col"}`}
             onFocusCapture={(event) => {
               // Native focus scrolling does not account for the sticky heading.
               const pane = event.currentTarget.parentElement!;
@@ -740,7 +724,7 @@ export function App() {
         >
           {readerOpen && (
             <button
-              className="back-button mb-6"
+              className="back-button mb-3"
               disabled={busy}
               onClick={closeReader}
             >
@@ -800,7 +784,7 @@ export function App() {
                 item={detail}
                 actions={
                   !detail.mediaUnavailable && (
-                    <div className="actions my-6">
+                    <div className="actions my-3">
                       <button
                         aria-label="Edit item"
                         disabled={busy}
@@ -895,7 +879,7 @@ export function App() {
             <div className="reader-placeholder">
               <Icon name="text" />
               <h2>
-                {selected && loading ? "Loading item…" : "A space to slow down"}
+                {selected && loading ? "Loading item…" : "No item selected"}
               </h2>
               <p>Choose an item to read it.</p>
             </div>

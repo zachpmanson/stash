@@ -31,7 +31,7 @@
     font: inherit;
   }
   button {
-    @apply inline-flex items-center justify-center gap-2 rounded-control border border-line bg-surface px-3 py-2 text-sm text-ink;
+    @apply inline-flex items-center justify-center gap-2 rounded-control border border-line bg-surface px-2 py-1 text-sm text-ink;
     cursor: pointer;
   }
   button:hover:not(:disabled) {
@@ -59,7 +59,7 @@
   input:not([type="checkbox"]),
   textarea,
   select {
-    @apply block w-full rounded-control border border-line bg-bg p-3 mt-2 mb-4 text-ink;
+    @apply block w-full rounded-control border border-line bg-bg p-2 mt-1 mb-3 text-ink;
   }
   textarea {
     resize: vertical;
@@ -76,7 +76,7 @@
     padding: 0;
   }
   h2 {
-    @apply text-2xl font-semibold;
+    @apply text-xl font-semibold;
     overflow-wrap: anywhere;
   }
   h3 {
@@ -95,15 +95,12 @@
   }
   .app-header {
     flex: 0 0 auto;
-    min-height: 72px;
+    min-height: 52px;
     border-bottom: 1px solid var(--color-line);
     background: var(--color-bg);
   }
   .brand-dot {
     color: var(--color-accent);
-  }
-  .header-caption {
-    @apply text-sm text-muted ml-6;
   }
   .primary {
     background: #6b58df;
@@ -115,8 +112,22 @@
   }
   .feedback {
     @apply text-muted text-xs flex items-center gap-3;
-    min-height: 28px;
-    flex-shrink: 0;
+    /* A stable, non-modal status toast: refresh/save never moves the panes.
+       Keep the live region mounted, including when it is empty. */
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 15;
+    max-width: calc(100% - 24px);
+    background: var(--color-surface);
+    border-radius: var(--radius-control);
+  }
+  .feedback:not(:empty) {
+    border: 1px solid var(--color-line);
+    padding: 6px 10px;
+  }
+  .feedback:empty {
+    padding: 0;
   }
   .feedback button {
     padding: 2px 10px;
@@ -132,7 +143,8 @@
     min-height: 0;
     flex: 1;
     display: grid;
-    grid-template-columns: 232px minmax(380px, 440px) minmax(0, 1fr);
+    --sidebar-width: clamp(208px, 16vw, 224px);
+    grid-template-columns: var(--sidebar-width) clamp(320px, 28vw, 384px) minmax(0, 1fr);
   }
   .sidebar,
   .collection,
@@ -141,19 +153,33 @@
     overscroll-behavior: contain;
     min-width: 0;
     scrollbar-color: #4a4860 transparent;
+    scroll-padding-bottom: 64px;
   }
   .sidebar {
-    padding: 24px 16px;
+    padding: 8px;
     border-right: 1px solid var(--color-line);
     display: flex;
     flex-direction: column;
   }
   .nav-label {
     @apply text-xs text-muted font-semibold uppercase tracking-widest;
-    padding: 16px 12px 8px;
+    padding: 8px 8px 4px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+  .sidebar-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .folder-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
   .folder-link {
-    @apply w-full justify-start border-transparent bg-transparent text-muted px-3 py-3;
+    @apply w-full justify-start border-transparent bg-transparent text-muted px-2 py-1;
+    min-height: 32px;
   }
   .folder-link svg {
     flex-shrink: 0;
@@ -164,32 +190,36 @@
     border-color: #50417a;
   }
   .new-folder {
-    @apply justify-start text-muted mt-6;
+    @apply justify-start text-muted mt-2;
     border-style: dashed;
   }
   .folder-actions button {
     @apply text-xs;
   }
-  .sidebar-note {
-    @apply text-xs text-muted leading-6 pt-8 px-3;
-    margin-top: auto;
-  }
   .collection {
-    @apply px-6 pb-8;
+    @apply px-3 pb-12;
     overflow-anchor: none;
     border-right: 1px solid var(--color-line);
   }
   .collection-heading {
-    @apply pt-4 pb-4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding-block: 8px;
     position: sticky;
     top: 0;
     z-index: 1;
     background: var(--color-bg);
     border-bottom: 1px solid var(--color-line);
-    margin-bottom: 12px;
+    margin-bottom: 6px;
   }
   .collection-heading h2 {
-    margin-top: 8px;
+    margin: 0;
+    min-width: 0;
+    flex: 1;
+    font-size: 16px;
+    line-height: 1.3;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -200,14 +230,16 @@
   }
   .layout-toggle {
     display: inline-flex;
-    padding: 3px;
+    padding: 2px;
     border: 1px solid var(--color-line);
     border-radius: var(--radius-control);
     background: var(--color-surface);
     flex-shrink: 0;
   }
   .layout-toggle button {
-    padding: 8px;
+    padding: 4px;
+    min-height: 28px;
+    min-width: 28px;
     border-color: transparent;
     background: transparent;
   }
@@ -227,9 +259,11 @@
     list-style: none;
   }
   .item-card {
-    @apply w-full text-left items-start rounded-card border-line bg-surface p-4;
-    min-height: 108px;
+    @apply w-full text-left items-start border-line bg-surface;
+    padding: 7px 8px;
+    min-height: 52px;
     height: 100%;
+    gap: 8px;
   }
   .item-card[aria-pressed="true"] {
     background: #262039;
@@ -240,55 +274,83 @@
     flex-shrink: 0;
     padding-top: 2px;
   }
+  .card-icon svg {
+    width: 16px;
+    height: 16px;
+  }
   .card-title {
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
     overflow-wrap: anywhere;
     font-weight: 550;
-    line-height: 1.5;
-  }
-  .card-excerpt {
-    @apply text-muted text-sm mt-2;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    overflow-wrap: anywhere;
+    line-height: 20px;
   }
   .item-card small {
-    @apply block text-muted text-xs mt-3;
-    overflow-wrap: anywhere;
+    @apply text-muted text-xs;
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+    line-height: 16px;
+    min-width: 0;
+  }
+  .card-kind {
+    flex-shrink: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-excerpt {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-excerpt::before {
+    content: "· ";
   }
   .items:not(.grid) .item-card {
-    min-height: 76px;
-    padding: 12px;
+    background: transparent;
+    border-color: transparent;
+    border-bottom-color: var(--color-line);
+    border-radius: 0;
   }
-  .items:not(.grid) .card-title {
-    -webkit-line-clamp: 2;
+  .items:not(.grid) .item-card:hover:not(:disabled) {
+    background: var(--color-raised);
   }
-  .items:not(.grid) .card-excerpt {
-    -webkit-line-clamp: 1;
-    margin-top: 4px;
-  }
-  .items:not(.grid) .item-card small {
-    margin-top: 6px;
+  .items:not(.grid) .item-card[aria-pressed="true"] {
+    background: #262039;
+    border-color: #9d8ffc;
   }
   .field-help,
   .external-link-hint {
     @apply block text-xs text-muted;
-    margin-block: 8px 16px;
+    margin-block: 4px 12px;
   }
   .empty button {
-    margin-top: 16px;
+    margin-top: 12px;
   }
   .items.grid .item-card {
-    flex-direction: column;
-    min-height: 180px;
+    min-height: 100px;
+    border-radius: var(--radius-control);
+  }
+  .items.grid .card-title {
+    -webkit-line-clamp: 2;
+  }
+  .items.grid small {
+    display: block;
+  }
+  .items.grid .card-kind,
+  .items.grid .card-excerpt {
+    display: block;
+  }
+  .items.grid .card-excerpt::before {
+    content: none;
   }
   .reader {
-    @apply p-8;
+    padding: 20px 24px 64px;
+    scroll-padding-bottom: 64px;
     background: #121218;
   }
   .reader:focus {
@@ -305,14 +367,14 @@
   }
   .reader-content h2,
   .reader form h2 {
-    margin-bottom: 24px;
+    margin-bottom: 12px;
     line-height: 1.25;
   }
   .reader-content p {
-    @apply leading-7 my-4;
+    @apply leading-6 my-3;
   }
   .reader-content h3 {
-    margin-top: 32px;
+    margin-top: 20px;
   }
   .plaintext {
     white-space: pre-wrap;
@@ -321,14 +383,14 @@
   .reader-placeholder,
   .empty {
     @apply text-muted text-center;
-    padding: 48px 12px;
+    padding: 24px 8px;
   }
   .reader-placeholder {
-    margin-top: 12vh;
+    margin-top: 0;
   }
   .reader-placeholder svg,
   .empty svg {
-    margin: 0 auto 24px;
+    margin: 0 auto 12px;
     width: 32px;
     height: 32px;
   }
@@ -342,12 +404,12 @@
     @apply text-sm leading-6;
   }
   .check {
-    @apply flex items-center gap-3 py-3;
+    @apply flex items-center gap-3 py-2;
     overflow-wrap: anywhere;
   }
   .organise {
     border-top: 1px solid var(--color-line);
-    padding-top: 24px;
+    padding-top: 12px;
   }
   .organise summary {
     @apply text-sm text-muted;
@@ -361,7 +423,7 @@
 }
 @media (max-width: 1199px) {
   .workspace {
-    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
   .reader {
     display: none;
@@ -373,7 +435,7 @@
     right: 0;
     top: 0;
     bottom: 0;
-    width: min(680px, calc(100% - 232px));
+    width: min(680px, calc(100% - var(--sidebar-width)));
     box-shadow: -12px 0 40px #0008;
     border-left: 1px solid var(--color-line);
   }
@@ -383,7 +445,7 @@
 }
 @media (max-width: 759px) {
   .app-header {
-    min-height: 64px;
+    min-height: 52px;
     gap: 8px;
   }
   .app-header button {
@@ -401,7 +463,7 @@
   .collection {
     height: 100%;
     border: 0;
-    padding-inline: 16px;
+    padding-inline: 12px;
   }
   .sidebar-toggle {
     display: inline-flex;
@@ -433,7 +495,7 @@
     position: absolute;
     inset: 0;
     width: 100%;
-    padding: 24px 16px;
+    padding: 16px 12px 64px;
     border: 0;
   }
 }
@@ -448,7 +510,34 @@
   .app-header button svg {
     width: 14px;
   }
-  .item-card {
-    padding: 12px;
+}
+
+/* Dense desktop controls must not become small touch targets. */
+@media (pointer: coarse) {
+  button,
+  .folder-link,
+  .layout-toggle button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .layout-toggle button {
+    min-width: 44px;
+  }
+  .app-header {
+    min-height: 60px;
+  }
+  input:not([type="checkbox"]),
+  select,
+  .check {
+    min-height: 44px;
+  }
+  .organise summary {
+    min-height: 44px;
+    padding-block: 12px;
+  }
+  .collection,
+  .reader-open .reader {
+    padding-bottom: 80px;
+    scroll-padding-bottom: 80px;
   }
 }
