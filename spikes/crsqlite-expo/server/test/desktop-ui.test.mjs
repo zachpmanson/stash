@@ -8,6 +8,11 @@ import { App, ItemEditor, ItemReader } from "../web/App.tsx";
 import { FolderNavigation, ItemCard } from "../web/components.tsx";
 import { FolderFeedDialog } from "../web/FolderFeedDialog.tsx";
 import { FolderForm } from "../web/FolderForm.tsx";
+import { AppHeader } from "../web/components/AppHeader.tsx";
+import { FolderSidebar } from "../web/components/FolderSidebar.tsx";
+import { ItemCollection } from "../web/components/ItemCollection.tsx";
+import { ItemToolbar } from "../web/components/ItemToolbar.tsx";
+import { ReaderPane } from "../web/components/ReaderPane.tsx";
 const flush = async (fn) =>
   act(async () => {
     await fn?.();
@@ -735,4 +740,79 @@ test("viewing/invalidating a target feed leaves unrelated folder draft and dirty
   await flush(() => h.button("All items").props.onClick());
   assert.equal(h.state.prompts, 1);
   assert.equal(h.location.search, "?folder=f1");
+});
+
+// These assertions traverse the actual App extraction, not a compatibility export.
+test("extracted App composition retains editor/input ancestors across refresh, layout, feedback and failed saves", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  for (const component of [AppHeader, FolderSidebar, ItemCollection, ItemToolbar, ReaderPane])
+    assert.equal(h.renderer.root.findAllByType(component).length, 1);
+  await flush(() => h.button("Edit item").props.onClick());
+  const pane = h.renderer.root.findByType(ReaderPane);
+  const editor = pane.findByType(ItemEditor), form = editor.findByType("form");
+  const title = form.findByType("input"), content = form.findByType("textarea");
+  const ancestors = (node) => { const result = []; while (node) { result.push(node.type); node = node.parent; } return result; };
+  const originalAncestors = ancestors(content);
+  const assertIdentity = () => {
+    assert.equal(h.renderer.root.findByType(ReaderPane), pane);
+    assert.equal(pane.findByType(ItemEditor), editor);
+    assert.equal(editor.findByType("form"), form);
+    assert.equal(form.findByType("input"), title);
+    assert.equal(form.findByType("textarea"), content);
+    assert.deepEqual(ancestors(content), originalAncestors);
+    assert.equal(content.props.defaultValue, "Original body");
+  };
+  const previous = globalThis.FormData;
+  globalThis.FormData = class extends Map { constructor(form) { super(Object.entries(form.fields)); } };
+  t.after(() => { globalThis.FormData = previous; });
+  const fields = { title: "Typed web title", content: "Original body" };
+  await flush(() => form.props.onChange({ currentTarget: { fields } }));
+  h.state.items[1].content = "Concurrent phone body";
+  h.state.folders = h.state.folders.filter((f) => f.id !== "f2");
+  await flush(() => h.button("Refresh").props.onClick());
+  assertIdentity();
+  await flush(() => h.button("Grid layout").props.onClick());
+  assertIdentity();
+  h.state.failWrite = true;
+  await flush(() => form.props.onSubmit({ preventDefault() {}, currentTarget: { fields } }));
+  assertIdentity();
+  const write = h.state.calls.filter((c) => c.url === "/api/items/i1" && c.method === "PATCH").at(-1);
+  assert.deepEqual(JSON.parse(write.body), { title: "Typed web title" });
+  assert.equal(h.state.items[1].content, "Concurrent phone body");
+  assert.match(textOf(h.renderer.root), /Synthetic write failed/);
+  let prevented = false;
+  h.listeners.get("beforeunload")({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  h.location.search = "?folder=f2";
+  await flush(() => h.listeners.get("popstate")());
+  assert.ok(h.location.search.includes("item=i1"));
+  assertIdentity();
+  await flush(() => h.button("All items").props.onClick());
+  assertIdentity();
+  assert.equal(h.state.prompts, 2);
+});
+
+test("extracted sidebar retains the new-folder input slot across layout and target-owned feed overlays", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await flush(() => h.button("New folder").props.onClick());
+  await typeFolderDraft(h, "Typed folder draft");
+  const sidebar = h.renderer.root.findByType(FolderSidebar);
+  const form = sidebar.findByType(FolderForm), input = form.findByType("input");
+  await flush(() => h.button("Grid layout").props.onClick());
+  assert.equal(h.renderer.root.findByType(FolderSidebar), sidebar);
+  assert.equal(sidebar.findByType(FolderForm), form);
+  assert.equal(form.findByType("input"), input);
+  await h.openMenu("f2");
+  await flush(() => h.button("Atom feed").props.onClick());
+  assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
+  assert.equal(form.findByType("input"), input);
+  await flush(() => h.button("Close").props.onClick());
+  h.state.folders = h.state.folders.filter((f) => f.id !== "f1");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.location.search, "");
+  assert.equal(sidebar.findByType(FolderForm), form);
+  assert.equal(form.findByType("input"), input);
+  await flush(() => h.button("Archive").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(form.findByType("input"), input);
 });

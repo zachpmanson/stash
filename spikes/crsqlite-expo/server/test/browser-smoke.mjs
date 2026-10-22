@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
 import { folderInteractions } from "./folder-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
+import { refactorComposition } from "./refactor-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
 // STASH_TEST_SERVER_ENTRY optionally selects the exact built service package.
@@ -914,6 +915,18 @@ try {
   if (process.env.STASH_DENSITY_REFERENCE !== "1") await folderInteractions({
     evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
     base: `http://127.0.0.1:${proxyPort}`, removeFixture,
+    confirm: async (action, accept) => {
+      const pending = action();
+      await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i);
+      await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending;
+      dialog = null;
+    },
+  });
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") await refactorComposition({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`,
     confirm: async (action, accept) => {
       const pending = action();
       await waitFor(() => !!dialog);

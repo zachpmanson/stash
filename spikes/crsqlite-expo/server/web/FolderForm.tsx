@@ -1,3 +1,4 @@
+import { Button } from "./components/controls.js";
 import React, { useState } from "react";
 
 /** Freeze the observed name just like the item editor: refresh is not consent to overwrite. */
@@ -43,7 +44,7 @@ export function FolderForm({
         />
       </label>
       <div className="actions">
-        <button type="submit" className="primary" disabled={busy}>
+        <Button type="submit" className="primary" disabled={busy}>
           {busy
             ? baseline === null
               ? "Creating…"
@@ -51,10 +52,10 @@ export function FolderForm({
             : baseline === null
               ? "Create folder"
               : "Rename folder"}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
+        </Button>
+        <Button type="button" disabled={busy} onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );

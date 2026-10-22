@@ -1,3 +1,4 @@
+import { Button } from "./components/controls.js";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import type { WebFolder } from "../src/contracts.js";
 
@@ -47,10 +48,10 @@ export function FolderMenu({ target, folder, busy, onClose, onRename, onArchive,
           (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
       }
     }}>
-    <button role="menuitem" disabled={busy} onClick={onRename}>Rename</button>
-    <button role="menuitem" disabled={busy} onClick={onArchive}>
+    <Button role="menuitem" disabled={busy} onClick={onRename}>Rename</Button>
+    <Button role="menuitem" disabled={busy} onClick={onArchive}>
       {folder.archived_at === null ? "Archive folder" : "Unarchive folder"}
-    </button>
-    <button role="menuitem" disabled={busy || folder.archived_at !== null} onClick={onFeed}>Atom feed</button>
+    </Button>
+    <Button role="menuitem" disabled={busy || folder.archived_at !== null} onClick={onFeed}>Atom feed</Button>
   </div>;
 }
