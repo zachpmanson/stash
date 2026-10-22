@@ -18,7 +18,9 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 
 async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = false, platform = 'android', edit = false } = {}) {
   let status = initial, folderId = 'folder-a', subscriptions = 0, unsubscribed = 0, renderer;
-  const listeners = new Set(), nav = [], requests = [], reads = [], scroll = [], writes = [], modules = new Map();
+  const listeners = new Set(), nav = [], requests = [], reads = [], scroll = [], writes = [], modals = [], modules = new Map();
+  const PaperMenu = ({ visible, anchor, onDismiss, children }) => React.createElement('PaperMenu', { visible, onDismiss }, anchor, visible ? children : null);
+  PaperMenu.Item = props => React.createElement('PaperMenuItem', props, props.title);
   const mocks = {
     react: React,
     'react-native': {
@@ -27,7 +29,7 @@ async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = 
       useWindowDimensions: () => ({ width: 360, height: 640 }),
     },
     'expo-router': {
-      Stack: { Screen: ({ options }) => options?.headerRight?.() ?? null },
+      Stack: { Screen: ({ options }) => React.createElement('StackHeader', null, options?.headerRight?.() ?? null) },
       useLocalSearchParams: () => ({ id: folderId, folderName: 'Synthetic folder', folderIcon: 'F' }),
       useRouter: () => ({ push: route => nav.push(route), back: () => nav.push('back') }),
       useFocusEffect: callback => React.useEffect(callback, [callback]),
@@ -35,13 +37,14 @@ async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = 
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0, top: 0 }) },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
     '@react-navigation/elements': { PlatformPressable: 'PlatformPressable' },
+    'react-native-paper': { Menu: PaperMenu },
     'unicode-segmenter/grapheme': { countGraphemes: x => x.length },
     '../db/folders': {
       getFolderById: async id => { reads.push(id); return { id, layout: 'grid' }; },
       ...Object.fromEntries(['archiveFolder', 'updateFolderName', 'updateFolderIcon', 'updateFolderLayout'].map(x => [x, async (...args) => writes.push([x, ...args])])),
     },
     '../db/items': { getItemsInFolder: async () => [{ id: 'item', lat: 1, lng: 2 }], archiveItem: async () => assert.fail('unexpected mutation') },
-    'src/state/modalState': { showModal: () => assert.fail('unexpected modal') },
+    'src/state/modalState': { showModal: config => modals.push(config) },
     'src/state/scrollTopState': { useScrollTopState: selector => selector({ setHandler: setScroll }) },
     '../state/scrollTopState': { triggerScrollToTop() {} },
     '../db/syncClient': {
@@ -72,7 +75,8 @@ async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = 
         if (spec === '../utils/uiAction') return load('src/utils/uiAction.ts');
         if (spec === '../state/modalState') return mocks['src/state/modalState'];
         if (spec === '../components/Screen') return load('src/components/Screen.tsx');
-        if (spec === '../components/TopbarButton') return load('src/components/TopbarButton.tsx');
+        if (spec === '../components/TopbarButton' || spec === './TopbarButton') return load('src/components/TopbarButton.tsx');
+        if (spec === '../components/OverflowMenu') return load('src/components/OverflowMenu.tsx');
         if (/components\//.test(spec)) return { __esModule: true, default: spec };
         throw Error(`Unexpected import ${spec} in ${file}`);
       },
@@ -86,10 +90,26 @@ async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = 
   t.after(async () => { if (renderer) await act(() => { renderer.unmount(); renderer = null; }); });
   const publish = async next => { status = next; await act(async () => { for (const fn of [...listeners]) fn(next); }); };
   const text = () => JSON.stringify(renderer.toJSON());
-  const links = () => renderer.root.findAllByType('Pressable').filter(x => x.props.accessibilityLabel === 'Atom feed');
-  const click = async () => { assert.equal(links().length, 1); await act(async () => links()[0].props.onPress()); };
+  const menu = () => renderer.root.findByType('PaperMenu');
+  const openMenu = async () => {
+    if (!menu().props.visible) {
+      const trigger = renderer.root.findByProps({ accessibilityLabel: 'Folder actions', accessibilityRole: 'button' });
+      await act(async () => trigger.props.onPress());
+    }
+  };
+  const links = () => renderer.root.findAllByType('PaperMenuItem').filter(x => x.props.title === 'Atom feed');
+  const select = async title => { await openMenu(); const entry = renderer.root.findAllByType('PaperMenuItem').find(x => x.props.title === title); assert.ok(entry); await act(async () => entry.props.onPress()); };
+  const click = () => select('Atom feed');
   return {
-    nav, requests, reads, scroll, writes, text, links, click, publish,
+    nav, requests, reads, scroll, writes, modals, text, links, click, publish, openMenu, select,
+    menuVisible: () => menu().props.visible,
+    menuTitles: () => renderer.root.findAllByType('PaperMenuItem').map(x => x.props.title),
+    headerIcons: () => renderer.root.findByType('StackHeader').findAllByType('MaterialIcons').map(x => x.props.name),
+    dismissMenu: async () => { await act(async () => menu().props.onDismiss()); },
+    confirmArchive: async () => { const config = modals.at(-1); assert.equal(config.title, 'Archive folder?'); await act(async () => config.buttons.find(x => x.text === 'Archive').onPress()); },
+    cancelArchive: async () => { const config = modals.at(-1); assert.equal(config.title, 'Archive folder?'); const button = config.buttons.find(x => x.text === 'Cancel'); assert.equal(button.style, 'cancel'); await act(async () => button.onPress?.()); },
+    editFolder: async () => { const button = renderer.root.findAllByType('PlatformPressable').find(x => x.findAllByType('MaterialIcons').some(i => i.props.name === 'edit')); assert.ok(button); await act(async () => button.props.onPress()); },
+
     counts: () => ({ subscriptions, unsubscribed, listeners: listeners.size }),
     folder: async id => { folderId = id; await act(async () => renderer.update(tree())); },
     openFeed: async () => { assert.equal(nav.at(-1)?.pathname, '/folder-feed/[id]'); folderId = nav.at(-1).params.id; await act(async () => renderer.update(tree('feed'))); },
@@ -110,22 +130,24 @@ for (const state of [
   active('error', { authenticationRequired: true }), active('synced', { authenticationRequired: true }),
 ]) test(`FolderScreen hides contextual feed for ineligible status ${JSON.stringify(state)}`, async t => {
   const h = await harness(t, { initial: state });
+  await h.openMenu();
   assert.equal(h.links().length, 0); assert.doesNotMatch(h.text(), /Atom feed|feed URL/);
   assert.deepEqual(h.nav, []); assert.deepEqual(h.requests, []); assert.deepEqual(h.writes, []);
 });
 
 for (const phase of ['synced', 'syncing', 'error']) test(`FolderScreen shows a labelled read-only link for established ${phase}, not confirmation`, async t => {
   const h = await harness(t, { initial: active(phase) });
-  assert.equal(h.links().length, 1); assert.match(h.text(), /Atom feed/); assert.match(h.text(), /read-only/);
-  assert.doesNotMatch(h.text(), /Available —|confirmed feed|https:\/\/|synthetic-owner/);
-  assert.match(h.links()[0].props.accessibilityHint, /availability must be confirmed/);
-  const icon = h.links()[0].findByType('MaterialIcons'); assert.equal(icon.props.name, 'rss-feed'); assert.ok(icon.props.color);
+  assert.equal(h.menuVisible(), false); assert.equal(h.links().length, 0);
+  await h.openMenu();
+  assert.equal(h.links().length, 1); assert.match(h.text(), /Atom feed/);
+  assert.doesNotMatch(h.text(), /Available —|confirmed feed|https:\/\/|synthetic-owner|View URL and preview/);
+  assert.deepEqual(h.headerIcons(), ['map', 'edit', 'more-vert']);
   assert.deepEqual(h.requests, []); assert.deepEqual(h.writes, []);
   await h.click(); assert.deepEqual(JSON.parse(JSON.stringify(h.nav)), [{ pathname: '/folder-feed/[id]', params: { id: 'folder-a' } }]);
   await h.folder('folder/β'); await h.click();
   assert.deepEqual(JSON.parse(JSON.stringify(h.nav.at(-1))), { pathname: '/folder-feed/[id]', params: { id: 'folder/β' } });
   assert.deepEqual(h.counts(), { subscriptions: 1, unsubscribed: 0, listeners: 1 });
-  await h.toggleMap(); assert.equal(h.links().length, 1); assert.match(h.text(), /FolderMap/);
+  await h.toggleMap(); await h.openMenu(); assert.equal(h.links().length, 1); assert.match(h.text(), /FolderMap/);
 });
 
 for (const config of [
@@ -135,6 +157,7 @@ for (const config of [
   { dev: false, optIn: true, platform: 'ios', allowed: false },
 ]) test(`FolderScreen build gate ${JSON.stringify(config)}`, async t => {
   const h = await harness(t, { ...config, initial: active() });
+  await h.openMenu();
   assert.equal(h.links().length, config.allowed ? 1 : 0);
   assert.equal(h.counts().subscriptions, config.allowed ? 1 : 0);
   assert.deepEqual(h.requests, []);
@@ -148,14 +171,14 @@ test('FolderScreen account changes, signout/drain/restart/auth rejection and rem
   await h.publish(active('synced', { account: { username: 'second-owner', serverUrl: 'https://second.example/' } }));
   await h.folder('second-folder'); await h.click(); assert.equal(h.nav.at(-1).params.id, 'second-folder');
   for (const state of [active('synced', { disconnecting: true }), { phase: 'stopped', disconnecting: true }, { phase: 'stopped', restartRequired: true }, active('error', { authenticationRequired: true }), { phase: 'stopped' }, { phase: 'connecting' }]) {
-    await h.publish(state); assert.equal(h.links().length, 0);
+    await h.publish(state); await h.openMenu(); assert.equal(h.links().length, 0);
   }
   await h.unmount(); assert.deepEqual(h.counts(), { subscriptions: 1, unsubscribed: 1, listeners: 0 });
   assert.equal(h.scroll.at(-1), null);
-  await h.publish(active('synced', { restartRequired: true })); await h.remount(); assert.equal(h.links().length, 0);
-  await h.publish(active('error')); assert.equal(h.links().length, 1);
+  await h.publish(active('synced', { restartRequired: true })); await h.remount(); await h.openMenu(); assert.equal(h.links().length, 0);
+  await h.publish(active('error')); await h.openMenu(); assert.equal(h.links().length, 1);
   await h.unmount(); assert.deepEqual(h.counts(), { subscriptions: 2, unsubscribed: 2, listeners: 0 });
-  await h.publish({ phase: 'stopped', disconnecting: true }); await h.remount(); assert.equal(h.links().length, 0);
+  await h.publish({ phase: 'stopped', disconnecting: true }); await h.remount(); await h.openMenu(); assert.equal(h.links().length, 0);
 });
 
 for (const phase of ['syncing', 'error']) test(`FolderScreen → actual FolderFeedScreen for ${phase} cannot confirm until full exchange and backend response`, async t => {
@@ -172,6 +195,54 @@ for (const phase of ['syncing', 'error']) test(`FolderScreen → actual FolderFe
   await h.publish(active('synced', { disconnecting: true }));
   assert.match(h.text(), /Unavailable — status not confirmed/); assert.doesNotMatch(h.text(), /Copy Atom URL/);
   await h.unmount(); assert.equal(h.counts().listeners, 0);
+});
+
+test('folder actions is the rightmost labelled header control; menu selection and dismissal close it', async t => {
+  const h = await harness(t, { initial: active() });
+  assert.deepEqual(h.headerIcons(), ['map', 'edit', 'more-vert']);
+  assert.equal(h.menuVisible(), false); assert.deepEqual(h.menuTitles(), []);
+  assert.doesNotMatch(h.text(), /View URL and preview|availability must be confirmed/);
+  await h.openMenu(); assert.deepEqual(h.menuTitles(), ['Atom feed', 'Archive']);
+  await h.dismissMenu(); assert.equal(h.menuVisible(), false); assert.deepEqual(h.nav, []);
+  await h.click(); assert.equal(h.menuVisible(), false);
+  assert.equal(h.nav.at(-1).pathname, '/folder-feed/[id]');
+  assert.deepEqual(h.requests, []); assert.deepEqual(h.writes, []); assert.deepEqual(h.modals, []);
+});
+
+test('signed-out folder keeps Archive in overflow without a direct archive or feed button', async t => {
+  const h = await harness(t);
+  assert.deepEqual(h.headerIcons(), ['map', 'edit', 'more-vert']);
+  await h.openMenu(); assert.deepEqual(h.menuTitles(), ['Archive']);
+  await h.dismissMenu(); await h.toggleMap(); assert.deepEqual(h.headerIcons(), ['grid-view', 'edit', 'more-vert']);
+  assert.equal(h.menuVisible(), false); await h.editFolder();
+  assert.equal(h.nav.at(-1).pathname, '/edit-folder/[id]'); assert.equal(h.nav.at(-1).params.id, 'folder-a');
+  assert.deepEqual(h.requests, []); assert.deepEqual(h.writes, []);
+});
+
+test('open menu resets on folder, account and eligibility changes without executing a stale action', async t => {
+  const h = await harness(t, { initial: active() });
+  await h.openMenu(); await h.publish(active('error')); assert.equal(h.menuVisible(), true, 'same established account may be offline');
+  await h.publish(active('synced', { account: { username: 'other', serverUrl: 'https://other.example/' } }));
+  assert.equal(h.menuVisible(), false);
+  await h.openMenu(); await h.folder('new-folder'); assert.equal(h.menuVisible(), false);
+  await h.openMenu(); await h.publish({ phase: 'stopped' }); assert.equal(h.menuVisible(), false);
+  await h.openMenu(); assert.deepEqual(h.menuTitles(), ['Archive']);
+  await h.publish(active()); assert.equal(h.menuVisible(), false);
+  for (const state of [active('synced', { disconnecting: true }), active('synced', { restartRequired: true }), active('error', { authenticationRequired: true })]) {
+    await h.publish(active()); await h.openMenu(); await h.publish(state);
+    assert.equal(h.menuVisible(), false); await h.openMenu(); assert.deepEqual(h.menuTitles(), ['Archive']);
+  }
+  assert.deepEqual(h.nav, []); assert.deepEqual(h.writes, []); assert.deepEqual(h.modals, []);
+});
+
+test('overflow Archive closes before the existing confirmation; Cancel is inert and confirmation targets current folder', async t => {
+  const h = await harness(t);
+  await h.select('Archive'); assert.equal(h.menuVisible(), false);
+  assert.match(h.modals.at(-1).message, /Synthetic folder.*archive/);
+  await h.cancelArchive(); assert.deepEqual(h.writes, []); assert.deepEqual(h.nav, []);
+  await h.folder('folder/β'); await h.select('Archive'); await h.confirmArchive();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.writes)), [['archiveFolder', 'folder/β']]);
+  assert.deepEqual(h.nav, ['back']); assert.deepEqual(h.requests, []);
 });
 
 for (const initial of [{ phase: 'stopped' }, active(), active('synced', { disconnecting: true }), active('synced', { restartRequired: true })]) test(`EditFolderScreen has no redundant Feed setting ${JSON.stringify(initial)}`, async t => {
