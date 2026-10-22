@@ -168,7 +168,7 @@
   .sidebar-heading { display: none; }
   .folder-row { display: flex; min-width: 0; gap: 2px; }
   .folder-row .folder-link { min-width: 0; flex: 1; }
-  .folder-menu-toggle { width: 28px; flex-shrink: 0; border-color: transparent; background: transparent; color: var(--color-muted); }
+  .folder-menu-toggle { width: 28px; padding-inline: 4px; flex-shrink: 0; border-color: transparent; background: transparent; color: var(--color-muted); }
   .folder-menu { position: fixed; z-index: 40; width: min(200px, calc(100vw - 16px)); padding: 4px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: 0 8px 24px #0008; }
   .folder-menu button { width: 100%; justify-content: flex-start; border-color: transparent; }
   .folder-dialog { margin: auto; width: min(360px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-ink); }

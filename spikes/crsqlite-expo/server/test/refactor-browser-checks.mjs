@@ -29,6 +29,14 @@ export async function refactorComposition({
       `document.querySelector('.reader h2')?.textContent==='Frozen title' && document.querySelector('.collection').getAttribute('aria-busy')==='false'`,
     ),
   );
+  assert.deepEqual(
+    await evaluate(`(() => {
+      const button = document.querySelector('.folder-menu-toggle');
+      return { button: button.getBoundingClientRect().width, icon: button.querySelector('svg').getBoundingClientRect().width };
+    })()`),
+    { button: 28, icon: 18 },
+    "folder ellipsis retains an 18px Heroicon inside its compact 28px control",
+  );
   await click("Edit item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
   await evaluate(`(() => {
