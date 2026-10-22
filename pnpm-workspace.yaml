@@ -4,3 +4,4 @@ minimumReleaseAgeExclude:
   - expo-location@55.1.13
 patchedDependencies:
   '@vlcn.io/ws-client@0.2.0': patches/@vlcn.io__ws-client@0.2.0.patch
+  expo-secure-store@55.0.18: patches/expo-secure-store@55.0.18.patch

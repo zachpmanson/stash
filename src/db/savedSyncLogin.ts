@@ -47,6 +47,8 @@ export function createSavedSyncLogin(deps: Dependencies) {
     catch { throw new Error("Could not erase the saved login from secure storage. It may reconnect after restart. Try Forget saved login again."); }
   };
   const establish = async (login: SavedSyncLogin, token: number, save: boolean) => {
+    // A synchronous observer may have cancelled while we published reconnecting.
+    if (token !== generation) return;
     const account = await deps.connect(login);
     if (token !== generation) return;
     if (!account || account.serverUrl !== login.serverUrl || account.username !== login.username) {
@@ -65,8 +67,7 @@ export function createSavedSyncLogin(deps: Dependencies) {
   const reconnect = () => {
     if (state.busy) return queue;
     const token = ++generation;
-    publish({ ...state, busy: true, message: "Reading saved login…" });
-    return enqueue(async () => {
+    const pending = enqueue(async () => {
       if (token !== generation) return;
       let login: SavedSyncLogin | null;
       try { login = await deps.storage.read(); }
@@ -86,13 +87,14 @@ export function createSavedSyncLogin(deps: Dependencies) {
         throw error;
       }
     });
+    publish({ ...state, busy: true, message: "Reading saved login…" });
+    return pending;
   };
   const forget = (invalid = false) => {
     const token = ++generation;
     bootstrapped = true;
-    const draining = stopNow();
-    publish({ ...state, busy: true, message: invalid ? "Login rejected; forgetting saved credentials…" : "Signing out and forgetting saved login…" });
-    return enqueue(async () => {
+    // Reserve removal before disconnect/notifications can enqueue a replacement.
+    const pending = enqueue(async () => {
       let storageFailure: string | undefined;
       try { await remove(); } catch (error) { storageFailure = (error as Error).message; }
       const drainFailure = await draining;
@@ -100,6 +102,9 @@ export function createSavedSyncLogin(deps: Dependencies) {
       publish({ busy: false, ...(storageFailure ? { storageError: true } : {}), message: storageFailure ?? drainFailure ?? (invalid ? "Login rejected. Saved credentials cleared; sign in again." : "Signed out. Saved login forgotten.") });
       if (storageFailure || drainFailure) throw new Error(storageFailure ?? drainFailure);
     });
+    const draining = stopNow();
+    publish({ ...state, busy: true, message: invalid ? "Login rejected; forgetting saved credentials…" : "Signing out and forgetting saved login…" });
+    return pending;
   };
   return {
     subscribe(listener: (state: SavedLoginState) => void) {
@@ -117,9 +122,7 @@ export function createSavedSyncLogin(deps: Dependencies) {
       const login = normalizeSyncLogin({ version: 1, serverUrl, username, password });
       const token = ++generation;
       bootstrapped = true;
-      const draining = stopNow();
-      publish({ busy: true, message: "Signing in…" });
-      return enqueue(async () => {
+      const pending = enqueue(async () => {
         try {
           const drainFailure = await draining;
           if (token !== generation) return;
@@ -138,6 +141,9 @@ export function createSavedSyncLogin(deps: Dependencies) {
           throw error;
         }
       });
+      const draining = stopNow();
+      publish({ busy: true, message: "Signing in…" });
+      return pending;
     },
     forget: () => forget(),
     authenticationRejected: () => { void forget(true).catch(() => {}); },

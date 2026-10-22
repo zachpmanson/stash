@@ -572,13 +572,13 @@ test('same-signature recovery after a transient outage restores feed controls wi
   } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
 });
 
-function savedClientHarness(h) {
+function savedClientHarness(h, native) {
   const records=new Map();
   const identity=load('src/db/syncIdentity.ts',{});
   const core=load('src/db/savedSyncLogin.ts',{'./syncIdentity':identity});
   const storage=load('src/db/syncLoginStorage.ts',{
     './syncIdentity':identity,
-    'expo-secure-store':{
+    'expo-secure-store':native??{
       getItemAsync:async key=>records.get(key)??null,
       setItemAsync:async(key,value)=>records.set(key,value),
       deleteItemAsync:async key=>records.delete(key),
@@ -624,4 +624,83 @@ test('actual account replacement cancels a delayed restored health check before 
   assert.equal(h.transports,1);assert.equal(JSON.parse([...s.records.values()][0]).username,'bob');
   let status;h.sync.subscribeStashSyncStatus(next=>{status=next;})();assert.equal(status.account.username,'bob');
   await s.login.forgetSavedStashLogin();assert.equal(h.stops,1);assert.equal(s.records.size,0);
+});
+
+// These observers are synchronous (unlike ordinary React state updates). Compose
+// the actual saved-login owner/adapter and syncClient, not a fake connect method.
+test('reentrant Forget on Reconnecting cancels before the actual client can start',async()=>{
+  const h=syncHarness(),s=savedClientHarness(h);s.seed();let forgetting,saved;
+  const unsubscribe=s.login.subscribeSavedStashLogin(next=>{
+    saved=next;
+    if(next.message==='Reconnecting with saved login…') forgetting=s.login.forgetSavedStashLogin();
+  });
+  try {
+    await s.login.bootstrapSavedStashLogin();assert.ok(forgetting);await forgetting;
+    assert.equal(h.transports,0);assert.equal(h.stops,0);assert.equal(s.records.size,0);
+    let status;h.sync.subscribeStashSyncStatus(next=>{status=next;})();
+    assert.equal(status.phase,'stopped');assert.equal(status.account,undefined);
+    assert.match(saved.message,/Signed out.*forgotten/);
+  } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
+});
+
+test('reentrant replacement during signout is ordered after stale removal and remains saved',async()=>{
+  const h=syncHarness(),s=savedClientHarness(h);s.seed();await s.login.bootstrapSavedStashLogin();
+  let replacement,saved;
+  const unsubscribe=s.login.subscribeSavedStashLogin(next=>{
+    saved=next;
+    if(next.message==='Signing out and forgetting saved login…') {
+      replacement=s.login.signInStashSync('https://other.example/','bob','other-synthetic');
+    }
+  });
+  try {
+    await s.login.forgetSavedStashLogin();assert.ok(replacement);await replacement;
+    assert.equal(h.transports,2);assert.equal(h.stops,1);
+    const record=JSON.parse(s.records.get('stash.sync.login.v1'));
+    assert.equal(record.username,'bob');assert.equal(record.serverUrl,'https://other.example/');
+    let status;h.sync.subscribeStashSyncStatus(next=>{status=next;})();
+    assert.equal(status.phase,'syncing');assert.equal(status.account.username,'bob');
+    assert.equal(saved.account.username,'bob');assert.match(saved.message,/Login saved securely/);
+  } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
+});
+
+const {secureStoreCommitModel}=require('./test-helpers/secure-store-commit-model.cjs');
+const durableLogin={version:1,serverUrl:'https://sync.example/',username:'alice',password:'synthetic-secret'};
+for(const original of [true,false]) test(`${original?'upstream negative control':'installed pinned patch'}: native false save commit at the actual owner boundary`,async()=>{
+  const h=syncHarness(),native=secureStoreCommitModel({original}),s=savedClientHarness(h,native.native);
+  native.failures.write=1;let saved;
+  const unsubscribe=s.login.subscribeSavedStashLogin(next=>{saved=next;});
+  try {
+    const signing=s.login.signInStashSync(durableLogin.serverUrl,durableLogin.username,durableLogin.password);
+    if(original) {await signing;assert.match(saved.message,/Login saved securely/);}
+    else {await assert.rejects(signing,/saving the login could not be confirmed/);assert.equal(saved.storageError,true);}
+    assert.equal(h.transports,1);assert.equal(native.disk.current.size,0);assert.equal(native.memory.current.size,1);
+    assert.doesNotMatch(JSON.stringify(saved),/synthetic-secret|WriteException|password/);
+  } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
+});
+
+for(const original of [true,false]) for(const location of ['aware','raw','legacy']) test(`${original?'upstream negative control':'installed pinned patch'}: failed ${location} deletion, retry, cold restart`,async()=>{
+  const native=secureStoreCommitModel({original});native.seed(durableLogin,location);
+  // Unrelated keys, including another keychain/account, must survive all attempts.
+  for(const store of ['current','legacy']) for(const key of ['unrelated','other-service-stash.sync.login.v1']) {
+    native.disk[store].set(key,'keep');native.memory[store].set(key,'keep');
+  }
+  const store=location==='legacy'?'legacy':'current';native.failures[store]=1;
+  const h=syncHarness(),s=savedClientHarness(h,native.native);let saved;
+  const unsubscribe=s.login.subscribeSavedStashLogin(next=>{saved=next;});
+  let coldClient;
+  try {
+    await s.login.bootstrapSavedStashLogin();assert.equal(h.transports,location==='legacy'?0:1);
+    await assert.rejects(s.login.forgetSavedStashLogin(),/may reconnect after restart/);
+    assert.equal(saved.storageError,true);assert.equal(native.disk[store].size,3);assert.equal(native.memory[store].size,2);
+    assert.equal(h.stops,location==='legacy'?0:1);assert.doesNotMatch(JSON.stringify(saved),/synthetic-secret|DeleteException|password/);
+    await s.login.forgetSavedStashLogin();assert.match(saved.message,/Signed out.*forgotten/);
+    assert.equal(native.commits.filter(commit=>commit.store===store).length,original?1:2);
+    for(const prefs of ['current','legacy']) for(const key of ['unrelated','other-service-stash.sync.login.v1']) assert.equal(native.disk[prefs].get(key),'keep');
+    // Only durable state crosses this process boundary; pending memory is discarded.
+    const cold=secureStoreCommitModel({original,disk:native.disk});coldClient=syncHarness();
+    await savedClientHarness(coldClient,cold.native).login.bootstrapSavedStashLogin();
+    // Default legacy prefs are cleanup-only in 55.0.18, not a read source.
+    assert.equal(coldClient.transports,original&&location!=='legacy'?1:0);
+    assert.equal(native.disk[store].size,original?3:2);
+  } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();if(coldClient)await coldClient.sync.disconnectStashSyncAndWait();}
 });

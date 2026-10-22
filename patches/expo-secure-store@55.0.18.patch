@@ -1,0 +1,42 @@
+diff --git a/android/src/main/java/expo/modules/securestore/SecureStoreModule.kt b/android/src/main/java/expo/modules/securestore/SecureStoreModule.kt
+index 0fef884af8f4c8a201d4a9c9e7e6ecd6bfe45bfb..bf2681cf5a5d01d98fde3e00b590a15c3bd18c38 100644
+--- a/android/src/main/java/expo/modules/securestore/SecureStoreModule.kt
++++ b/android/src/main/java/expo/modules/securestore/SecureStoreModule.kt
+@@ -203,7 +203,9 @@ open class SecureStoreModule : Module() {
+       val secretKeyEntry: SecretKeyEntry = getOrCreateKeyEntry(SecretKeyEntry::class.java, mAESEncryptor, options, options.requireAuthentication)
+       val encryptedItem = mAESEncryptor.createEncryptedItem(value, secretKeyEntry, options.requireAuthentication, options.authenticationPrompt, authenticationHelper)
+       encryptedItem.put(SCHEME_PROPERTY, AESEncryptor.NAME)
+-      saveEncryptedItem(encryptedItem, prefs, keychainAwareKey, options.requireAuthentication, options.keychainService)
++      if (!saveEncryptedItem(encryptedItem, prefs, keychainAwareKey, options.requireAuthentication, options.keychainService)) {
++        throw WriteException("Could not write the encrypted item to SecureStore", key, options.keychainService)
++      }
+
+       // If a legacy value exists under this key we remove it to avoid unexpected errors in the future
+       if (prefs.contains(key)) {
+@@ -241,22 +243,14 @@ open class SecureStoreModule : Module() {
+   }
+
+   private fun deleteItemImpl(key: String, options: SecureStoreOptions) {
+-    var success = true
+     val prefs = getSharedPreferences()
+     val keychainAwareKey = createKeychainAwareKey(key, options.keychainService)
+     val legacyPrefs = PreferenceManager.getDefaultSharedPreferences(reactContext)
+
+-    if (prefs.contains(keychainAwareKey)) {
+-      success = prefs.edit().remove(keychainAwareKey).commit()
+-    }
+-
+-    if (prefs.contains(key)) {
+-      success = prefs.edit().remove(key).commit() && success
+-    }
+-
+-    if (legacyPrefs.contains(key)) {
+-      success = legacyPrefs.edit().remove(key).commit() && success
+-    }
++    // A failed commit may already have removed keys from memory but not disk.
++    // Always commit these specific removals so a retry persists the deletion.
++    var success = prefs.edit().remove(keychainAwareKey).remove(key).commit()
++    success = legacyPrefs.edit().remove(key).commit() && success
+
+     if (!success) {
+       throw DeleteException("Could not delete the item from SecureStore", key, options.keychainService)
