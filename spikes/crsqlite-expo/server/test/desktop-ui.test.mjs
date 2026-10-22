@@ -5,7 +5,8 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App, ItemEditor, ItemReader } from "../web/App.tsx";
-import { ItemCard } from "../web/components.tsx";
+import { FolderNavigation, ItemCard } from "../web/components.tsx";
+import { FolderFeedDialog } from "../web/FolderFeedDialog.tsx";
 import { FolderForm } from "../web/FolderForm.tsx";
 const flush = async (fn) =>
   act(async () => {
@@ -157,6 +158,9 @@ async function fixture(t, initial = "/?folder=f1") {
     buttons,
     button,
     select,
+    openMenu: (id = "f1") => flush(() => renderer.root.findByType(FolderNavigation).props.onMenu(id, {
+      isConnected: false, getBoundingClientRect: () => ({ left: 0, bottom: 32 }),
+    })),
     location,
     listeners,
     storage,
@@ -173,7 +177,7 @@ test("folder layout persists only after success; All items preference remains br
   assert.equal(h.button("Grid layout").props["aria-pressed"], true);
   assert.equal(h.state.folders[0].layout, "grid");
   const ul = h.renderer.root.findByProps({
-    className: "items grid grid-cols-2 gap-3",
+    className: "items grid grid-cols-2 gap-2",
   });
   assert.equal(ul.children.length, 3);
   await h.select("i1");
@@ -334,6 +338,7 @@ async function typeFolderDraft(h, name) {
 for (const action of ["New folder", "Rename"]) {
   test(`${action} draft guards item-edit transition and editors are mutually exclusive`, async (t) => {
     const h = await fixture(t, "/?folder=f1&item=i1");
+    if (action === "Rename") await h.openMenu();
     await flush(() => h.button(action).props.onClick());
     await typeFolderDraft(h, "Unsaved folder draft");
     const form = h.renderer.root.findByType(FolderForm);
@@ -374,6 +379,7 @@ test("new-folder form identity and dirty protection survive remote selected-fold
 
 test("remote folder removal still invalidates its owned rename draft", async (t) => {
   const h = await fixture(t);
+  await h.openMenu();
   await flush(() => h.button("Rename").props.onClick());
   await typeFolderDraft(h, "Removed folder rename");
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
@@ -471,6 +477,7 @@ test("item and folder forms have one primary submit, secondary Cancel and disabl
         assert.match(textOf(title.parent), /Title \(optional\)/);
         assert.equal(title.props.required, undefined);
         assert.equal(content.props.required, true);
+        assert.equal(content.props.rows, 6, "compact initial editor remains vertically resizable");
         const help = renderer.root.findByProps({ id: content.props["aria-describedby"] });
         assert.match(textOf(help), /required.*http:\/\/ or https:\/\//);
         assert.equal(content.props.maxLength, extra.item ? 4096 : 48000);
@@ -501,7 +508,7 @@ test("card labels are human Note/Link, while domains, untitled fallback and devi
     [{ type: "image", mediaUnavailable: true }, "Media · available on device"],
   ]) {
     const html = renderToStaticMarkup(React.createElement(ItemCard, { item: { id: "label", ...item }, onSelect() {}, onKeyDown() {} }));
-    assert.match(html, new RegExp(`<small>${expected}</small>`));
+    assert.match(html, new RegExp(`<small><span class="card-kind">${expected}</span></small>`));
     if (item.type === "text") assert.match(html, /Untitled text/);
   }
 });
@@ -603,4 +610,129 @@ test("primary default and hover colors meet WCAG AA for white normal-size text",
     const ratio = 1.05 / (luminance(color.slice(1)) + 0.05);
     assert.ok(ratio >= 4.5, `${color} white text contrast ${ratio.toFixed(3)} must be >= 4.5:1`);
   }
+});
+
+test("compact chrome removes slogans, keeps a mounted live region and bounded two-line card hierarchy", async (t) => {
+  const h = await fixture(t);
+  const status = h.renderer.root.findByProps({ role: "status" });
+  assert.equal(status.props["aria-live"], "polite");
+  assert.equal(textOf(status), "");
+  const header = h.renderer.root.findByType("header");
+  assert.doesNotMatch(textOf(header), /little space|later/);
+  const heading = h.renderer.root.findByProps({ className: "collection-heading" });
+  assert.equal(heading.findAllByType("h2").length, 1);
+  assert.equal(heading.findAllByType("p").length, 0, "no duplicate eyebrow or slogan");
+  assert.doesNotMatch(h.renderer.root.findByType("ul").props.className, /gap-/);
+  assert.equal(h.button("Archive").props["aria-label"], "Archive");
+
+  let card;
+  await flush(() => { card = create(React.createElement(ItemCard, {
+    item: { id: "preview", type: "text", title: "Full title", excerpt: "Useful bounded preview" },
+    selected: true, onSelect() {}, onKeyDown() {},
+  })); });
+  t.after(() => act(() => card.unmount()));
+  const title = card.root.findByProps({ className: "card-title" });
+  assert.equal(title.props.title, "Full title");
+  const preview = card.root.findByProps({ className: "card-excerpt" });
+  assert.equal(preview.parent.type, "small", "preview shares the metadata line instead of a third block");
+  assert.equal(textOf(preview), "Useful bounded preview");
+  assert.equal(card.root.findByType("button").props["aria-pressed"], true);
+});
+
+test("rendered header is exactly Stash; sidebar is a single list without section chrome or bottom actions", async (t) => {
+  const h = await fixture(t);
+  assert.equal(textOf(h.renderer.root.findByType("h1")).trim(), "Stash");
+  const sidebar = h.renderer.root.findByType("aside");
+  assert.equal(sidebar.findAllByType("h2").length, 0);
+  assert.equal(sidebar.findAllByType("p").length, 0);
+  assert.equal(h.button("Rename"), undefined);
+  assert.equal(h.button("Archive folder"), undefined);
+  assert.doesNotMatch(textOf(h.renderer.root), /Your collection|A little space for later\./);
+  for (const row of sidebar.findAllByProps({ className: "folder-row" })) {
+    assert.equal(row.findAllByType("button").length, 2);
+    for (const button of row.findAllByType("button")) assert.equal(button.findAllByType("button").length, 1, "no nested buttons");
+  }
+});
+
+test("nonselected menu targets live folder, archive preserves route, and deleted menu cannot act", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await h.openMenu("f2");
+  h.state.folders[1].archived_at = 1;
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.ok(h.button("Unarchive folder"), "menu uses refreshed target, not stale archive state");
+  await flush(() => h.button("Unarchive folder").props.onClick());
+  assert.equal(h.location.search, "?folder=f1&item=i1");
+  const write = h.state.calls.findLast((c) => c.method === "PATCH");
+  assert.equal(write.url, "/api/folders/f2");
+  assert.deepEqual(JSON.parse(write.body), { archived: false });
+  await h.openMenu("f2");
+  h.state.folders = h.state.folders.filter(f => f.id !== "f2");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByProps({ role: "menu" }).length, 0);
+});
+
+test("target-owned rename survives unrelated filter deletion, freezes name and invalidates on target archive", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await h.openMenu("f2");
+  await flush(() => h.button("Rename").props.onClick());
+  const form = h.renderer.root.findByType(FolderForm);
+  await typeFolderDraft(h, "Draft for Other");
+  h.state.folders = h.state.folders.filter(f => f.id !== "f1");
+  h.state.folders[0].name = "Remote rename";
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.location.search, "");
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  assert.equal(form.findByType("input").props.defaultValue, "Other");
+  await flush(() => h.button("Cancel").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  h.state.folders[0].archived_at = 1;
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  await flush(() => h.button("Archive").props.onClick());
+  assert.equal(h.state.prompts, 1, "invalidated rename releases only its own dirty flag");
+});
+
+test("context archive rejects dirty item discard and rename Cancel/Escape/backdrop are busy guarded", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await flush(() => h.button("Edit item").props.onClick());
+  await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
+  await h.openMenu("f2");
+  await flush(() => h.button("Archive folder").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.state.calls.filter(c => c.method === "PATCH").length, 0);
+  assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 1);
+  h.state.confirm = true;
+  await flush(() => h.button("Rename").props.onClick());
+  const modal = h.renderer.root.findByType("dialog");
+  assert.equal(modal.props["aria-labelledby"], "rename-folder-title");
+  let release;
+  h.state.writeGate = new Promise(r => { release = r; });
+  await flush(() => h.renderer.root.findByType(FolderForm).props.onSave("New Other"));
+  assert.equal(h.renderer.root.findByType("dialog").props["aria-busy"], true);
+  assert.equal(h.renderer.root.findByType(FolderForm).findByType("input").props.disabled, true);
+  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
+  await flush(() => release());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  assert.equal(h.location.search, "?folder=f1&item=i1");
+});
+
+
+test("viewing/invalidating a target feed leaves unrelated folder draft and dirty ownership untouched", async (t) => {
+  const h = await fixture(t);
+  await flush(() => h.button("New folder").props.onClick());
+  await typeFolderDraft(h, "Unrelated folder draft");
+  const form = h.renderer.root.findByType(FolderForm);
+  await h.openMenu("f2");
+  await flush(() => h.button("Atom feed").props.onClick());
+  assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
+  assert.equal(h.state.prompts, 0);
+  h.state.folders = h.state.folders.filter(f => f.id !== "f2");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderFeedDialog).length, 0);
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  await flush(() => h.button("All items").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.location.search, "?folder=f1");
 });

@@ -5,6 +5,8 @@ import { once } from "node:events";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
+import { folderInteractions } from "./folder-browser-checks.mjs";
+import { desktopDensity } from "./compact-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
 // STASH_TEST_SERVER_ENTRY optionally selects the exact built service package.
@@ -301,8 +303,20 @@ try {
     sessionId,
   );
   assert.ok(await evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · No folders')`));
+  await evaluate(`document.documentElement.dataset.fixtureReload='old'`);
+  await cdp('Page.reload', {}, sessionId);
+  await waitFor(() => evaluate(`!document.documentElement.dataset.fixtureReload && !!document.querySelector('.organise summary') && document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
   // The busy probe delays only synthetic local writes; no production traffic.
   await evaluate(`(()=>{const original=window.fetch;window.fetch=async (...args)=>{if(window.fixtureDelayWrite && args[1]?.method && args[1].method!=='GET')await new Promise(r=>setTimeout(r,350));return original(...args)}})()`);
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") {
+    // Loading/empty feedback must not reserve or resize a chrome rail.
+    await evaluate(`window.fixturePaneTop=document.querySelector('.workspace').getBoundingClientRect().top;window.fixtureFetch=window.fetch;window.fetch=async (...a)=>{if(!a[1]?.method||a[1].method==='GET')await new Promise(r=>setTimeout(r,350));return window.fixtureFetch(...a)};document.querySelector('[aria-label="Refresh"]').click()`);
+    await waitFor(() => evaluate(`document.querySelector('[role=status]').textContent.includes('Refreshing')`));
+    assert.ok(await evaluate(`document.querySelector('[role=status]').getAttribute('aria-live')==='polite' && document.querySelector('.workspace').getBoundingClientRect().top===window.fixturePaneTop`));
+    await waitFor(() => evaluate(`document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
+    assert.ok(await evaluate(`document.querySelector('[role=status]').textContent==='' && document.querySelector('[role=status]').getBoundingClientRect().height===0 && document.querySelector('.workspace').getBoundingClientRect().top===window.fixturePaneTop`));
+    await evaluate(`window.fetch=window.fixtureFetch`);
+  }
   await click("New folder");
   await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
   assert.ok(await evaluate(`(()=>{const f=document.querySelector('input[name=name]').form;return f.querySelectorAll('button.primary[type=submit]').length===1 && f.querySelector('button[type=button]').textContent==='Cancel'})()`));
@@ -321,7 +335,10 @@ try {
     `new URLSearchParams(location.search).get('folder')`,
   );
   assert.ok(folderId);
-  await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
+  const feedPolicy = await json(`/folders/${folderId}/feed`);
+  // Only the legacy backend needs fixture opt-in; always-on policy is read-only.
+  if (feedPolicy.policy === undefined) await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
+  else assert.equal(feedPolicy.policy, "always-on");
   assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), "New item");
   // Empty-state creation uses the same guarded transition as the header.
   await click('New folder');
@@ -391,6 +408,7 @@ try {
     (await json("/folders")).find((f) => f.id === folderId).layout,
     "grid",
   );
+  await desktopDensity(evaluate, "grid");
   await screenshot("desktop-grid-reader");
   await click("List layout");
   await waitFor(() =>
@@ -400,11 +418,12 @@ try {
     await evaluate(`new URLSearchParams(location.search).get('item')`),
     filedId,
   );
-  assert.ok(await evaluate(`(()=>{const cards=[...document.querySelectorAll('.item-card')];return cards.some(c=>c.getBoundingClientRect().height<100) && cards.every(c=>c.getBoundingClientRect().height>=76) && document.querySelector('.layout-toggle').getAttribute('role')==='group' && [...document.querySelectorAll('.layout-toggle button')].every(b=>b.title===b.getAttribute('aria-label'))})()`));
+  assert.ok(await evaluate(`(()=>{const cards=[...document.querySelectorAll('.item-card')];return cards.length===3 && document.querySelector('.layout-toggle').getAttribute('role')==='group' && [...document.querySelectorAll('.layout-toggle button')].every(b=>b.title===b.getAttribute('aria-label'))})()`));
   assert.ok(await evaluate(`document.querySelector('.organise summary').textContent.includes('Organise · 1 folder')`));
-  assert.ok(await evaluate(`[...document.querySelectorAll('.item-card small')].some(n=>n.textContent==='Note') && [...document.querySelectorAll('.item-card small')].some(n=>n.textContent==='example.com')`));
+  assert.ok(await evaluate(`[...document.querySelectorAll('.item-card small')].some(n=>n.textContent.startsWith('Note')) && [...document.querySelectorAll('.item-card small')].some(n=>n.textContent.startsWith('example.com'))`));
   assert.ok(await evaluate(`(()=>{const b=[...document.querySelectorAll('.layout-toggle button')];return getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='true')).backgroundColor!==getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='false')).backgroundColor})()`));
   console.log('UI10_LIST_GEOMETRY ' + JSON.stringify(await evaluate(`[...document.querySelectorAll('.item-card')].map(c=>({title:c.querySelector('.card-title').textContent,height:c.getBoundingClientRect().height}))`)));
+  await desktopDensity(evaluate, "list");
   await screenshot("desktop-list-reader");
   // Membership count includes archived folders and updates through the real checkbox mutation.
   const { id: archivedMembership } = await json('/folders', 'POST', { name: 'Synthetic archived membership' });
@@ -455,6 +474,10 @@ try {
   );
   // Folder and item editing must not coexist or silently clear dirty protection.
   for (const action of ["New folder", "Rename"]) {
+    if (action === "Rename" && process.env.STASH_DENSITY_REFERENCE !== "1") {
+      await evaluate(`document.querySelector('.folder-link[aria-current=page]').parentElement.querySelector('.folder-menu-toggle').click()`);
+      await waitFor(() => evaluate(`!!document.querySelector('[role=menu]')`));
+    }
     await click(action);
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unsaved folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -629,9 +652,24 @@ try {
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }, sessionId);
   assert.ok(await evaluate(`document.activeElement.getAttribute('aria-label')==='Grid layout' && getComputedStyle(document.activeElement).outlineStyle!=='none'`));
   await screenshot('320-layout-focus');
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") {
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }, sessionId);
+    assert.ok(await evaluate(`matchMedia('(pointer: coarse)').matches && [...document.querySelectorAll('.app-header button, .layout-toggle button')].filter(b=>b.getBoundingClientRect().width>0).every(b=>{const r=b.getBoundingClientRect();return r.height>=44&&r.width>=44}) && document.documentElement.scrollWidth<=innerWidth`));
+    await click('Open folders');
+    assert.ok(await evaluate(`[...document.querySelectorAll('.sidebar .folder-link')].every(b=>b.getBoundingClientRect().height>=44) && document.documentElement.scrollWidth<=innerWidth`));
+    await screenshot('320-touch-folders');
+    await click('Close folders');
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }, sessionId);
+  }
   await click('New item');
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
   assert.ok(await evaluate(`document.documentElement.scrollWidth<=innerWidth && document.querySelector('.field-help').getBoundingClientRect().right<=innerWidth && document.querySelector('textarea').getBoundingClientRect().right<=innerWidth`));
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") {
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 }, sessionId);
+    assert.ok(await evaluate(`[...document.querySelectorAll('.reader input:not([type=checkbox]), .reader select, .reader button')].every(b=>b.getBoundingClientRect().height>=44) && document.documentElement.scrollWidth<=innerWidth`));
+    await screenshot('320-touch-form');
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }, sessionId);
+  }
   await screenshot('320-item-form');
   await click('Cancel');
   await waitFor(() => evaluate(`!document.querySelector('textarea')`));
@@ -662,7 +700,7 @@ try {
   );
   assert.ok(
     await evaluate(
-      `getComputedStyle(document.querySelector('.collection')).visibility==='visible' && document.querySelector('.reader').getBoundingClientRect().width<=innerWidth-232`,
+      `getComputedStyle(document.querySelector('.collection')).visibility==='visible' && document.querySelector('.reader').getBoundingClientRect().width<=innerWidth-document.querySelector('.sidebar').getBoundingClientRect().width`,
     ),
   );
   await screenshot("medium-reader-drawer");
@@ -790,6 +828,10 @@ try {
     const { id: removedFolder } = await json("/folders", "POST", { name: `Disposable filter ${action}` });
     await cdp("Page.navigate", { url: `http://127.0.0.1:${proxyPort}/?folder=${removedFolder}` }, sessionId);
     await waitFor(() => evaluate(`document.querySelector('.collection h2')?.textContent===${JSON.stringify(`Disposable filter ${action}`)}`));
+    if (action === "Rename" && process.env.STASH_DENSITY_REFERENCE !== "1") {
+      await evaluate(`document.querySelector('.folder-link[aria-current=page]').parentElement.querySelector('.folder-menu-toggle').click()`);
+      await waitFor(() => evaluate(`!!document.querySelector('[role=menu]')`));
+    }
     await click(action);
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');window.fixtureFolderInput=n;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unrelated new folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -870,7 +912,21 @@ try {
   await waitFor(() => evaluate(`document.querySelector('.reader').textContent.includes('Media unavailable on the web')`));
   assert.equal(await evaluate(`document.querySelectorAll('.reader img, .reader video').length`), 0);
   console.log('PASS 320px long heading/card/URL overflow, unsafe replicated Link label without anchor/hint, and honest device-only media');
-  console.log('PASS ten focused UI improvements: compact list/sticky toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") await folderInteractions({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`, removeFixture,
+    confirm: async (action, accept) => {
+      const pending = action();
+      await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i);
+      await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending;
+      dialog = null;
+    },
+  });
+  console.log(process.env.STASH_DENSITY_REFERENCE === '1'
+    ? 'PASS baseline behavior; density metrics recorded only (compact acceptance intentionally disabled)'
+    : 'PASS compact density/chrome/panes/grid/touch controls and preserved UI safeguards: compact list/sticky toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');
   console.log("PASS real remote filter removal preserves unrelated new-folder DOM/value/dirty protection and invalidates owned rename");
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",

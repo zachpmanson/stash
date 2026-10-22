@@ -166,11 +166,11 @@ test("component flows: loading, read, create, edit, membership, archive, filters
     await flush(() => button("Archive item").props.onClick());
     assert.equal(item.archived_at, 1);
     assert.equal(renderer.root.findAllByType(ItemReader).length, 0);
-    await flush(() => buttons().find(node => node.props['aria-pressed'] === false && node.children.includes('Archive')).props.onClick());
+    await flush(() => buttons().find(node => node.props['aria-pressed'] === false && node.props['aria-label'] === 'Archive').props.onClick());
     await flush(() => buttons().find(node => node.props['data-item-id'] === 'i1').props.onClick());
     assert.ok(button("Unarchive item"));
     await flush(() => button("Unarchive item").props.onClick());
-    await flush(() => buttons().find(node => node.props['aria-pressed'] === true && node.children.includes('Archive')).props.onClick());
+    await flush(() => buttons().find(node => node.props['aria-pressed'] === true && node.props['aria-label'] === 'Archive').props.onClick());
     await flush(() => button("New item").props.onClick());
     await flush(() =>
       renderer.root

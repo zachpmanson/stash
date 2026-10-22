@@ -28,13 +28,14 @@ export function FolderForm({
         const name = String(
           new FormData(event.currentTarget).get("name") ?? "",
         ).trim();
-        onSave(name === baseline ? null : name);
+        if (!busy && name) onSave(name === baseline ? null : name);
       }}
     >
       <label>
         {baseline === null ? "New folder" : "Folder name"}
         <input
           autoFocus
+          disabled={busy}
           required
           name="name"
           maxLength={200}
