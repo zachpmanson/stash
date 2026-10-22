@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { folderInteractions } from "./folder-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
 import { refactorComposition } from "./refactor-browser-checks.mjs";
+import { modalConsistency } from "./modal-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
 // STASH_TEST_SERVER_ENTRY optionally selects the exact built service package.
@@ -283,6 +284,7 @@ try {
     await waitFor(() =>
       evaluate(`(()=>{const b=${selector};return !!b && !b.disabled})()`),
     );
+    assert.ok(await evaluate(`(()=>{const modal=document.querySelector('dialog[open]');return !modal || modal.contains(${selector})})()`), `Cannot click inert background: ${label}`);
     return evaluate(`(${selector}).click()`);
   };
   const screenshot = async (name) => {
@@ -344,11 +346,8 @@ try {
   await click('New folder');
   await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
   await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Keep empty-state draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-  const emptyNavigation = evaluate(`document.querySelector('.empty button').click()`);
-  await waitFor(() => !!dialog);
-  await cdp('Page.handleJavaScriptDialog', { accept: false }, sessionId);
-  await emptyNavigation;
-  dialog = null;
+  // Empty CTA is now natively inert; dirty dismissal is tested via the modal Cancel.
+  assert.ok(await evaluate(`document.querySelector('dialog').matches(':modal') && !document.querySelector('textarea')`));
   assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), 'Keep empty-state draft');
   const cancelEmptyDraft = click('Cancel');
   await waitFor(() => !!dialog);
@@ -481,7 +480,8 @@ try {
     await click(action);
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unsaved folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
-    const editing = click("Edit item");
+    // Browser history remains a real navigation path even while the background is inert.
+    const editing = evaluate(`history.pushState(null,'','?folder=${folderId}');window.dispatchEvent(new PopStateEvent('popstate'))`);
     await waitFor(() => !!dialog);
     assert.match(dialog.message, /unsaved/i);
     await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
@@ -489,22 +489,24 @@ try {
     dialog = null;
     assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unsaved folder draft");
     assert.equal(await evaluate(`!!document.querySelector('textarea')`), false);
-    const navigating = click("All items");
+    const navigating = click("Cancel");
     await waitFor(() => !!dialog);
     await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
     await navigating;
     dialog = null;
     assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unsaved folder draft");
-    const acceptingEdit = click("Edit item");
+    const acceptingEdit = click("Cancel");
     await waitFor(() => !!dialog);
     await cdp("Page.handleJavaScriptDialog", { accept: true }, sessionId);
     await acceptingEdit;
     dialog = null;
-    await waitFor(() => evaluate(`!!document.querySelector('textarea') && !document.querySelector('input[name=name]')`));
+    await waitFor(() => evaluate(`!document.querySelector('input[name=name]')`));
+    await click("Edit item");
+    await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
     await click("Cancel");
     await waitFor(() => evaluate(`!document.querySelector('textarea')`));
   }
-  console.log("PASS real new-folder/rename drafts guard Edit item and All items; accepted discard opens only the item editor");
+  console.log("PASS real new-folder/rename drafts guard browser history and Cancel; accepted dismissal allows only one subsequent item editor");
   // A real edited draft must survive a rejected navigation confirmation.
   await click("Edit item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
@@ -836,7 +838,7 @@ try {
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');window.fixtureFolderInput=n;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unrelated new folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     removeFixture("DELETE FROM sync_folders WHERE id=?", removedFolder);
-    await click("Refresh");
+    await evaluate(`window.dispatchEvent(new Event('focus'))`);
     await waitFor(() => evaluate(`!new URLSearchParams(location.search).get('folder') && document.querySelector('.collection h2')?.textContent==='All items' && !document.querySelector('[role=status]').textContent.includes('Refreshing')`));
     if (action === "Rename") {
       assert.equal(await evaluate(`!!document.querySelector('input[name=name]')`), false);
@@ -844,7 +846,7 @@ try {
     }
     assert.equal(await evaluate(`document.querySelector('input[name=name]')===window.fixtureFolderInput`), true);
     assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), "Unrelated new folder draft");
-    const leaving = click("Archive");
+    const leaving = click("Cancel");
     await waitFor(() => !!dialog);
     await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
     await leaving;
@@ -927,6 +929,18 @@ try {
   if (process.env.STASH_DENSITY_REFERENCE !== "1") await refactorComposition({
     evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
     base: `http://127.0.0.1:${proxyPort}`,
+    confirm: async (action, accept) => {
+      const pending = action();
+      await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i);
+      await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending;
+      dialog = null;
+    },
+  });
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") await modalConsistency({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`, removeFixture,
     confirm: async (action, accept) => {
       const pending = action();
       await waitFor(() => !!dialog);

@@ -82,7 +82,7 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   // Frozen baseline/no-op must not overwrite a remote rename or send a PATCH.
   await rename();
   await json(`/folders/${target}`, "PATCH", { name: "Remote target" });
-  await click("Refresh");
+  await evaluate(`window.dispatchEvent(new Event('focus'))`);
   await waitFor(() => evaluate(`!!document.querySelector('[aria-label="Actions for Remote target"]')`));
   assert.equal(await evaluate(`document.querySelector('dialog input').value`), "Target shelf");
   await click("Rename folder");
@@ -164,7 +164,7 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   await click("New folder");
   await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Retained after late feed');n.dispatchEvent(new Event('input',{bubbles:true}));window.fixtureLateDraft=n;window.fixtureReleaseFeed()})()`);
   await waitFor(() => evaluate(`document.querySelector('input[name=name]')?.value==='Retained after late feed'`));
-  assert.ok(await evaluate(`!document.querySelector('dialog') && document.querySelector('input[name=name]')===window.fixtureLateDraft`));
+  assert.ok(await evaluate(`document.querySelector('dialog')?.getAttribute('aria-labelledby')==='new-folder-title' && document.querySelector('input[name=name]')===window.fixtureLateDraft`));
   await confirm(() => click("Cancel"), true);
   await evaluate(`window.fetch=window.fixtureFeedFetch`);
   console.log("PASS target-owned Atom URL dialog: GET-only capability validation, private-auth copy via real clipboard, unsafe/old-backend errors, retained item/new-folder drafts and ignored late response");
@@ -193,7 +193,7 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   await rename();
   await input("Invalidated draft");
   await json(`/folders/${target}`, "PATCH", { archived: true });
-  await click("Refresh");
+  await evaluate(`window.dispatchEvent(new Event('focus'))`);
   await modalClosed();
   assert.equal(await evaluate(`location.search`), route);
   await json(`/folders/${target}`, "PATCH", { archived: false });
@@ -209,16 +209,16 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   await waitFor(() => evaluate(`!document.querySelector('[role=menu]')`));
   assert.equal(await evaluate(`location.search`), route);
   await evaluate(`window.fixtureFeedReply=${JSON.stringify({ ...oldRead, policy: "always-on", enabled: true })};window.fixtureFeedFetch=window.fetch;window.fixtureReleaseFeed=null;window.fetch=async (...a)=>{if(a[0]===${JSON.stringify(`/api/folders/${target}/feed`)}){await new Promise(r=>window.fixtureReleaseFeed=r);return Response.json(window.fixtureFeedReply)}return window.fixtureFeedFetch(...a)}`);
-  await click("New folder");
-  await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Draft across deleted feed');n.dispatchEvent(new Event('input',{bubbles:true}));window.fixtureDeletedFeedDraft=n})()`);
+  // New is modal now: never open a second dialog through an inert background.
   await openFeed();
   await waitFor(() => evaluate(`!!window.fixtureReleaseFeed`));
   await screenshot("320-touch-folder-feed-loading");
   removeFixture("DELETE FROM sync_folders WHERE id=?", target);
-  await click("Refresh");
+  await evaluate(`window.dispatchEvent(new Event('focus'))`);
   await modalClosed();
-  await evaluate(`window.fixtureReleaseFeed();window.fetch=window.fixtureFeedFetch`);
-  assert.ok(await evaluate(`!document.querySelector('dialog')&&document.querySelector('input[name=name]')===window.fixtureDeletedFeedDraft&&window.fixtureDeletedFeedDraft.value==='Draft across deleted feed'`));
+  await click("New folder");
+  await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Draft after deleted feed');n.dispatchEvent(new Event('input',{bubbles:true}));window.fixtureDeletedFeedDraft=n;window.fixtureReleaseFeed();window.fetch=window.fixtureFeedFetch})()`);
+  assert.ok(await evaluate(`document.querySelector('dialog')?.getAttribute('aria-labelledby')==='new-folder-title'&&document.querySelector('input[name=name]')===window.fixtureDeletedFeedDraft&&window.fixtureDeletedFeedDraft.value==='Draft after deleted feed'`));
   await confirm(() => click("Cancel"), true);
   assert.equal(await evaluate(`location.search`), route);
   await key("Escape");

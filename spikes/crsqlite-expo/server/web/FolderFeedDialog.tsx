@@ -47,7 +47,7 @@ export function FolderFeedDialog({ id, name, returnFocus, onClose }: {
     {loading && <p role="status" className="feed-status"><Spinner /> Loading feed…</p>}
     {error && <p role="alert">{error}</p>}
     {url && <label>Atom feed URL<input name="feed-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></label>}
-    <div className="actions">
+    <div className="dialog-actions">
       {url && <Button disabled={copying} onClick={async () => {
         setCopying(true);
         setCopied(false);
@@ -59,6 +59,6 @@ export function FolderFeedDialog({ id, name, returnFocus, onClose }: {
       {!loading && !url && <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>}
       <Button autoFocus onClick={onClose}>Close</Button>
     </div>
-    <p role="status" aria-live="polite">{copied ? "Copied URL." : ""}</p>
+    <p role="status" aria-live="polite" className="dialog-copy-status">{copied ? "Copied URL." : ""}</p>
   </CompactDialog>;
 }
