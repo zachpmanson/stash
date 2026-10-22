@@ -9,6 +9,7 @@ import { Colors } from "../src/theme";
 import { SnackbarHost } from "../src/components/SnackbarHost";
 import { ModalHost } from "../src/components/ModalHost";
 import { isShareLaunch } from "../src/utils/nativeShareIntent";
+import { bootstrapSavedStashLogin } from "../src/db/syncLogin";
 import { subscribeStashSyncProjection } from "../src/db/syncClient";
 import { useFolderStore } from "../src/state/folderState";
 import { initializeSettingsFromDatabase } from "../src/state/settingsState";
@@ -47,6 +48,7 @@ function RootLayout() {
   const handledSigRef = useRef<string | null>(null);
 
   useEffect(() => { void initializeSettingsFromDatabase().catch(console.error); }, []);
+  useEffect(() => { void bootstrapSavedStashLogin(); }, []);
 
   useEffect(() => subscribeStashSyncProjection(() => {
     void useFolderStore.getState().refresh();

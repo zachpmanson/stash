@@ -6,7 +6,9 @@ import { useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { runSyncReplicaSmoke } from "../db/syncReplicaSmoke";
 import { prepareCurrentStashReplica } from "../db/syncReplica";
-import { connectStashSync, disconnectStashSyncAndWait, subscribeStashSyncStatus, StashSyncPreparationRequiredError, type StashSyncStatus } from "../db/syncClient";
+import { subscribeStashSyncStatus, StashSyncPreparationRequiredError, type StashSyncStatus } from "../db/syncClient";
+import { signInStashSync, forgetSavedStashLogin, retrySavedStashLogin, subscribeSavedStashLogin } from "../db/syncLogin";
+import type { SavedLoginState } from "../db/savedSyncLogin";
 import { withAppDb, isRestorePendingOwned } from "../db/database";
 import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
 
@@ -19,25 +21,28 @@ export default function SyncSettingsScreen() {
   const [status, setStatus] = useState<StashSyncStatus | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [savedLogin, setSavedLogin] = useState<SavedLoginState>({ busy: false });
   const auRecipe = useSettingsStore((s) => s.auRecipe);
 
   useEffect(() => {
     if (!STASH_SYNC_DEV_TOOLS) return;
     const refreshPending = () => { void withAppDb(isRestorePendingOwned).then(setRecoveryPending).catch(console.error); };
     refreshPending();
-    return subscribeStashSyncStatus((next) => { setStatus(next); refreshPending(); });
+    const unsubscribeLogin = subscribeSavedStashLogin(setSavedLogin);
+    const unsubscribeStatus = subscribeStashSyncStatus((next) => { setStatus(next); refreshPending(); });
+    return () => { unsubscribeLogin(); unsubscribeStatus(); };
   }, []);
 
   const handleConnect = async () => {
-    if (!status || busy || signingOut || status.disconnecting || status.restartRequired || status.account || status.phase === "connecting") return;
+    if (!status || busy || savedLogin.busy || signingOut || status.disconnecting || status.restartRequired || status.account || status.phase === "connecting") return;
     setBusy(true);
     try {
-      await connectStashSync(serverUrl, { username, password });
-      setPassword("");
+      await signInStashSync(serverUrl, username, password);
     } catch (e) {
       const needsPreparation = e instanceof StashSyncPreparationRequiredError;
-      showModal({ title: needsPreparation ? "Prepare sync first" : "Stash sync could not start", message: e instanceof Error ? e.message : String(e) });
+      showModal({ title: needsPreparation ? "Prepare sync first" : "Stash sync sign-in issue", message: e instanceof Error ? e.message : String(e) });
     } finally {
+      setPassword("");
       setBusy(false);
     }
   };
@@ -47,13 +52,19 @@ export default function SyncSettingsScreen() {
     setSigningOut(true);
     setPassword("");
     try {
-      await disconnectStashSyncAndWait();
-      setSigningOut(false);
+      await forgetSavedStashLogin();
+      setSignOutError(null);
     } catch (e) {
-      // Teardown cannot prove callbacks have stopped. Do not offer another connection.
-      setSignOutError("Sign out could not finish. Restart the app before reconnecting.");
+      // Storage failures remain retryable; unsafe client teardown still fails closed.
+      if (e instanceof Error && /Restart the app/.test(e.message)) setSignOutError(e.message);
       showModal({ title: "Sign out failed", message: e instanceof Error ? e.message : String(e) });
-    }
+    } finally { setSigningOut(false); }
+  };
+
+  const handleRetry = async () => {
+    if (savedLogin.busy || status?.account) return;
+    try { await retrySavedStashLogin(); }
+    catch (e) { showModal({ title: "Sync could not reconnect", message: e instanceof Error ? e.message : String(e) }); }
   };
 
   const handleSmoke = async () => {
@@ -83,7 +94,7 @@ export default function SyncSettingsScreen() {
   };
 
   const connecting = status?.phase === "connecting";
-  const disabled = busy || connecting;
+  const disabled = busy || connecting || savedLogin.busy;
   const teardownPending = signingOut || status?.disconnecting;
   const restartRequired = signOutError || status?.restartRequired;
   const hideControls = teardownPending || restartRequired;
@@ -94,22 +105,37 @@ export default function SyncSettingsScreen() {
         {!STASH_SYNC_DEV_TOOLS ? <Text style={styles.note}>Sync requires an Android development or explicitly opted-in sync build.</Text> : !status ? <Text style={styles.note}>Checking sync status…</Text> : (
           <View style={styles.panel}>
             <Text style={styles.heading}>Experimental sync (Android only)</Text>
-            <Text style={styles.note}>Experimental: use a disposable Stash backup. Credentials stay in memory and are not saved; sync requires a matching Stash server schema.</Text>
+            <Text style={styles.note}>Experimental: use a disposable Stash backup. Verified logins are saved in device secure storage. Sync requires a matching Stash server schema.</Text>
             {recoveryPending && <Text style={styles.note}>Restored locally — read-only until a full server merge completes. Connect to sync to finish recovery.</Text>}
             {status.account && !hideControls && <>
               <Text style={styles.heading}>Signed in as {status.account.username}</Text>
               <Text style={styles.note}>{status.account.serverUrl}</Text>
             </>}
+            {savedLogin.message && <Text style={styles.note}>{savedLogin.message}</Text>}
+            {!status.account && savedLogin.account && !hideControls && <>
+              <Text style={styles.heading}>Saved login for {savedLogin.account.username}</Text>
+              <Text style={styles.note}>{savedLogin.account.serverUrl}</Text>
+            </>}
             <Text style={styles.note}>{restartRequired ? "Sign out could not finish. Restart the app before reconnecting." : teardownPending ? "Signing out…" : status.message ?? `Status: ${status.phase}`}</Text>
             {hideControls ? null : status.account ? (
               <Action label="Sign out" onPress={() => void handleSignOut()} />
+            ) : savedLogin.account ? (
+              <>
+                <Action label="Retry saved login" disabled={disabled} onPress={() => void handleRetry()} />
+                <Action label="Forget saved login" disabled={signingOut} onPress={() => void handleSignOut()} />
+                {!recoveryPending && <Action label="Prepare this install's local sync replica" disabled={disabled} onPress={() => void handlePrepare()} />}
+              </>
             ) : (
               <>
+                {savedLogin.storageError && <>
+                  <Action label="Retry saved login" disabled={disabled} onPress={() => void handleRetry()} />
+                  <Action label="Forget saved login" onPress={() => void handleSignOut()} />
+                </>}
                 <TextInput autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://your-stash-sync-server" placeholderTextColor={Colors.textMuted} style={styles.input} value={serverUrl} onChangeText={setServerUrl} editable={!disabled} />
                 <TextInput autoCapitalize="none" autoCorrect={false} placeholder="Server username" placeholderTextColor={Colors.textMuted} style={styles.input} value={username} onChangeText={setUsername} editable={!disabled} />
                 <TextInput autoCapitalize="none" autoCorrect={false} placeholder="Server password" placeholderTextColor={Colors.textMuted} secureTextEntry style={styles.input} value={password} onChangeText={setPassword} editable={!disabled} />
                 <Action label="Connect and sync" disabled={disabled} onPress={() => void handleConnect()} />
-                {connecting && <Action label="Cancel" onPress={() => void handleSignOut()} />}
+                {(connecting || savedLogin.busy) && <Action label="Cancel" onPress={() => void handleSignOut()} />}
                 {!recoveryPending && <Action label="Prepare this install's local sync replica" disabled={disabled} onPress={() => void handlePrepare()} />}
                 <Action label="Run isolated sync migration smoke" disabled={disabled} onPress={() => void handleSmoke()} />
               </>

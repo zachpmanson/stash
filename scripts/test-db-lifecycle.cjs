@@ -72,6 +72,7 @@ function syncHarness() {
   let transports = 0, stops = 0;
   const api = load('src/db/syncClient.ts', {
     'expo-sqlite': h.sqlite, './database': h.api,
+    './syncIdentity': load('src/db/syncIdentity.ts', {}),
     './restoreMerge': { assertRecoveryConfigurationOwned: async () => {} },
     '../state/settingsState': { useSettingsStore: { getState: () => ({ setAuRecipe() {} }) } },
     './syncReplica': {
@@ -100,7 +101,7 @@ function syncHarness() {
       if (url.pathname.endsWith('healthz')) {
         if (healthGate) await healthGate.promise;
         if (h.options.healthError) throw h.options.healthError;
-        return { ok: true, json: async () => ({ schema: 'test', schemaVersion: '1' }) };
+        return { ok: !h.options.healthStatus, status: h.options.healthStatus || 200, json: async () => ({ schema: 'test', schemaVersion: '1' }) };
       }
       statusSignal = signal;
       if (h.options.statusResponse) return h.options.statusResponse(url, signal);
@@ -569,4 +570,58 @@ test('same-signature recovery after a transient outage restores feed controls wi
     assert.equal((await h.sync.requestStashFolderFeed('f','status')).status,200);
     assert.equal(projections,1);
   } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
+});
+
+function savedClientHarness(h) {
+  const records=new Map();
+  const identity=load('src/db/syncIdentity.ts',{});
+  const core=load('src/db/savedSyncLogin.ts',{'./syncIdentity':identity});
+  const storage=load('src/db/syncLoginStorage.ts',{
+    './syncIdentity':identity,
+    'expo-secure-store':{
+      getItemAsync:async key=>records.get(key)??null,
+      setItemAsync:async(key,value)=>records.set(key,value),
+      deleteItemAsync:async key=>records.delete(key),
+    },
+  });
+  const login=load('src/db/syncLogin.ts',{
+    './syncClient':h.sync,'./savedSyncLogin':core,'./syncLoginStorage':storage,
+    '../utils/syncBuildGate':{STASH_SYNC_DEV_TOOLS:true},
+  });
+  return {login,records,seed(){records.set('stash.sync.login.v1',JSON.stringify({version:1,serverUrl:'https://sync.example/',username:'alice',password:'synthetic'}));}};
+}
+for(const code of [401,403]) test(`actual health HTTP ${code} never starts transport, never persists a rejected login`,async()=>{
+  const h=syncHarness(),s=savedClientHarness(h);h.options.healthStatus=code;
+  await s.login.signInStashSync('https://sync.example/','alice','synthetic');await tick();
+  assert.equal(h.transports,0);assert.equal(s.records.size,0);
+  let saved;s.login.subscribeSavedStashLogin(next=>{saved=next;})();assert.match(saved.message,/rejected.*cleared/);
+});
+
+test('actual poll invalid auth stops/drains native transport, clears saved login, and never retries bad credentials',async()=>{
+  const h=syncHarness(),s=savedClientHarness(h),rejected=deferred();s.seed();
+  h.options.statusResponse=async()=>({ok:false,status:401});
+  h.sync.subscribeStashSyncStatus(status=>{if(status.authenticationRequired)rejected.resolve();});
+  await s.login.bootstrapSavedStashLogin();await rejected.promise;await tick();
+  await h.sync.disconnectStashSyncAndWait();assert.equal(s.records.size,0);assert.equal(h.stops,1);
+  await s.login.bootstrapSavedStashLogin();assert.equal(h.transports,1);
+  await assert.rejects(h.sync.requestStashFolderFeed('folder','status'),/Connect in Settings/);
+});
+
+for(const phase of ['health','startup']) test(`actual saved bootstrap signout during delayed ${phase} cannot revive old session or write credentials`,async()=>{
+  const h=syncHarness(),s=savedClientHarness(h),gate=deferred();s.seed();
+  if(phase==='health')h.healthGate=gate;else h.startGate=gate;
+  const boot=s.login.bootstrapSavedStashLogin();await tick();
+  const stop=s.login.forgetSavedStashLogin();await tick();gate.resolve();await boot;await stop;
+  assert.equal(s.records.size,0);let status;h.sync.subscribeStashSyncStatus(next=>{status=next;})();assert.equal(status.account,undefined);
+  assert.equal(h.transports,phase==='health'?0:1);assert.equal(h.stops,phase==='health'?0:1);
+});
+
+test('actual account replacement cancels a delayed restored health check before starting the new account',async()=>{
+  const h=syncHarness(),s=savedClientHarness(h),gate=deferred();s.seed();h.healthGate=gate;
+  const boot=s.login.bootstrapSavedStashLogin();await tick();
+  const next=s.login.signInStashSync('https://other.example/','bob','other-synthetic');await tick();
+  h.healthGate=null;gate.resolve();await boot;await next;
+  assert.equal(h.transports,1);assert.equal(JSON.parse([...s.records.values()][0]).username,'bob');
+  let status;h.sync.subscribeStashSyncStatus(next=>{status=next;})();assert.equal(status.account.username,'bob');
+  await s.login.forgetSavedStashLogin();assert.equal(h.stops,1);assert.equal(s.records.size,0);
 });

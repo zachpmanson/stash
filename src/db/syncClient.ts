@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import { normalizedBaseUrl } from "./syncIdentity";
 import {
   createSyncedDB,
   defaultConfig,
@@ -42,6 +43,13 @@ export class StashSyncPreparationRequiredError extends Error {
   }
 }
 
+export class StashSyncAuthenticationError extends Error {
+  constructor() {
+    super("Sync login was rejected. Sign in again with the correct credentials.");
+    this.name = "StashSyncAuthenticationError";
+  }
+}
+
 type SyncPhase = "connecting" | "syncing" | "synced" | "error" | "stopped";
 export type StashSyncStatus = {
   phase: SyncPhase;
@@ -53,6 +61,8 @@ export type StashSyncStatus = {
   disconnecting?: boolean;
   /** Teardown failed closed; no further connection is safe before restart. */
   restartRequired?: boolean;
+  /** Definitive HTTP auth rejection: stop transport and require corrected credentials. */
+  authenticationRequired?: boolean;
 };
 type SyncListener = (status: StashSyncStatus) => void;
 type ServerSyncStatus = {
@@ -163,21 +173,6 @@ export function subscribeStashSyncProjection(listener: () => void): () => void {
 
 function publishProjection(): void {
   for (const listener of projectionListeners) listener();
-}
-
-function normalizedBaseUrl(value: string): URL {
-  const url = new URL(value.trim());
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("Sync server URL must start with https://");
-  }
-  if (url.protocol === "http:" && !["localhost", "127.0.0.1"].includes(url.hostname)) {
-    throw new Error("Basic-auth credentials require HTTPS outside localhost");
-  }
-  if (url.username || url.password) throw new Error("Use a server URL without embedded credentials.");
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
-  url.search = "";
-  url.hash = "";
-  return url;
 }
 
 function basicAuthorization(credentials: Credentials): string {
@@ -361,6 +356,7 @@ async function authenticatedHealthCheck(
     headers: { Authorization: authorization },
     signal,
   });
+  if (response.status === 401 || response.status === 403) throw new StashSyncAuthenticationError();
   if (!response.ok) throw new Error(`Authenticated sync-server health check returned HTTP ${response.status}`);
   const health = await response.json() as { schema?: string; schemaVersion?: string };
   if (health.schema !== SYNC_CRR_SCHEMA_NAME || health.schemaVersion !== SYNC_CRR_SCHEMA_VERSION.toString()) {
@@ -380,6 +376,7 @@ async function readServerStatus(
   const url = new URL("sync/status", base);
   url.searchParams.set("clientSiteId", clientSiteId);
   const response = await fetch(url, { headers: { Authorization: authorization }, signal });
+  if (response.status === 401 || response.status === 403) throw new StashSyncAuthenticationError();
   if (!response.ok) throw new Error(`Sync-server status returned HTTP ${response.status}`);
   const status = await response.json() as ServerSyncStatus;
   if (status.schema !== SYNC_CRR_SCHEMA_NAME || status.schemaVersion !== SYNC_CRR_SCHEMA_VERSION.toString()) {
@@ -679,6 +676,11 @@ export async function connectStashSync(
             }
           } catch (error) {
             if (!running) break;
+            if (error instanceof StashSyncAuthenticationError) {
+              session.stop();
+              notifyStatus({ phase: "error", authenticationRequired: true, message: error.message });
+              break;
+            }
             notifySessionStatus({ phase: "error", message: error instanceof Error ? error.message : String(error) });
           }
           if (running) await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_MS));
@@ -705,7 +707,7 @@ export async function connectStashSync(
       if (!attempt.cancelled || shutdownFailure) {
         setupFailed = true;
         setupError = error;
-        notifyStatus({ phase: error instanceof StashSyncPreparationRequiredError ? "stopped" : "error", message: error instanceof Error ? error.message : String(error) });
+        notifyStatus({ phase: error instanceof StashSyncPreparationRequiredError ? "stopped" : "error", message: error instanceof Error ? error.message : String(error), ...(error instanceof StashSyncAuthenticationError ? { authenticationRequired: true } : {}) });
       }
     } finally {
       if (connectionAttempt === attempt) connectionAttempt = null;
