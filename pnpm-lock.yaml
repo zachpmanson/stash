@@ -6,6 +6,7 @@ settings:
 
 patchedDependencies:
   '@vlcn.io/ws-client@0.2.0': ce4d1b24827529626ea0ad475d1cbe7a88771fc50e7cb65043947fcf84e869e2
+  expo-secure-store@55.0.18: 87c2020adaed4368309918cecf1566eeaa7a9f91141410ef7ee3aa4d323b8d06
 
 importers:
 
@@ -65,6 +66,9 @@ importers:
       expo-router:
         specifier: ^55.0.13
         version: 55.0.13(@expo/log-box@55.0.11)(@expo/metro-runtime@55.0.9)(@react-native-masked-view/masked-view@0.3.2(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(@types/react@19.2.14)(expo-constants@55.0.15)(expo-font@55.0.6)(expo-linking@55.0.13)(expo@55.0.18)(react-dom@19.2.5(react@19.2.0))(react-native-safe-area-context@5.6.2(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native-screens@4.24.0(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+      expo-secure-store:
+        specifier: ~55.0.18
+        version: 55.0.18(patch_hash=87c2020adaed4368309918cecf1566eeaa7a9f91141410ef7ee3aa4d323b8d06)(expo@55.0.18)
       expo-sharing:
         specifier: ^55.0.18
         version: 55.0.18(expo@55.0.18)(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
@@ -2228,6 +2232,11 @@ packages:
         optional: true
       react-server-dom-webpack:
         optional: true
+
+  expo-secure-store@55.0.18:
+    resolution: {integrity: sha512-shKZYQf7/KA45Z3oEIXUkXdrfRNFxsc+fJC182bbpuKqS4nLPZslsJUqruQ937Zkkbev126N/QJv+zmd6FpZjA==}
+    peerDependencies:
+      expo: '*'
 
   expo-server@55.0.8:
     resolution: {integrity: sha512-AoV5TKuO4biSzrhe/OVLyInfTT0pV9/OOc/g/oVq5vmCjL8SaSYTkES8PLt+67Tm7VqX+Dn0+kSx1nQcjEKaPw==}
@@ -6683,6 +6692,10 @@ snapshots:
       - '@types/react-dom'
       - expo-font
       - supports-color
+
+  expo-secure-store@55.0.18(patch_hash=87c2020adaed4368309918cecf1566eeaa7a9f91141410ef7ee3aa4d323b8d06)(expo@55.0.18):
+    dependencies:
+      expo: 55.0.18(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(@expo/metro-runtime@55.0.9)(expo-router@55.0.13)(react-dom@19.2.5(react@19.2.0))(react-native@0.83.4(@babel/core@7.29.0)(@react-native-community/cli@20.2.0(typescript@5.7.3))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.7.3)
 
   expo-server@55.0.8: {}
 

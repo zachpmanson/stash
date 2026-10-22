@@ -14,7 +14,7 @@ pnpm build:android      # Release build (expo prebuild + react-native run-androi
 
 Always use `pnpm`, not `npm` or `yarn`.
 
-There are no automated tests.
+Root lifecycle/UI/login regressions: `nix develop --command node --test scripts/test-*.cjs scripts/test-*.mjs` (install the isolated server dependencies first for native SQLite tests). See `docs/mobile-sync-login.md` for focused tests and build notes.
 
 ## Architecture
 

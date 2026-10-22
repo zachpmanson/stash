@@ -38,29 +38,45 @@ export function FolderNavigation({
   selected,
   archived,
   onSelect,
+  onMenu,
+  busy = false,
 }: {
   folders: WebFolder[];
   selected: string;
   archived: boolean;
   onSelect: (id: string) => void;
+  onMenu: (id: string, trigger: HTMLElement, point?: { x: number; y: number }) => void;
+  busy?: boolean;
 }) {
   const group = (isArchived: boolean) =>
     folders
       .filter((f) => (f.archived_at !== null) === isArchived)
       .map((f) => (
-        <button
-          className="folder-link"
-          key={f.id}
-          aria-current={selected === f.id ? "page" : undefined}
-          onClick={() => onSelect(f.id)}
-          title={f.name}
-        >
-          <Icon name="folder" />
-          <span className="truncate">{f.name}</span>
-        </button>
+        <div className="folder-row" key={f.id}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onMenu(f.id, e.currentTarget.querySelector("button")!, { x: e.clientX, y: e.clientY });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+              e.preventDefault();
+              onMenu(f.id, e.target as HTMLElement);
+            }
+          }}>
+          <button className="folder-link" aria-current={selected === f.id ? "page" : undefined}
+            onClick={() => onSelect(f.id)} title={f.name}>
+            <Icon name="folder" />
+            <span className="truncate">{f.name}</span>
+            {f.archived_at !== null && <span className="sr-only"> (archived)</span>}
+          </button>
+          <button className="folder-menu-toggle" aria-label={`Actions for ${f.name}`} aria-haspopup="menu"
+            disabled={busy} onClick={(e) => onMenu(f.id, e.currentTarget)}>
+            <span aria-hidden="true">⋯</span>
+          </button>
+        </div>
       ));
   return (
-    <nav aria-label="Folders" className="space-y-1">
+    <nav aria-label="Folders" className="folder-nav">
       <button
         className="folder-link"
         aria-current={!selected ? "page" : undefined}
@@ -69,14 +85,8 @@ export function FolderNavigation({
         <Icon name="all" />
         All items
       </button>
-      <p className="nav-label">Folders</p>
       {group(false)}
-      {archived && folders.some((f) => f.archived_at !== null) && (
-        <>
-          <p className="nav-label">Archived folders</p>
-          {group(true)}
-        </>
-      )}
+      {archived && group(true)}
     </nav>
   );
 }
@@ -121,14 +131,18 @@ export function ItemCard({
           />
         </span>
         <span className="min-w-0 flex-1">
-          <strong className="card-title">{title}</strong>
-          {item.title && item.excerpt && (
-            <span className="card-excerpt">{item.excerpt}</span>
-          )}
+          <strong className="card-title" title={title}>
+            {title}
+          </strong>
           <small>
-            {item.mediaUnavailable
-              ? "Media · available on device"
-              : item.domain || (item.type === "text" ? "Note" : "Link")}
+            <span className="card-kind">
+              {item.mediaUnavailable
+                ? "Media · available on device"
+                : item.domain || (item.type === "text" ? "Note" : "Link")}
+            </span>
+            {item.title && item.excerpt && (
+              <span className="card-excerpt">{item.excerpt}</span>
+            )}
           </small>
         </span>
       </button>
