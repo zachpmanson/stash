@@ -54,5 +54,12 @@
     "patch-package": "^8.0.1",
     "typescript": "~5.7.3"
   },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": ["expo-secure-store"]
+      }
+    }
+  },
   "private": true
 }

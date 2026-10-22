@@ -18,6 +18,8 @@ The adapter uses `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, no biometric authenticat
 
 ## Validation and builds
 
+SecureStore 55.0.18 has a version-pinned pnpm patch for failed native save commits and retrying failed deletion. Expo SDK 55 otherwise prefers a prebuilt Android artifact, which bypasses that patched Kotlin. Keep `expo.autolinking.android.buildFromSource: ["expo-secure-store"]` in `package.json`; rebuilding JavaScript or checking installed source alone is insufficient. The final APK must contain the compiled `SecureStoreModule` and the patched error string `Could not write the encrypted item to SecureStore`. Recheck this source-build requirement and both persistence fixes on an SDK/dependency upgrade.
+
 Use pnpm inside Nix (`bash -c`, not a login shell that resets PATH):
 
 ```sh

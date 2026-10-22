@@ -10,6 +10,10 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes,no) => {resolve=yes;reject=no;}); return {promise,resolve,reject}; };
 const login = {version:1,serverUrl:'https://sync.example/base/',username:'alice',password:'synthetic-secret'};
 const identity = ({serverUrl,username}) => ({serverUrl,username});
+test('Android autolinking builds patched SecureStore from source instead of a prebuilt artifact', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.deepEqual(manifest.expo?.autolinking?.android?.buildFromSource, ['expo-secure-store']);
+});
 function harness({ allowed = true, disk = new Map() } = {}) {
   const cache = new Map(), calls = [], options = {}, listeners = new Set();
   let status = {phase:'stopped'}, saved;
