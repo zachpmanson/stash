@@ -73,17 +73,14 @@ if (command === "backup") {
   await copyFile(source, replacement);
   await chmod(replacement, 0o600);
   openAndValidate(replacement);
-  // A restored snapshot must never silently republish stale folders. Preserve
-  // stable IDs/hashes/dates but require explicit enable after recovery review.
+  // Active folders automatically have private authenticated feeds after restore.
+  // Preserve their identities, hashes and semantic dates exactly.
   const restored = new Database(replacement, { fileMustExist: true });
   try {
-    // Commit recovery policy into the replacement file itself, not an adjacent
-    // WAL whose old name would be lost at the atomic rename.
+    // Keep replacement changes in the file, not an adjacent WAL whose old name
+    // would be lost at the atomic rename.
     restored.pragma("journal_mode = DELETE");
     restored.loadExtension(extensionPath);
-    if (restored.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_feeds'").get()) {
-      restored.prepare("UPDATE folder_feeds SET enabled=0").run();
-    }
     restored.prepare("SELECT crsql_finalize()").get();
   } finally { restored.close(); }
   await rename(replacement, databasePath);

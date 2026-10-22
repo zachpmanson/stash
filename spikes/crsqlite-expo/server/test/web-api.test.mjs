@@ -308,7 +308,7 @@ test(
     await json(`/items/${id}/folders/${folderId}`, "PUT", { present: true });
     const feedPath = `/folders/${folderId}/feed`;
     const feed = () => fetch(`${base}/feeds/folders/${folderId}.atom`, { headers: { 'X-Auth-User': 'web-test-owner' } });
-    await json(feedPath, 'PUT', { enabled: true });
+    assert.equal((await json(feedPath)).policy, 'always-on');
     assert.match(await (await feed()).text(), /Web title/);
     await project(async (db) =>
       Boolean(
@@ -386,15 +386,16 @@ test(
     assert.equal(nativeCreated.content, "https://example.com/native");
     assert.deepEqual(nativeCreated.folderIds, [folderId]);
     assert.match(await (await feed()).text(), /Native link/);
-    // CRR-applied archive transitions must disable even if unarchived before
-    // a reader polls; native backup replay cannot re-enable server enablement.
+    // CRR-applied archives are unavailable; unarchives automatically restore
+    // private feeds, without changing identity or requiring a toggle.
     await app.withAppDb(db => db.runAsync('UPDATE sync_folders SET archived_at=123 WHERE id=?', folderId));
     await upload();
+    assert.equal((await feed()).status, 404);
     await app.withAppDb(db => db.runAsync('UPDATE sync_folders SET archived_at=NULL WHERE id=?', folderId));
     await upload();
-    assert.equal((await json(feedPath)).enabled, false);
-    assert.equal((await feed()).status, 404);
-    await json(feedPath, 'PUT', { enabled: true });
+    assert.equal((await json(feedPath)).enabled, true);
+    assert.equal((await feed()).status, 200);
+    assert.equal((await json(feedPath)).policy, 'always-on');
     await json(`/items/${id}`, "PATCH", {
       content: "Web edit",
       archived: true,

@@ -336,9 +336,8 @@ try {
   );
   assert.ok(folderId);
   const feedPolicy = await json(`/folders/${folderId}/feed`);
-  // Only the legacy backend needs fixture opt-in; always-on policy is read-only.
-  if (feedPolicy.policy === undefined) await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
-  else assert.equal(feedPolicy.policy, "always-on");
+  assert.equal(feedPolicy.policy, "always-on");
+  assert.equal(feedPolicy.enabled, true);
   assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), "New item");
   // Empty-state creation uses the same guarded transition as the header.
   await click('New folder');

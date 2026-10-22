@@ -4,7 +4,7 @@ Node 24/TypeScript, Hono HTTP routing, bundled React, and the existing raw Node 
 
 Source baseline: **`9f238df`**, the reviewed but unmerged prerequisite [zpm/stash#58](https://github.com/zachpmanson/stash/pull/58). This branch includes that prerequisite until it integrates; review the new implementation with `git diff 9f238df..HEAD`. Implementation/review used only disposable state and synthetic credentials, with no live service/database/device access. Zach subsequently authorized deployment **after independent review/fixes pass**; activation, exact pin and private backup evidence are tracked on the issue and Nix operational runbook rather than inferred from a successful build. Media sync remains separate under [zpm/stash#26](https://github.com/zachpmanson/stash/issues/26).
 
-Private folder Atom feeds and Android controls: see [`../../../docs/folder-feeds.md`](../../../docs/folder-feeds.md) for review baseline, API/content/cache/recovery semantics, disposable validation and future owner-approved configuration. Feeds stay behind Caddy Basic authentication; this change is **not deployed**.
+Always-on private folder Atom feeds and read-only Android status/copy/preview: see [`../../../docs/folder-feeds.md`](../../../docs/folder-feeds.md) for review baseline, API/content/cache/recovery semantics, disposable validation and future owner-approved configuration. Feeds stay behind Caddy Basic authentication; this change is **not deployed**.
 
 ## Trust boundary
 
