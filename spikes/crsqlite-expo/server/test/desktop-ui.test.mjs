@@ -5,7 +5,8 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { App, ItemEditor, ItemReader } from "../web/App.tsx";
-import { ItemCard } from "../web/components.tsx";
+import { FolderNavigation, ItemCard } from "../web/components.tsx";
+import { FolderFeedDialog } from "../web/FolderFeedDialog.tsx";
 import { FolderForm } from "../web/FolderForm.tsx";
 const flush = async (fn) =>
   act(async () => {
@@ -157,6 +158,9 @@ async function fixture(t, initial = "/?folder=f1") {
     buttons,
     button,
     select,
+    openMenu: (id = "f1") => flush(() => renderer.root.findByType(FolderNavigation).props.onMenu(id, {
+      isConnected: false, getBoundingClientRect: () => ({ left: 0, bottom: 32 }),
+    })),
     location,
     listeners,
     storage,
@@ -334,6 +338,7 @@ async function typeFolderDraft(h, name) {
 for (const action of ["New folder", "Rename"]) {
   test(`${action} draft guards item-edit transition and editors are mutually exclusive`, async (t) => {
     const h = await fixture(t, "/?folder=f1&item=i1");
+    if (action === "Rename") await h.openMenu();
     await flush(() => h.button(action).props.onClick());
     await typeFolderDraft(h, "Unsaved folder draft");
     const form = h.renderer.root.findByType(FolderForm);
@@ -374,6 +379,7 @@ test("new-folder form identity and dirty protection survive remote selected-fold
 
 test("remote folder removal still invalidates its owned rename draft", async (t) => {
   const h = await fixture(t);
+  await h.openMenu();
   await flush(() => h.button("Rename").props.onClick());
   await typeFolderDraft(h, "Removed folder rename");
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
@@ -631,4 +637,102 @@ test("compact chrome removes slogans, keeps a mounted live region and bounded tw
   assert.equal(preview.parent.type, "small", "preview shares the metadata line instead of a third block");
   assert.equal(textOf(preview), "Useful bounded preview");
   assert.equal(card.root.findByType("button").props["aria-pressed"], true);
+});
+
+test("rendered header is exactly Stash; sidebar is a single list without section chrome or bottom actions", async (t) => {
+  const h = await fixture(t);
+  assert.equal(textOf(h.renderer.root.findByType("h1")).trim(), "Stash");
+  const sidebar = h.renderer.root.findByType("aside");
+  assert.equal(sidebar.findAllByType("h2").length, 0);
+  assert.equal(sidebar.findAllByType("p").length, 0);
+  assert.equal(h.button("Rename"), undefined);
+  assert.equal(h.button("Archive folder"), undefined);
+  assert.doesNotMatch(textOf(h.renderer.root), /Your collection|A little space for later\./);
+  for (const row of sidebar.findAllByProps({ className: "folder-row" })) {
+    assert.equal(row.findAllByType("button").length, 2);
+    for (const button of row.findAllByType("button")) assert.equal(button.findAllByType("button").length, 1, "no nested buttons");
+  }
+});
+
+test("nonselected menu targets live folder, archive preserves route, and deleted menu cannot act", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await h.openMenu("f2");
+  h.state.folders[1].archived_at = 1;
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.ok(h.button("Unarchive folder"), "menu uses refreshed target, not stale archive state");
+  await flush(() => h.button("Unarchive folder").props.onClick());
+  assert.equal(h.location.search, "?folder=f1&item=i1");
+  const write = h.state.calls.findLast((c) => c.method === "PATCH");
+  assert.equal(write.url, "/api/folders/f2");
+  assert.deepEqual(JSON.parse(write.body), { archived: false });
+  await h.openMenu("f2");
+  h.state.folders = h.state.folders.filter(f => f.id !== "f2");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByProps({ role: "menu" }).length, 0);
+});
+
+test("target-owned rename survives unrelated filter deletion, freezes name and invalidates on target archive", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await h.openMenu("f2");
+  await flush(() => h.button("Rename").props.onClick());
+  const form = h.renderer.root.findByType(FolderForm);
+  await typeFolderDraft(h, "Draft for Other");
+  h.state.folders = h.state.folders.filter(f => f.id !== "f1");
+  h.state.folders[0].name = "Remote rename";
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.location.search, "");
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  assert.equal(form.findByType("input").props.defaultValue, "Other");
+  await flush(() => h.button("Cancel").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  h.state.folders[0].archived_at = 1;
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  await flush(() => h.button("Archive").props.onClick());
+  assert.equal(h.state.prompts, 1, "invalidated rename releases only its own dirty flag");
+});
+
+test("context archive rejects dirty item discard and rename Cancel/Escape/backdrop are busy guarded", async (t) => {
+  const h = await fixture(t, "/?folder=f1&item=i1");
+  await flush(() => h.button("Edit item").props.onClick());
+  await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
+  await h.openMenu("f2");
+  await flush(() => h.button("Archive folder").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.state.calls.filter(c => c.method === "PATCH").length, 0);
+  assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 1);
+  h.state.confirm = true;
+  await flush(() => h.button("Rename").props.onClick());
+  const modal = h.renderer.root.findByType("dialog");
+  assert.equal(modal.props["aria-labelledby"], "rename-folder-title");
+  let release;
+  h.state.writeGate = new Promise(r => { release = r; });
+  await flush(() => h.renderer.root.findByType(FolderForm).props.onSave("New Other"));
+  assert.equal(h.renderer.root.findByType("dialog").props["aria-busy"], true);
+  assert.equal(h.renderer.root.findByType(FolderForm).findByType("input").props.disabled, true);
+  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
+  await flush(() => release());
+  assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
+  assert.equal(h.location.search, "?folder=f1&item=i1");
+});
+
+
+test("viewing/invalidating a target feed leaves unrelated folder draft and dirty ownership untouched", async (t) => {
+  const h = await fixture(t);
+  await flush(() => h.button("New folder").props.onClick());
+  await typeFolderDraft(h, "Unrelated folder draft");
+  const form = h.renderer.root.findByType(FolderForm);
+  await h.openMenu("f2");
+  await flush(() => h.button("Atom feed").props.onClick());
+  assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
+  assert.equal(h.state.prompts, 0);
+  h.state.folders = h.state.folders.filter(f => f.id !== "f2");
+  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(h.renderer.root.findAllByType(FolderFeedDialog).length, 0);
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  await flush(() => h.button("All items").props.onClick());
+  assert.equal(h.state.prompts, 1);
+  assert.equal(h.location.search, "?folder=f1");
 });

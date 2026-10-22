@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
+import { folderInteractions } from "./folder-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
@@ -334,7 +335,10 @@ try {
     `new URLSearchParams(location.search).get('folder')`,
   );
   assert.ok(folderId);
-  await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
+  const feedPolicy = await json(`/folders/${folderId}/feed`);
+  // Only the legacy backend needs fixture opt-in; always-on policy is read-only.
+  if (feedPolicy.policy === undefined) await json(`/folders/${folderId}/feed`, "PUT", { enabled: true });
+  else assert.equal(feedPolicy.policy, "always-on");
   assert.equal(await evaluate(`document.querySelector('.empty button').textContent`), "New item");
   // Empty-state creation uses the same guarded transition as the header.
   await click('New folder');
@@ -470,6 +474,10 @@ try {
   );
   // Folder and item editing must not coexist or silently clear dirty protection.
   for (const action of ["New folder", "Rename"]) {
+    if (action === "Rename" && process.env.STASH_DENSITY_REFERENCE !== "1") {
+      await evaluate(`document.querySelector('.folder-link[aria-current=page]').parentElement.querySelector('.folder-menu-toggle').click()`);
+      await waitFor(() => evaluate(`!!document.querySelector('[role=menu]')`));
+    }
     await click(action);
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unsaved folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -820,6 +828,10 @@ try {
     const { id: removedFolder } = await json("/folders", "POST", { name: `Disposable filter ${action}` });
     await cdp("Page.navigate", { url: `http://127.0.0.1:${proxyPort}/?folder=${removedFolder}` }, sessionId);
     await waitFor(() => evaluate(`document.querySelector('.collection h2')?.textContent===${JSON.stringify(`Disposable filter ${action}`)}`));
+    if (action === "Rename" && process.env.STASH_DENSITY_REFERENCE !== "1") {
+      await evaluate(`document.querySelector('.folder-link[aria-current=page]').parentElement.querySelector('.folder-menu-toggle').click()`);
+      await waitFor(() => evaluate(`!!document.querySelector('[role=menu]')`));
+    }
     await click(action);
     await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
     await evaluate(`(()=>{const n=document.querySelector('input[name=name]');window.fixtureFolderInput=n;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unrelated new folder draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -900,6 +912,18 @@ try {
   await waitFor(() => evaluate(`document.querySelector('.reader').textContent.includes('Media unavailable on the web')`));
   assert.equal(await evaluate(`document.querySelectorAll('.reader img, .reader video').length`), 0);
   console.log('PASS 320px long heading/card/URL overflow, unsafe replicated Link label without anchor/hint, and honest device-only media');
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") await folderInteractions({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`, removeFixture,
+    confirm: async (action, accept) => {
+      const pending = action();
+      await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i);
+      await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending;
+      dialog = null;
+    },
+  });
   console.log(process.env.STASH_DENSITY_REFERENCE === '1'
     ? 'PASS baseline behavior; density metrics recorded only (compact acceptance intentionally disabled)'
     : 'PASS compact density/chrome/panes/grid/touch controls and preserved UI safeguards: compact list/sticky toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');

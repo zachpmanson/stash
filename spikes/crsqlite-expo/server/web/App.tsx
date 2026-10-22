@@ -7,6 +7,10 @@ import type {
 import { ApiResponseError, ItemEditor, ItemReader, request } from "./items.js";
 import { FolderNavigation, Icon, ItemCard } from "./components.js";
 import { FolderForm } from "./FolderForm.js";
+import { FolderDialog } from "./FolderDialog.js";
+import { FolderMenu, type FolderMenuTarget } from "./FolderMenu.js";
+import { FolderFeedDialog } from "./FolderFeedDialog.js";
+import { Spinner } from "./Spinner.js";
 export {
   ApiResponseError,
   ItemEditor,
@@ -67,9 +71,23 @@ export function App() {
   const [notice, setNotice] = useState("");
   const [allLayout, setAllLayout] = useState(localLayout);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [folderAction, setFolderAction] = useState<"new" | "rename" | null>(
+  const [folderAction, setFolderAction] = useState<"new" | null>(
     null,
   );
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string; archived: boolean; trigger: HTMLElement } | null>(null);
+  const [feedTarget, setFeedTarget] = useState<{ id: string; trigger: HTMLElement } | null>(null);
+  const feedFolder = folders.find((f) => f.id === feedTarget?.id && f.archived_at === null);
+  const [menuTarget, setMenuTarget] = useState<FolderMenuTarget | null>(null);
+  const menuFolder = folders.find((f) => f.id === menuTarget?.id);
+  function closeMenu() {
+    if (menuTarget?.trigger.isConnected) menuTarget.trigger.focus({ preventScroll: true });
+    setMenuTarget(null);
+  }
+  function closeRename() {
+    if (busy || !discard()) return;
+    dirty.current = false;
+    setRenameTarget(null);
+  }
   const [undo, setUndo] = useState<{ id: string; archived: boolean } | null>(
     null,
   );
@@ -114,6 +132,9 @@ export function App() {
     else if (selected) readerRef.current?.focus({ preventScroll: true });
     setSidebarOpen(false);
     setFolderAction(null);
+    setRenameTarget(null);
+    setMenuTarget(null);
+    setFeedTarget(null);
     writeRoute(next);
   }
   const refresh = useCallback(async () => {
@@ -147,6 +168,15 @@ export function App() {
           (nextDetail.archived_at !== null) !== archived ||
           (!!folderId && !nextDetail.folderIds.includes(folderId)));
       setFolders(nextFolders);
+      setFeedTarget((current) => current && nextFolders.some((f) => f.id === current.id && f.archived_at === null) ? current : null);
+      setMenuTarget((current) => current && nextFolders.some((f) => f.id === current.id) ? current : null);
+      setRenameTarget((current) => {
+        if (current && !nextFolders.some((f) => f.id === current.id && (f.archived_at !== null) === current.archived)) {
+          dirty.current = false;
+          return null;
+        }
+        return current;
+      });
       setItems(nextItems.items);
       setLoadedPage({ folderId, archived, offset });
       setHasMore(nextItems.hasMore);
@@ -159,14 +189,6 @@ export function App() {
         };
         window.history?.replaceState(null, "", routeUrl(next));
         setRoute(next);
-        if (missingFolder)
-          setFolderAction((current) => {
-            if (current === "rename") {
-              dirty.current = false;
-              return null;
-            }
-            return current;
-          });
         setEditor((current) => {
           if (current === "edit") {
             dirty.current = false;
@@ -216,6 +238,9 @@ export function App() {
       dirty.current = false;
       setEditor(null);
       setFolderAction(null);
+      setRenameTarget(null);
+      setMenuTarget(null);
+      setFeedTarget(null);
       const next = readRoute();
       if (
         next.selected !== selected ||
@@ -272,6 +297,8 @@ export function App() {
     dirty.current = false;
     setEditor(null);
     setFolderAction(null);
+    setRenameTarget(null);
+    setMenuTarget(null);
     setDetail(null);
     writeRoute({ ...route, selected: "" });
     const target =
@@ -298,14 +325,18 @@ export function App() {
     editorReturnFocus.current = document.activeElement as HTMLElement;
     dirty.current = false;
     setFolderAction(null);
+    setRenameTarget(null);
+    setMenuTarget(null);
     setEditor("new");
     setDetail(null);
     writeRoute({ ...route, selected: "" });
   }
-  function openFolderForm(next: "new" | "rename" | null) {
-    if (!discard()) return;
+  function openFolderForm(next: "new" | null) {
+    if (busy || !discard()) return;
     dirty.current = false;
     setEditor(null);
+    setRenameTarget(null);
+    setMenuTarget(null);
     setFolderAction(next);
   }
   function changeLayout(next: "list" | "grid") {
@@ -325,13 +356,12 @@ export function App() {
       }
     }
   }
-  const folderPath = `/folders/${encodeURIComponent(folderId)}`;
   const readerOpen = !!selected || !!editor;
   return (
     <div
       className="shell"
       onKeyDown={(e) => {
-        if (e.key === "Tab" && sidebarOpen) {
+        if (e.key === "Tab" && sidebarOpen && !renameTarget && !menuTarget && !feedTarget) {
           const controls = [
             ...(document.querySelectorAll<HTMLElement>(
               ".sidebar button:not(:disabled), .sidebar input:not(:disabled)",
@@ -370,7 +400,7 @@ export function App() {
           <Icon name="menu" />
         </button>
         <h1 className="text-xl font-semibold tracking-tight">
-          Stash<span className="brand-dot">.</span>
+          Stash
         </h1>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -389,7 +419,7 @@ export function App() {
             disabled={loading || busy}
             onClick={() => void refresh()}
           >
-            <Icon name="refresh" />
+            <Spinner active={loading} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
           {!archived && (
@@ -406,6 +436,7 @@ export function App() {
         </div>
       </header>
       <div className="feedback px-4" role="status" aria-live="polite">
+        {(busy || loading) && <Spinner />}
         {busy
           ? "Saving…"
           : loading
@@ -432,7 +463,7 @@ export function App() {
           </button>
         )}
       </div>
-      {error && (
+      {error && !renameTarget && (
         <div role="alert" className="error px-4">
           {error}{" "}
           <button disabled={loading || busy} onClick={() => void refresh()}>
@@ -456,7 +487,6 @@ export function App() {
           aria-label="Library filters"
         >
           <div className="sidebar-heading">
-            <h2 className="nav-label">Library</h2>
             <button
               className="sidebar-toggle"
               aria-label="Close folders"
@@ -472,6 +502,12 @@ export function App() {
             folders={folders}
             selected={folderId}
             archived={archived}
+            busy={busy}
+            onMenu={(id, trigger, point) => {
+              if (busy) return;
+              const box = trigger.getBoundingClientRect();
+              setMenuTarget({ id, trigger, x: point?.x ?? box.left, y: point?.y ?? box.bottom });
+            }}
             onSelect={(id) =>
               navigate({ folderId: id, offset: 0, selected: "" })
             }
@@ -488,79 +524,21 @@ export function App() {
               New folder
             </button>
           )}
-          {activeFolder && (
-            <div
-              className="folder-actions mt-2 pt-2 border-t border-line flex flex-wrap gap-2"
-              aria-label="Folder actions"
-            >
-              <button
-                disabled={busy}
-                onClick={() =>
-                  openFolderForm(folderAction === "rename" ? null : "rename")
-                }
-              >
-                <Icon name="edit" />
-                Rename
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => {
-                  if (discard())
-                    void mutate(() =>
-                      request(folderPath, "PATCH", {
-                        archived: activeFolder.archived_at === null,
-                      }),
-                    );
-                }}
-              >
-                {activeFolder.archived_at === null
-                  ? "Archive folder"
-                  : "Unarchive folder"}
-              </button>
-            </div>
-          )}
-          {folderAction && (
-            <FolderForm
-              key={folderAction === "new" ? "new" : `rename-${folderId}`}
-              initialName={
-                folderAction === "new" ? null : (activeFolder?.name ?? "")
-              }
-              busy={busy}
-              onDirty={(value) => {
-                dirty.current = value;
-              }}
+          {folderAction === "new" && (
+            <FolderForm key="new" initialName={null} busy={busy}
+              onDirty={(value) => { dirty.current = value; }}
               onCancel={() => openFolderForm(null)}
               onSave={(name) => {
-                if (name === null) {
+                if (busy || name === null) return;
+                void mutate(() => request<{ id: string }>("/folders", "POST", { name }), (result) => {
                   dirty.current = false;
                   setFolderAction(null);
-                  return;
-                }
-                void mutate(
-                  () =>
-                    request<{ id: string }>(
-                      folderAction === "new" ? "/folders" : folderPath,
-                      folderAction === "new" ? "POST" : "PATCH",
-                      { name },
-                    ),
-                  (result) => {
-                    dirty.current = false;
-                    setFolderAction(null);
-                    if (folderAction === "new") {
-                      setSidebarOpen(false);
-                      setEditor(null);
-                      setDetail(null);
-                      writeRoute({
-                        ...route,
-                        folderId: result.id,
-                        selected: "",
-                        offset: 0,
-                      });
-                    }
-                  },
-                );
-              }}
-            />
+                  setSidebarOpen(false);
+                  setEditor(null);
+                  setDetail(null);
+                  writeRoute({ ...route, folderId: result.id, selected: "", offset: 0 });
+                });
+              }} />
           )}
         </aside>
         <main className="collection" aria-label="Items" aria-busy={loading}>
@@ -792,6 +770,8 @@ export function App() {
                           if (!discard()) return;
                           dirty.current = false;
                           setFolderAction(null);
+      setRenameTarget(null);
+      setMenuTarget(null);
                           setEditor("edit");
                         }}
                       >
@@ -886,6 +866,51 @@ export function App() {
           )}
         </section>
       </div>
+      {menuTarget && menuFolder && <FolderMenu target={menuTarget} folder={menuFolder} busy={busy}
+        onClose={closeMenu}
+        onFeed={() => {
+          if (busy || menuFolder.archived_at !== null) return;
+          // Viewing a URL is not consent to discard any underlying draft.
+          setFeedTarget({ id: menuFolder.id, trigger: menuTarget.trigger });
+          setMenuTarget(null);
+        }}
+        onRename={() => {
+          if (busy || !discard()) return;
+          dirty.current = false;
+          setEditor(null);
+          setFolderAction(null);
+          setRenameTarget({ id: menuFolder.id, name: menuFolder.name,
+            archived: menuFolder.archived_at !== null, trigger: menuTarget.trigger });
+          setMenuTarget(null);
+        }}
+        onArchive={() => {
+          if (busy || !discard()) return;
+          // A discarded editor must not remain mounted with a stale dirty flag.
+          dirty.current = false;
+          setEditor(null);
+          setFolderAction(null);
+          closeMenu();
+          void mutate(() => request(`/folders/${encodeURIComponent(menuFolder.id)}`, "PATCH", {
+            archived: menuFolder.archived_at === null,
+          }));
+        }} />}
+      {feedTarget && feedFolder && <FolderFeedDialog key={feedTarget.id} id={feedFolder.id} name={feedFolder.name}
+        returnFocus={feedTarget.trigger} onClose={() => setFeedTarget(null)} />}
+      {renameTarget && <FolderDialog key={renameTarget.id} name={renameTarget.name} busy={busy} error={error}
+        returnFocus={renameTarget.trigger} onCancel={closeRename}
+        onDirty={(value) => { dirty.current = value; }}
+        onSave={(name) => {
+          if (busy || !folders.some((f) => f.id === renameTarget.id && (f.archived_at !== null) === renameTarget.archived)) return;
+          if (name === null) {
+            dirty.current = false;
+            setRenameTarget(null);
+            return;
+          }
+          void mutate(() => request(`/folders/${encodeURIComponent(renameTarget.id)}`, "PATCH", { name }), () => {
+            dirty.current = false;
+            setRenameTarget(null);
+          });
+        }} />}
     </div>
   );
 }
