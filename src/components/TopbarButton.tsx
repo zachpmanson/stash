@@ -3,9 +3,11 @@ import { Platform, StyleSheet, Text } from "react-native";
 import { PlatformPressable } from "@react-navigation/elements";
 import { Radius, Spacing } from "../theme";
 
-export default function TopbarButton({ onPress, children }: { onPress: () => void; children: React.ReactNode }) {
+export default function TopbarButton({ onPress, children, accessibilityLabel }: { onPress: () => void; children: React.ReactNode; accessibilityLabel?: string }) {
   return (
     <PlatformPressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       android_ripple={{
         borderless: false,

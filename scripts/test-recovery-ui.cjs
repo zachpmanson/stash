@@ -124,7 +124,7 @@ for (const target of ['folder','folder-item','item']) test(`actual ${target} arc
   } else {
     const tree = h.render('src/screens/FolderScreen.tsx');
     if (target === 'folder-item') nodes(tree).find(n => n.props?.onLongPress).props.onLongPress({id:'id'});
-    else nodes(tree).find(n => n.props?.children?.some(c => c?.props?.name === 'archive')).props.onPress();
+    else nodes(tree).find(n => n.type === '../components/OverflowMenu').props.items.find(item => item.title === 'Archive').onPress();
   }
   await h.pressModal('Archive'); recoveryMessage(h,target === 'folder' ? 'archiveFolder' : 'archiveItem');
 });

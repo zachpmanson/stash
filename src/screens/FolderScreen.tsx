@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, Text, StyleSheet, useWindowDimensions } from "react-native";
+import { FlatList, StyleSheet, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ItemGrid from "src/components/ItemGrid";
 import FolderMap from "src/components/FolderMap";
@@ -11,6 +11,7 @@ import { showModal } from "src/state/modalState";
 import { useScrollTopState } from "src/state/scrollTopState";
 import Screen from "../components/Screen";
 import TopbarButton from "../components/TopbarButton";
+import OverflowMenu from "../components/OverflowMenu";
 import { archiveFolder, getFolderById } from "../db/folders";
 import { archiveItem, getItemsInFolder } from "../db/items";
 import { subscribeStashSyncStatus, type StashSyncStatus } from "../db/syncClient";
@@ -133,25 +134,21 @@ export default function FolderScreen() {
           <TopbarButton onPress={handleEdit}>
             <MaterialIcons name="edit" size={20} color={Colors.text} />
           </TopbarButton>
-          <TopbarButton onPress={handleArchive}>
-            <MaterialIcons name="archive" size={20} color={Colors.text} />
-          </TopbarButton>
+          <OverflowMenu
+            // Only ephemeral menu state resets when its folder/account changes.
+            key={JSON.stringify([folderId, showFeed, sync?.account?.serverUrl, sync?.account?.username])}
+            accessibilityLabel="Folder actions"
+            items={[
+              ...(showFeed ? [{
+                title: "Atom feed",
+                onPress: () => router.push({ pathname: "/folder-feed/[id]", params: { id: folderId } }),
+              }] : []),
+              { title: "Archive", destructive: true, onPress: handleArchive },
+            ]}
+          />
         </>
       }
     >
-      {showFeed && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Atom feed"
-          accessibilityHint="View the read-only feed URL and preview; availability must be confirmed."
-          style={styles.feedLink}
-          onPress={() => router.push({ pathname: "/folder-feed/[id]", params: { id: folderId } })}
-        >
-          <MaterialIcons name="rss-feed" size={20} color={Colors.accent} />
-          <Text style={styles.feedLabel}>Atom feed</Text>
-          <Text style={styles.feedHint}>View URL and preview (read-only)</Text>
-        </Pressable>
-      )}
       {showMap ? (
         <FolderMap items={items} folderName={folderName} />
       ) : (
@@ -179,16 +176,6 @@ export default function FolderScreen() {
 }
 
 const styles = StyleSheet.create({
-  feedLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  feedLabel: { ...Typography.body, color: Colors.accent },
-  feedHint: { ...Typography.caption, color: Colors.textSecondary },
   container: {
     flex: 1,
     backgroundColor: Colors.bg,

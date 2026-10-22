@@ -18,15 +18,16 @@ type Props = {
   items: OverflowMenuItem[];
   icon?: React.ComponentProps<typeof MaterialIcons>["name"];
   anchor?: React.ReactNode;
+  accessibilityLabel?: string;
 };
 
-export default function OverflowMenu({ items, icon = "more-vert", anchor }: Props) {
+export default function OverflowMenu({ items, icon = "more-vert", anchor, accessibilityLabel = "More actions" }: Props) {
   const [visible, setVisible] = useState(false);
   const open = () => setVisible(true);
   const close = () => setVisible(false);
 
   const trigger = anchor ?? (
-    <TopbarButton onPress={open}>
+    <TopbarButton onPress={open} accessibilityLabel={accessibilityLabel}>
       <MaterialIcons name={icon} size={20} color={Colors.text} />
     </TopbarButton>
   );
