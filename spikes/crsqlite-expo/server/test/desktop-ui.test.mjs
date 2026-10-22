@@ -96,6 +96,8 @@ async function fixture(t, initial = "/?folder=f1") {
           state.folders.find((f) => url.endsWith(f.id)),
           data,
         );
+      else if (url === "/api/folders" && options.method === "POST")
+        state.folders.push({ ...data, id: "new", archived_at: null, layout: "list" });
       else if (options.method === "POST")
         state.items.push({
           ...state.items[0],
@@ -159,6 +161,7 @@ async function fixture(t, initial = "/?folder=f1") {
     );
   return {
     state,
+    newTrigger: { isConnected: false },
     renderer,
     buttons,
     button,
@@ -344,7 +347,7 @@ for (const action of ["New folder", "Rename"]) {
   test(`${action} draft guards item-edit transition and editors are mutually exclusive`, async (t) => {
     const h = await fixture(t, "/?folder=f1&item=i1");
     if (action === "Rename") await h.openMenu();
-    await flush(() => h.button(action).props.onClick());
+    await flush(() => h.button(action).props.onClick({ currentTarget: h.newTrigger }));
     await typeFolderDraft(h, "Unsaved folder draft");
     const form = h.renderer.root.findByType(FolderForm);
     await flush(() => h.button("Edit item").props.onClick());
@@ -369,7 +372,7 @@ for (const action of ["New folder", "Rename"]) {
 
 test("new-folder form identity and dirty protection survive remote selected-folder removal", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
-  await flush(() => h.button("New folder").props.onClick());
+  await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
   await typeFolderDraft(h, "Unrelated new folder draft");
   const form = h.renderer.root.findByType(FolderForm);
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
@@ -396,7 +399,7 @@ test("remote folder removal still invalidates its owned rename draft", async (t)
 
 test("Back to collection guards and explicitly closes a discarded folder draft", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
-  await flush(() => h.button("New folder").props.onClick());
+  await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
   await typeFolderDraft(h, "Unsaved folder draft");
   await flush(() => h.button("Back to collection").props.onClick());
   assert.equal(h.state.prompts, 1);
@@ -439,7 +442,7 @@ for (const archived of [false, true]) {
     const cta = empty.findByType("button");
     assert.equal(textOf(cta), archived ? "Back to collection" : "New item");
     if (!archived) {
-      await flush(() => h.button("New folder").props.onClick());
+      await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
       await typeFolderDraft(h, "Keep this draft");
       await flush(() => cta.props.onClick());
       assert.equal(h.state.prompts, 1);
@@ -460,7 +463,7 @@ test("item and folder forms have one primary submit, secondary Cancel and disabl
   for (const [Component, extra, idle, busy] of [
     [ItemEditor, { item: null }, "Save item", "Saving…"],
     [ItemEditor, { item: { title: "Observed", content: "Body", type: "url" } }, "Save item", "Saving…"],
-    [FolderForm, { initialName: null }, "Create folder", "Creating…"],
+    [FolderForm, { initialName: null }, "Create", "Creating…"],
     [FolderForm, { initialName: "Observed" }, "Rename folder", "Saving…"],
   ]) {
     for (const saving of [false, true]) {
@@ -724,11 +727,11 @@ test("context archive rejects dirty item discard and rename Cancel/Escape/backdr
 });
 
 
-test("viewing/invalidating a target feed leaves unrelated folder draft and dirty ownership untouched", async (t) => {
+test("viewing/invalidating a target feed leaves unrelated item draft and dirty ownership untouched", async (t) => {
   const h = await fixture(t);
-  await flush(() => h.button("New folder").props.onClick());
-  await typeFolderDraft(h, "Unrelated folder draft");
-  const form = h.renderer.root.findByType(FolderForm);
+  await flush(() => h.button("New item").props.onClick());
+  await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
+  const form = h.renderer.root.findByType(ItemEditor);
   await h.openMenu("f2");
   await flush(() => h.button("Atom feed").props.onClick());
   assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
@@ -736,7 +739,7 @@ test("viewing/invalidating a target feed leaves unrelated folder draft and dirty
   h.state.folders = h.state.folders.filter(f => f.id !== "f2");
   await flush(() => h.button("Refresh").props.onClick());
   assert.equal(h.renderer.root.findAllByType(FolderFeedDialog).length, 0);
-  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  assert.equal(h.renderer.root.findByType(ItemEditor), form);
   await flush(() => h.button("All items").props.onClick());
   assert.equal(h.state.prompts, 1);
   assert.equal(h.location.search, "?folder=f1");
@@ -792,27 +795,49 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   assert.equal(h.state.prompts, 2);
 });
 
-test("extracted sidebar retains the new-folder input slot across layout and target-owned feed overlays", async (t) => {
+test("App-owned new modal retains form/input across unrelated and selected-folder invalidation", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
-  await flush(() => h.button("New folder").props.onClick());
+  await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
   await typeFolderDraft(h, "Typed folder draft");
   const sidebar = h.renderer.root.findByType(FolderSidebar);
-  const form = sidebar.findByType(FolderForm), input = form.findByType("input");
-  await flush(() => h.button("Grid layout").props.onClick());
-  assert.equal(h.renderer.root.findByType(FolderSidebar), sidebar);
-  assert.equal(sidebar.findByType(FolderForm), form);
-  assert.equal(form.findByType("input"), input);
-  await h.openMenu("f2");
-  await flush(() => h.button("Atom feed").props.onClick());
-  assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
-  assert.equal(form.findByType("input"), input);
-  await flush(() => h.button("Close").props.onClick());
-  h.state.folders = h.state.folders.filter((f) => f.id !== "f1");
-  await flush(() => h.button("Refresh").props.onClick());
+  assert.equal(sidebar.findAllByType(FolderForm).length, 0, "no inline duplicate");
+  const form = h.renderer.root.findByType(FolderForm), input = form.findByType("input");
+  assert.equal(h.renderer.root.findByType("dialog").props["aria-labelledby"], "new-folder-title");
+  for (const id of ["f2", "f1"]) {
+    h.state.folders = h.state.folders.filter((f) => f.id !== id);
+    // Handler-level refresh models timer/focus refresh, not an inert background click.
+    await flush(() => h.button("Refresh").props.onClick());
+    assert.equal(h.renderer.root.findByType(FolderForm), form);
+    assert.equal(form.findByType("input"), input);
+  }
   assert.equal(h.location.search, "");
-  assert.equal(sidebar.findByType(FolderForm), form);
-  assert.equal(form.findByType("input"), input);
-  await flush(() => h.button("Archive").props.onClick());
+  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
   assert.equal(h.state.prompts, 1);
   assert.equal(form.findByType("input"), input);
+});
+
+test("new modal preserves failed draft, blocks duplicate/busy dismiss and selects successful create", async (t) => {
+  const h = await fixture(t, "/?folder=f1&offset=100");
+  await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
+  await typeFolderDraft(h, "Retried folder");
+  const form = h.renderer.root.findByType(FolderForm);
+  let release;
+  h.state.failWrite = true;
+  h.state.writeGate = new Promise(r => { release = r; });
+  const save = form.props.onSave;
+  await flush(() => { save("Retried folder"); save("Retried folder"); });
+  assert.equal(h.state.calls.filter(c => c.method === "POST").length, 1);
+  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  await flush(() => form.props.onCancel());
+  assert.equal(h.state.prompts, 0);
+  assert.equal(h.renderer.root.findByType("dialog").props["aria-busy"], true);
+  await flush(() => release());
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  assert.match(textOf(h.renderer.root.findByType("dialog")), /Synthetic write failed/);
+  assert.equal(h.renderer.root.findAllByProps({ role: "alert" }).length, 1);
+  h.state.failWrite = false;
+  await flush(() => form.props.onSave("Retried folder"));
+  assert.equal(h.renderer.root.findAllByType("dialog").length, 0);
+  assert.equal(h.location.search, "?folder=new");
+  assert.equal(h.state.calls.filter(c => c.method === "POST").length, 2);
 });

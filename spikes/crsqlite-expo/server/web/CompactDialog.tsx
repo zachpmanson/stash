@@ -13,8 +13,13 @@ export function CompactDialog({ title, id, busy = false, returnFocus, onCancel, 
   useEffect(() => {
     dialog.current?.showModal();
     return () => {
-      const target = returnFocus?.isConnected ? returnFocus : document.querySelector<HTMLElement>(".folder-link");
-      target?.focus({ preventScroll: true });
+      // Restore after the closing commit: create may also hide the mobile drawer.
+      window.setTimeout?.(() => {
+        const visible = (node: HTMLElement | null): node is HTMLElement =>
+          !!node?.isConnected && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
+        const target = [returnFocus, ...document.querySelectorAll<HTMLElement>(".sidebar-toggle, .folder-link")].find(visible);
+        target?.focus({ preventScroll: true });
+      }, 0);
     };
   }, []);
   return <dialog ref={dialog} className="folder-dialog" aria-labelledby={id} aria-busy={busy} tabIndex={-1}
@@ -33,7 +38,7 @@ export function CompactDialog({ title, id, busy = false, returnFocus, onCancel, 
       const box = e.currentTarget.getBoundingClientRect();
       if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) onCancel();
     }}>
-    <h2 id={id}>{title}</h2>
-    {children}
+    <header className="dialog-header"><h2 id={id}>{title}</h2></header>
+    <div className="dialog-body">{children}</div>
   </dialog>;
 }

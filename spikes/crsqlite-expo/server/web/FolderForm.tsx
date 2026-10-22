@@ -1,5 +1,6 @@
 import { Button } from "./components/controls.js";
 import React, { useState } from "react";
+import { Spinner } from "./Spinner.js";
 
 /** Freeze the observed name just like the item editor: refresh is not consent to overwrite. */
 export function FolderForm({
@@ -18,7 +19,7 @@ export function FolderForm({
   const [baseline] = useState(initialName);
   return (
     <form
-      className="mt-4"
+      className="dialog-form"
       onChange={(event) =>
         onDirty(
           new FormData(event.currentTarget).get("name") !== (baseline ?? ""),
@@ -33,7 +34,7 @@ export function FolderForm({
       }}
     >
       <label>
-        {baseline === null ? "New folder" : "Folder name"}
+        Folder name
         <input
           autoFocus
           disabled={busy}
@@ -43,14 +44,15 @@ export function FolderForm({
           defaultValue={baseline ?? ""}
         />
       </label>
-      <div className="actions">
-        <Button type="submit" className="primary" disabled={busy}>
+      <div className="dialog-actions">
+        <Button type="submit" className="primary" disabled={busy} aria-live="polite">
+          {busy && <Spinner />}
           {busy
             ? baseline === null
               ? "Creating…"
               : "Saving…"
             : baseline === null
-              ? "Create folder"
+              ? "Create"
               : "Rename folder"}
         </Button>
         <Button type="button" disabled={busy} onClick={onCancel}>

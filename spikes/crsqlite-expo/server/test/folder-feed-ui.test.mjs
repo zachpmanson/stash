@@ -30,11 +30,12 @@ test("actual shared Spinner uses Heroicons with aria-hidden, explicit static idl
 });
 
 test("actual feed dialog is GET-only, ignores late target results, exposes readonly URL and manual copy fallback", async (t) => {
-  const previous = { fetch: globalThis.fetch, document: globalThis.document };
+  const previous = { fetch: globalThis.fetch, document: globalThis.document, window: globalThis.window };
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   const calls = [], pending = new Map();
   globalThis.fetch = (url, options) => { calls.push({ url, ...options }); return new Promise(resolve => pending.set(url, resolve)); };
   globalThis.document = { querySelector: () => null };
+  globalThis.window = { setTimeout() {} };
   let copied = "", failCopy = true, renderer;
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (value) => { if (failCopy) throw new Error("Denied"); copied = value; } } } });
   t.after(async () => {

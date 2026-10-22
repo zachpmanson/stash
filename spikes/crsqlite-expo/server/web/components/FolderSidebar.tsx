@@ -1,6 +1,5 @@
 import React from "react";
 import { FolderNavigation } from "../components.js";
-import { FolderForm } from "../FolderForm.js";
 import { Icon } from "./Icon.js";
 import { Button, IconButton } from "./controls.js";
 
@@ -11,27 +10,20 @@ export function FolderSidebar({
   selected,
   archived,
   busy,
-  creating,
   onClose,
   onMenu,
   onSelect,
-  onToggleNew,
-  formProps,
+  onNew,
 }: {
   sidebarOpen: boolean;
   folders: NavigationProps["folders"];
   selected: string;
   archived: boolean;
   busy: boolean;
-  creating: boolean;
   onClose: () => void;
   onMenu: NavigationProps["onMenu"];
   onSelect: NavigationProps["onSelect"];
-  onToggleNew: () => void;
-  formProps: Pick<
-    React.ComponentProps<typeof FolderForm>,
-    "onDirty" | "onCancel" | "onSave"
-  >;
+  onNew: (trigger: HTMLButtonElement) => void;
 }) {
   return (
     <aside
@@ -56,13 +48,10 @@ export function FolderSidebar({
         onSelect={onSelect}
       />
       {!archived && (
-        <Button className="new-folder" disabled={busy} onClick={onToggleNew}>
+        <Button className="new-folder" disabled={busy} onClick={(event) => onNew(event.currentTarget)}>
           <Icon name="plus" />
           New folder
         </Button>
-      )}
-      {creating && (
-        <FolderForm key="new" initialName={null} busy={busy} {...formProps} />
       )}
     </aside>
   );

@@ -50,6 +50,8 @@ export function App() {
   const [allLayout, setAllLayout] = useLayoutPreference();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [folderAction, setFolderAction] = useState<"new" | null>(null);
+  const newFolderTrigger = useRef<HTMLElement | null>(null);
+  const creatingFolder = useRef(false);
   const [renameTarget, setRenameTarget] = useState<{
     id: string;
     name: string;
@@ -324,12 +326,15 @@ export function App() {
     setDetail(null);
     writeRoute({ ...route, selected: "" });
   }
-  function openFolderForm(next: "new" | null) {
-    if (busy || !discard()) return;
+  function openFolderForm(next: "new" | null, trigger?: HTMLElement) {
+    if (busy || creatingFolder.current || !discard()) return;
+    if (next) newFolderTrigger.current = trigger ?? null;
     dirty.current = false;
+    setError("");
     setEditor(null);
     setRenameTarget(null);
     setMenuTarget(null);
+    setFeedTarget(null);
     setFolderAction(next);
   }
   function changeLayout(next: "list" | "grid") {
@@ -353,6 +358,7 @@ export function App() {
           e.key === "Tab" &&
           sidebarOpen &&
           !renameTarget &&
+          !folderAction &&
           !menuTarget &&
           !feedTarget
         ) {
@@ -424,7 +430,7 @@ export function App() {
           </Button>
         )}
       </div>
-      {error && !renameTarget && (
+      {error && !renameTarget && !folderAction && (
         <div role="alert" className="error px-4">
           {error}{" "}
           <Button disabled={loading || busy} onClick={() => void refresh()}>
@@ -449,7 +455,6 @@ export function App() {
           selected={folderId}
           archived={archived}
           busy={busy}
-          creating={folderAction === "new"}
           onClose={() => {
             setSidebarOpen(false);
             folderButton.current?.focus();
@@ -465,34 +470,7 @@ export function App() {
             });
           }}
           onSelect={(id) => navigate({ folderId: id, offset: 0, selected: "" })}
-          onToggleNew={() =>
-            openFolderForm(folderAction === "new" ? null : "new")
-          }
-          formProps={{
-            onDirty: (value) => {
-              dirty.current = value;
-            },
-            onCancel: () => openFolderForm(null),
-            onSave: (name) => {
-              if (busy || name === null) return;
-              void mutate(
-                () => request<{ id: string }>("/folders", "POST", { name }),
-                (result) => {
-                  dirty.current = false;
-                  setFolderAction(null);
-                  setSidebarOpen(false);
-                  setEditor(null);
-                  setDetail(null);
-                  writeRoute({
-                    ...route,
-                    folderId: result.id,
-                    selected: "",
-                    offset: 0,
-                  });
-                },
-              );
-            },
-          }}
+          onNew={(trigger) => openFolderForm("new", trigger)}
         />
         <ItemCollection
           folderName={activeFolder?.name}
@@ -613,6 +591,32 @@ export function App() {
           }}
         />
       </div>
+      {folderAction === "new" && (
+        <FolderDialog
+          key="new"
+          name={null}
+          busy={busy}
+          error={error}
+          returnFocus={newFolderTrigger.current}
+          onCancel={() => openFolderForm(null)}
+          onDirty={(value) => { dirty.current = value; }}
+          onSave={(name) => {
+            if (busy || creatingFolder.current || name === null) return;
+            creatingFolder.current = true;
+            void mutate(
+              () => request<{ id: string }>("/folders", "POST", { name }),
+              (result) => {
+                dirty.current = false;
+                setFolderAction(null);
+                setSidebarOpen(false);
+                setEditor(null);
+                setDetail(null);
+                writeRoute({ ...route, folderId: result.id, selected: "", offset: 0 });
+              },
+            ).finally(() => { creatingFolder.current = false; });
+          }}
+        />
+      )}
       {menuTarget && menuFolder && (
         <FolderMenu
           target={menuTarget}
