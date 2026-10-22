@@ -124,8 +124,8 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   assert.equal((await json("/folders")).find(f => f.id === target).name, "Target shelf");
   assert.equal(await evaluate(`location.search`), route);
   await waitFor(() => evaluate(`!!document.querySelector(${JSON.stringify(fallback)})`));
-  // HTTP response fixtures isolate the new always-on capability while this branch
-  // deliberately retains the old backend. No enable/disable PUT is introduced.
+  // HTTP response fixtures exercise capability and late-result failures against
+  // either backend policy. The dialog itself never sends an enable/disable PUT.
   const oldRead = await json(`/folders/${target}/feed`);
   await evaluate(`window.fixtureFeedReply=${JSON.stringify({ ...oldRead, policy: "always-on", enabled: true })};window.fixtureFeedFetch=window.fetch;window.fixtureFeedReads=0;window.fetch=async (...a)=>{if(a[0]===${JSON.stringify(`/api/folders/${target}/feed`)}){if(a[1]?.method!=='GET')throw Error('Feed UI must be read-only');window.fixtureFeedReads++;if(window.fixtureHoldFeed)await new Promise(r=>window.fixtureReleaseFeed=r);return Response.json(window.fixtureFeedReply)}return window.fixtureFeedFetch(...a)}`);
   const openFeed = async () => { await openMenu(); await click("Atom feed"); await waitFor(() => evaluate(`!!document.querySelector('dialog[open]')`)); };
@@ -148,7 +148,7 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   await confirm(() => click("Cancel"), true);
   await waitFor(() => evaluate(`!document.querySelector('textarea')`));
   // Wrong-target/credential-bearing/capability-less results never become links.
-  for (const reply of [{ ...oldRead, policy: "always-on", enabled: true, url: 'https://user:secret@feeds.example/feeds/folders/other.atom' }, { ...oldRead, enabled: true }]) {
+  for (const reply of [{ ...oldRead, policy: "always-on", enabled: true, url: 'https://user:secret@feeds.example/feeds/folders/other.atom' }, { ...oldRead, enabled: true, policy: undefined }]) {
     await evaluate(`window.fixtureFeedReply=${JSON.stringify(reply)}`);
     await openFeed();
     await waitFor(() => evaluate(`!!document.querySelector('dialog [role=alert]')`));
