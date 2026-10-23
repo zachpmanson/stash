@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { fork } from "node:child_process";
 import type Database from "better-sqlite3";
+import { PngPolicyError, requireStillPng } from "./media-png.js";
 
 export const MEDIA_MAX_BYTES = 20 * 1024 * 1024;
 export const MEDIA_MAX_PIXELS = 24_000_000;
@@ -177,8 +178,15 @@ export async function mediaFile(root: string, value: Manifest, kind: "original" 
   const digest = value[`${kind}_sha`];
   const filename = blobPath(root, digest);
   const info = await stat(filename);
-  await verifyBlob(filename, digest);
   if (!info.isFile() || (kind === "original" && info.size !== value.size))
     throw new MediaError(503, "Private image unavailable; recovery required");
+  await verifyBlob(filename, digest);
+  if (kind === "original" && value.mime === "image/png") {
+    try { await requireStillPng(filename); }
+    catch (error) {
+      if (error instanceof PngPolicyError) throw new MediaError(415, "Unsupported or animated PNG original; retained bytes were not changed");
+      throw error;
+    }
+  }
   return { filename, digest, size: info.size, mime: kind === "original" ? value.mime : "image/jpeg" };
 }

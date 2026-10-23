@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, readdir, stat, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, stat, mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -11,7 +11,8 @@ import sharp from "sharp";
 import Database from "better-sqlite3";
 import { extensionPath } from "@vlcn.io/crsqlite";
 import { launch, waitFor } from "./web-helpers.mjs";
-import { receiveImage, manifest, blobPath, MEDIA_MAX_BYTES } from "../src/media-store.ts";
+import { syntheticPng } from "./png-fixtures.mjs";
+import { receiveImage, manifest, commitManifest, blobPath, MEDIA_MAX_BYTES } from "../src/media-store.ts";
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const image = color => sharp({ create: { width: 40, height: 30, channels: 3, background: color } }).png().toBuffer();
 const headers = bytes => ({ "X-Auth-User": "web-test-owner", "X-Stash-Request": "1",
@@ -86,6 +87,35 @@ test("binary routes retain auth/CSRF bounds and reject invalid, unsupported, ove
   assert.equal((await json("/items")).items.length, 0, "retry cannot resurrect deletion");
   for (const route of ["/items/%2e%2e%2fsecret/original", "/items/%2fetc%2fpasswd/original", "/uploads/%2e%2e%2fsecret"])
     assert.ok([400, 404].includes((await upload(base, route, bytes)).status));
+});
+
+test("APNG animation hidden by decoder metadata and excessive PNG chunks fail without a manifest or item", async t => {
+  const { base, json, tmp } = await launch(t);
+  for (const options of [{ animation: true }, { excessiveChunks: true }]) {
+    const bytes = await syntheticPng(options); const id = randomUUID();
+    if (options.animation) assert.equal((await sharp(bytes).metadata()).format, 'png');
+    assert.equal((await upload(base, `/uploads/${id}`, bytes)).status, 415);
+    assert.equal(mutate(tmp, db => manifest(db, id)), undefined);
+  }
+  assert.equal((await json('/items')).items.length, 0);
+  assert.deepEqual(await readdir(path.join(tmp, 'media', 'temporary')), []);
+  // Simulate a pre-guard manifest without uploading/inspecting any real data.
+  // A retained original cannot bypass policy via a previously accepted mapping.
+  const original = await syntheticPng({ animation: true });
+  const preview = await sharp({ create: { width: 1, height: 1, channels: 3, background: 'red' } }).jpeg().toBuffer();
+  for (const bytes of [original, preview]) {
+    const file = blobPath(path.join(tmp, 'media'), digest(bytes));
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 }); await writeFile(file, bytes, { mode: 0o600 });
+  }
+  mutate(tmp, db => {
+    db.prepare("INSERT INTO sync_items(id,type,media_id) VALUES ('retained-animation','image','retained-animation')").run();
+    commitManifest(db, { media_id: 'retained-animation', original_sha: digest(original), preview_sha: digest(preview), thumbnail_sha: digest(preview), size: original.length, mime: 'image/png', width: 1, height: 1 });
+  });
+  const denied = await fetch(base + '/api/media/items/retained-animation/original', { headers: headers(original) });
+  assert.equal(denied.status, 415);
+  assert.match((await denied.json()).error, /retained bytes were not changed/);
+  assert.deepEqual(await readFile(blobPath(path.join(tmp, 'media'), digest(original))), original);
+  assert.equal((await fetch(base + '/api/media/items/retained-animation/preview', { headers: headers(original) })).status, 200);
 });
 
 test("native metadata-first ordering, interrupted uploads, delete-during-transfer and old-client writes never change identity or resurrect items", async t => {
