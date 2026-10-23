@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { requireStillPng } from "./media-png.js";
 import { MEDIA_MAX_EDGE, MEDIA_MAX_PIXELS } from "./media-store.js";
 
 sharp.cache(false);
@@ -7,6 +8,7 @@ const [input, preview, thumbnail] = process.argv.slice(2);
 try {
   const options = { limitInputPixels: MEDIA_MAX_PIXELS, failOn: "warning" as const, sequentialRead: true };
   const meta = await sharp(input, options).metadata();
+  if (meta.format === "png") await requireStillPng(input);
   const mime = ({ jpeg: "image/jpeg", png: "image/png", webp: "image/webp" } as Record<string, string>)[meta.format ?? ""];
   if (!mime || !meta.width || !meta.height || meta.width > MEDIA_MAX_EDGE || meta.height > MEDIA_MAX_EDGE ||
     meta.width * meta.height > MEDIA_MAX_PIXELS || (meta.pages ?? 1) !== 1)
