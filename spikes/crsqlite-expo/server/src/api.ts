@@ -7,6 +7,7 @@ import { DATABASE_ROOM, SCHEMA_NAME } from "../schema.js";
 import type { WebItem, WebFolder } from "./contracts.js";
 import { FeedError, feedSettings, renderFeed } from "./feeds.js";
 import { manifest } from "./media-store.js";
+import { folderIcon } from "./folder-icon.js";
 
 class ApiError extends Error {
   constructor(
@@ -212,12 +213,13 @@ export function installApi(
   }
   route("get", "/folders", false, (db, req) => {
     if (Object.keys(req.query).length) fail();
-    return db
+    const folders = db
       .prepare(
-        `SELECT f.id, f.name, COALESCE(f.icon, '📁') AS icon, f.created_at, f.archived_at, f.layout
+        `SELECT f.id, f.name, f.icon, f.created_at, f.archived_at, f.layout
       FROM sync_folders f WHERE ${visibleFolder} ORDER BY f.created_at DESC, f.id`,
       )
-      .all() as WebFolder[];
+      .all() as (Omit<WebFolder, "icon"> & { icon: string | null })[];
+    return folders.map((folder): WebFolder => ({ ...folder, icon: folderIcon(folder) }));
   });
   route("get", "/items", false, (db, req) => {
     if (

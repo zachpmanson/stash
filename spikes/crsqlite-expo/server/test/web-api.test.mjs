@@ -347,6 +347,22 @@ test(
     }));
     await upload();
     assert.equal((await json('/folders')).find(f => f.id === folderId).layout, "list");
+    // Actual native folder mirror -> wire replica -> API, including later icon
+    // metadata changes and unrelated web writes back to the native projection.
+    for (const icon of ["🧑🏽‍💻", "🏳️‍🌈👨‍👩‍👧‍👦"]) {
+      await app.withAppDbMutation(async db => db.withTransactionAsync(async () => {
+        await db.runAsync("UPDATE folders SET icon=? WHERE id=?", icon, folderId);
+        await replica.mirrorLocalFolderOwned(db, folderId);
+      }));
+      await upload();
+      assert.equal((await json('/folders')).find(f => f.id === folderId).icon, icon);
+      await json(`/folders/${folderId}`, 'PATCH', { name: `Icon preserved ${icon}`, archived: true });
+      assert.equal((await json('/folders')).find(f => f.id === folderId).icon, icon);
+      await project(async db => (await db.getFirstAsync("SELECT archived_at FROM sync_folders WHERE id=?", folderId))?.archived_at !== null);
+      assert.equal(await app.withAppDb(async db => (await db.getFirstAsync("SELECT icon FROM folders WHERE id=?", folderId)).icon), icon);
+      await json(`/folders/${folderId}`, 'PATCH', { archived: false });
+      await project(async db => (await db.getFirstAsync("SELECT archived_at FROM sync_folders WHERE id=?", folderId))?.archived_at === null);
+    }
     const { id: initiallyFiled } = await json('/items', 'POST', { type: 'text', content: 'Atomic initial membership', folderId });
     await project(async db => !!await db.getFirstAsync("SELECT 1 FROM sync_item_folders WHERE item_id=? AND folder_id=?", initiallyFiled, folderId));
     assert.deepEqual(Array.from((await items.getItemById(initiallyFiled)).folder_ids), [folderId]);

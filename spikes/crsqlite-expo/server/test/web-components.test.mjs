@@ -5,7 +5,7 @@ import { act, create } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Button, IconButton } from "../web/components/controls.tsx";
 import { Icon } from "../web/components/Icon.tsx";
-import { Icon as LegacyIcon } from "../web/components.tsx";
+import { Icon as LegacyIcon, FolderNavigation } from "../web/components.tsx";
 import { AppHeader } from "../web/components/AppHeader.tsx";
 import { ItemToolbar } from "../web/components/ItemToolbar.tsx";
 import { readRoute, routeUrl } from "../web/App.tsx";
@@ -279,3 +279,51 @@ for (const initial of ["grid", "unexpected", "throws"])
     assert.equal(preference[0], "grid");
     assert.deepEqual(writes, [["stash.all.layout", "grid"]]);
   });
+
+test("folder navigation renders complete decorative saved text while retaining names, selection, archives and context controls", async t => {
+  const folders = [
+    { id: "custom", name: "Custom shelf", icon: "🧑🏽‍💻🏳️‍🌈", archived_at: null },
+    { id: "html", name: "Safe shelf", icon: "<img src=x onerror=alert(1)>", archived_at: null },
+    { id: "archived", name: "Old shelf", icon: "👨‍👩‍👧‍👦✉️", archived_at: 1 },
+  ];
+  const selections = [], menus = [];
+  const props = { folders, selected: "custom", archived: false, onSelect: id => selections.push(id), onMenu: (...args) => menus.push(args) };
+  const renderer = await mount(t, React.createElement(FolderNavigation, props));
+  assert.deepEqual(renderer.root.findAllByProps({ className: "folder-emoji" }).map(n => n.children.join("")), folders.slice(0, 2).map(f => f.icon));
+  await flush(() => renderer.update(React.createElement(FolderNavigation, { ...props, archived: true })));
+  const icons = renderer.root.findAllByProps({ className: "folder-emoji" });
+  assert.deepEqual(icons.map(n => n.children.join("")), folders.map(f => f.icon));
+  assert.ok(icons.every(n => n.props["aria-hidden"] === "true"));
+  assert.equal(renderer.root.findAllByType("img").length, 0);
+  const buttons = renderer.root.findAllByType("button");
+  assert.equal(buttons[0].findAllByType("svg").length, 1, "All items stays a Heroicon");
+  for (const f of folders) {
+    const link = buttons.find(b => b.props.title === f.name);
+    assert.equal(link.props["aria-current"], f.id === "custom" ? "page" : undefined);
+    assert.equal(link.findAllByType("svg").length, 0);
+    assert.equal(link.findByProps({ className: "truncate" }).children.join(""), f.name);
+    await flush(() => link.props.onClick());
+    const control = buttons.find(b => b.props["aria-label"] === `Actions for ${f.name}`);
+    assert.equal(control.props["aria-haspopup"], "menu");
+    assert.equal(control.findAllByType("svg").length, 1);
+    const trigger = { focus() {} };
+    control.props.onClick({ currentTarget: trigger });
+    assert.deepEqual(menus.at(-1), [f.id, trigger]);
+    const row = renderer.root.findAllByProps({ className: "folder-row" }).find(r => r.findAllByType("button")[0] === link);
+    let prevented = 0;
+    row.props.onContextMenu({ preventDefault() { prevented++; }, currentTarget: { querySelector: () => trigger }, clientX: 12, clientY: 34 });
+    assert.deepEqual(menus.at(-1), [f.id, trigger, { x: 12, y: 34 }]);
+    for (const event of [{ key: "ContextMenu" }, { key: "F10", shiftKey: true }]) {
+      row.props.onKeyDown({ ...event, preventDefault() { prevented++; }, target: trigger });
+      assert.deepEqual(menus.at(-1), [f.id, trigger]);
+    }
+    assert.equal(prevented, 3);
+  }
+  assert.deepEqual(selections, folders.map(f => f.id));
+  assert.equal(buttons.find(b => b.props.title === "Old shelf").findByProps({ className: "sr-only" }).children.join(""), " (archived)");
+  const markup = renderToStaticMarkup(React.createElement(FolderNavigation, { ...props, archived: true }));
+  assert.match(markup, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(markup, /<img/);
+  await flush(() => renderer.update(React.createElement(FolderNavigation, { ...props, busy: true })));
+  assert.ok(renderer.root.findAllByType("button").filter(b => b.props["aria-haspopup"] === "menu").every(b => b.props.disabled));
+});
