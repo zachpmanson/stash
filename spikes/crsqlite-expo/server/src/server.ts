@@ -171,14 +171,14 @@ installFeedRoutes(app, dbCache, AUTH_USER, FEED_BASE);
 // node_modules, data directory, dotfiles or an SPA fallback for unknown APIs.
 const builtPublic = fileURLToPath(new URL("../public/", import.meta.url));
 const publicDir = existsSync(builtPublic) ? builtPublic : fileURLToPath(new URL("../dist/public/", import.meta.url));
-for (const [route, file] of [["/", "index.html"], ["/assets/app.js", "app.js"], ["/assets/app.css", "app.css"]]) {
+for (const [route, file] of [["/", "index.html"], ["/assets/app.js", "app.js"], ["/assets/app.css", "app.css"], ["/assets/favicon.svg", "favicon.svg"]]) {
   app.get(route, async (c) => {
     if (c.req.header("X-Auth-User") !== AUTH_USER) return c.json({ error: "Unauthorized" }, 401);
     const headers = {
       "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
       "Referrer-Policy": "no-referrer",
-      "Content-Type": file.endsWith(".js") ? "text/javascript; charset=utf-8" : file.endsWith(".css") ? "text/css; charset=utf-8" : "text/html; charset=utf-8",
+      "Content-Type": file.endsWith(".svg") ? "image/svg+xml" : file.endsWith(".js") ? "text/javascript; charset=utf-8" : file.endsWith(".css") ? "text/css; charset=utf-8" : "text/html; charset=utf-8",
     };
     try { return c.body(new Uint8Array(await readFile(path.join(publicDir, file))), 200, headers); }
     catch { return c.notFound(); }

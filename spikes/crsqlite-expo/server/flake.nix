@@ -68,6 +68,7 @@
               (pkgs.python3.withPackages (ps: [ ps.feedparser ]))
               pkgs.caddy
               pkgs.chromium
+              pkgs.xvfb-run # headed Chromium favicon/tab-strip fixture without a physical display
               pkgs.unzip
             ];
           };

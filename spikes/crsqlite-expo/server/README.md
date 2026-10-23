@@ -85,6 +85,8 @@ The server uses Node 24, `@vlcn.io/ws-server@0.2.3`, `@vlcn.io/ws-common@0.2.0`,
 
 ## Online frontend development
 
+The only favicon is `/assets/favicon.svg` (`image/svg+xml`, same authentication/no-cache/nosniff policy as the other allowlisted assets). Its white circle has transparent outer corners; the five rounded black strokes trace `assets/icon.png` exactly, translated by (-80,-95) into a 500×500 viewBox to remove launcher padding. `ic_launcher.zip` contains no vector source. Native assets/configuration are unchanged; no raster favicon fallback or embedded raster is shipped. The existing same-origin image CSP (needed for private media) also permits the favicon without further relaxation.
+
 All web source is under this standalone flake's input (`web/`); esbuild bundles React/TS into `dist/public/app.js`; pinned **Tailwind v4.1.18** compiles the single `web/style.css` entry into `dist/public/app.css`. CSS is not imported into esbuild: there is exactly one CSS output pipeline, no CDN, runtime engine or Vite server. `pnpm build` preserves **`dist/src/server.js`** as the package entrypoint. The Nix derivation builds the frontend and CRSQLite/native addon using Node 24, pinned Node headers, the lockfile and `fetchPnpmDeps` hash. Do not run these native addons in the root app's potentially Node 22 devshell. `pnpm build` must precede `pnpm dev`/`pnpm start` so the assets exist. Rebuild after web-source edits; `pnpm dev` watches the service TS only.
 
 Use **fresh disposable directories**, never the Naboo paths:
@@ -158,13 +160,16 @@ No staging target is defined. This source/build does **not** authorize deploying
 Optional real-browser smoke (provide installed Chromium/Caddy binaries; uses only fresh disposable loopback services/profiles/synthetic credentials and blocks external browser traffic):
 
 ```sh
-CADDY_BIN=/path/to/caddy CHROMIUM_BIN=/path/to/chromium \
-  STASH_TEST_SERVER_ENTRY="$package/dist/src/server.js" \
+STASH_PACKAGE="$package" nix develop --cores 2 --max-jobs 1 --command bash -c '
+  CADDY_BIN=$(command -v caddy) CHROMIUM_BIN=$(command -v chromium) \
+  STASH_BROWSER_HEADED=1 STASH_TEST_SERVER_ENTRY="$STASH_PACKAGE/dist/src/server.js" \
   STASH_SCREENSHOT_DIR=/tmp/stash-synthetic-screenshots \
-  nix develop --cores 2 --max-jobs 1 --command node test/browser-smoke.mjs
+  xvfb-run -a node test/browser-smoke.mjs'
+# Set/export STASH_PACKAGE to the package built above, or omit STASH_TEST_SERVER_ENTRY
+# to exercise source. Without STASH_BROWSER_HEADED=1, Chromium runs headless.
 ```
 
-This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, exercises real dirty-draft confirmation dialogs, creates a folder and atomically files an item, checks exact two-column CSS/layout persistence/scroll retention/selection/history/archive/Undo, keyboard focus return, narrow drawers and a 200%-zoom-equivalent layout. Optional screenshots contain synthetic examples only. It additionally verifies both folder-draft regressions with real input values/DOM identity/confirmation dialogs, and combined desktop atomic filing/layout with private Atom feeds behind cached Basic authentication. It also verifies same-origin replication and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
+This loads the actual static bundle through Basic auth, creates/edits an item without overwriting a concurrent untouched field, exercises real dirty-draft confirmation dialogs, creates a folder and atomically files an item, checks exact two-column CSS/layout persistence/scroll retention/selection/history/archive/Undo, keyboard focus return, narrow drawers and a 200%-zoom-equivalent layout. Optional screenshots contain synthetic examples only. The headed Xvfb run additionally requires Chromium's automatic favicon request (headless has no tab favicon loader); canvas pixels in both modes verify the SVG MIME, CSP, transparent corners, white circle and black mark at 16/32/48px. `STASH_FAVICON_PREVIEW` selects its synthetic light/dark contact-sheet PNG (default `/tmp/stash-favicon-preview.png`); these are chrome-colour swatches, not a headless-browser tab strip or owner acceptance. It additionally verifies both folder-draft regressions with real input values/DOM identity/confirmation dialogs, and combined desktop atomic filing/layout with private Atom feeds behind cached Basic authentication. It also verifies same-origin replication and asserts an attacker-origin WebSocket cannot reuse cached Basic credentials or receive private frames. It is separate from the component suite and is not exhaustive accessibility/device/production-TLS acceptance.
 
 The test script sets `NODE_PATH=./node_modules` so the immutable native harness resolves the server's TypeScript without installing the root app dependency tree. To additionally run its existing restore regressions from this server directory:
 
