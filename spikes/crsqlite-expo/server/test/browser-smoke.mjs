@@ -208,6 +208,11 @@ try {
         ),
       ),
   );
+  // Let the first page's asynchronous tab-icon load complete before replacing
+  // the document; immediate same-URL navigation can cancel Chrome's icon task.
+  if (process.env.STASH_BROWSER_HEADED === "1") {
+    await waitFor(() => faviconResponses.some(r => new URL(r.url).pathname === "/assets/favicon.svg" && r.status === 200));
+  }
   await cdp(
     "Page.navigate",
     { url: `http://127.0.0.1:${proxyPort}/` },

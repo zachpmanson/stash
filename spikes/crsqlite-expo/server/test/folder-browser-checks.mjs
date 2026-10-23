@@ -77,6 +77,8 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   assert.equal(await evaluate(`document.querySelector('dialog input').value`), "Unsaved target");
   await confirm(() => cdp("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, x: 5, y: 5 }).then(() => cdp("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, x: 5, y: 5 })), true);
   await modalClosed();
+  // CompactDialog intentionally restores focus in a post-commit timer.
+  await waitFor(() => evaluate(`document.activeElement.getAttribute('aria-label')==='Actions for Target shelf'`));
   assert.equal(await evaluate(`document.activeElement.getAttribute('aria-label')`), "Actions for Target shelf");
   assert.equal(await evaluate(`location.search`), route);
   // Frozen baseline/no-op must not overwrite a remote rename or send a PATCH.
