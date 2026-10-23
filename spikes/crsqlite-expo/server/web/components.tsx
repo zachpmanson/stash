@@ -36,7 +36,7 @@ export function FolderNavigation({
           }}>
           <Button className="folder-link" aria-current={selected === f.id ? "page" : undefined}
             onClick={() => onSelect(f.id)} title={f.name}>
-            <Icon name="folder" />
+            <span className="folder-emoji" aria-hidden="true">{f.icon}</span>
             <span className="truncate">{f.name}</span>
             {f.archived_at !== null && <span className="sr-only"> (archived)</span>}
           </Button>

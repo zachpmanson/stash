@@ -6,6 +6,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
 import { folderInteractions } from "./folder-browser-checks.mjs";
+import { folderEmojiChecks } from "./folder-emoji-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
 import { refactorComposition } from "./refactor-browser-checks.mjs";
 import { modalConsistency } from "./modal-browser-checks.mjs";
@@ -574,7 +575,7 @@ try {
   );
   assert.ok(
     await evaluate(
-      `[...document.querySelectorAll('.folder-link')].some(b=>b.textContent==='Synthetic reading shelf')`,
+      `[...document.querySelectorAll('.folder-link')].some(b=>b.title==='Synthetic reading shelf' && b.querySelector('.truncate')?.textContent==='Synthetic reading shelf')`,
     ),
   );
   await waitFor(() => evaluate(`!!document.querySelector('.empty button')`));
@@ -928,6 +929,10 @@ try {
   await waitFor(() => evaluate(`document.querySelector('.reader').textContent.includes('Media unavailable on the web')`));
   assert.equal(await evaluate(`document.querySelectorAll('.reader img, .reader video').length`), 0);
   console.log('PASS 320px long heading/card/URL overflow, unsafe replicated Link label without anchor/hint, and honest device-only media');
+  if (process.env.STASH_DENSITY_REFERENCE !== "1") await folderEmojiChecks({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`, removeFixture,
+  });
   if (process.env.STASH_DENSITY_REFERENCE !== "1") await folderInteractions({
     evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
     base: `http://127.0.0.1:${proxyPort}`, removeFixture,

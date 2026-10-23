@@ -91,3 +91,15 @@ for (const editor of ['edit', 'new']) test(`removed folder clears invalid edit b
   assert.equal(h.renderer.root.findAllByType(ItemEditor).length, editor === 'new' ? 1 : 0);
   assert.equal(h.state.calls.filter(call => call.method !== 'GET').length, 0);
 });
+
+test('App refresh updates replicated folder icons without writes or losing selection', async t => {
+  const h = await fixture(t);
+  const link = () => h.renderer.root.findAllByType('button').find(n => n.props.title === 'Reading');
+  await flush(() => link().props.onClick());
+  assert.equal(link().props['aria-current'], 'page');
+  h.state.folders[0] = { ...h.state.folders[0], icon: '🧑🏽‍💻🏳️‍🌈' };
+  await flush(() => h.button('Refresh').props.onClick());
+  assert.equal(link().findByProps({ className: 'folder-emoji' }).children.join(''), '🧑🏽‍💻🏳️‍🌈');
+  assert.equal(link().props['aria-current'], 'page');
+  assert.equal(h.state.calls.filter(call => call.method !== 'GET').length, 0);
+});
