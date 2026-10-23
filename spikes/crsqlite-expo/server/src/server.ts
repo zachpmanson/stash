@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { installApi } from "./api.js";
+import { installMediaRoutes } from "./media-routes.js";
+import { initializeMedia, initializeMediaDirectory } from "./media-store.js";
 import { canonicalFeedBase, initializeFeeds } from "./feeds.js";
 import { installFeedRoutes } from "./feed-routes.js";
 import Database from "better-sqlite3";
@@ -159,6 +161,9 @@ for (const listener of process.listeners("SIGINT")) {
   if (!signalListenersBeforeAttach.has(listener)) process.removeListener("SIGINT", listener);
 }
 
+const mediaRoot = path.join(DATA_DIR, "media");
+await initializeMediaDirectory(mediaRoot);
+installMediaRoutes(app, dbCache, AUTH_USER, mediaRoot, () => fsnotify.notifyChanges(DATABASE_ROOM));
 installApi(app, dbCache, AUTH_USER, () => fsnotify.notifyChanges(DATABASE_ROOM), FEED_BASE);
 installFeedRoutes(app, dbCache, AUTH_USER, FEED_BASE);
 
@@ -171,7 +176,7 @@ for (const [route, file] of [["/", "index.html"], ["/assets/app.js", "app.js"], 
     if (c.req.header("X-Auth-User") !== AUTH_USER) return c.json({ error: "Unauthorized" }, 401);
     const headers = {
       "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
       "Referrer-Policy": "no-referrer",
       "Content-Type": file.endsWith(".js") ? "text/javascript; charset=utf-8" : file.endsWith(".css") ? "text/css; charset=utf-8" : "text/html; charset=utf-8",
     };
@@ -214,6 +219,9 @@ await dbCache.use(DATABASE_ROOM, SCHEMA_NAME, async (peer) => {
   }
   const db = peer.getDB();
   initializeFeeds(db);
+  // Manifest commits must survive power loss after durable CAS publication.
+  db.pragma("synchronous = FULL");
+  initializeMedia(db);
   const integrity = db.pragma("integrity_check", { simple: true });
   if (integrity !== "ok") throw new Error(`SQLite integrity check failed: ${String(integrity)}`);
   const tables = db.prepare(`SELECT name FROM sqlite_master

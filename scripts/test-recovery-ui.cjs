@@ -35,6 +35,7 @@ function harness({ dev = true, optIn = false, platform = 'android', effects = fa
     'src/state/modalState': modal, '../state/modalState': modal,
     '../db/items': db, '../db/folders': db, '../db/textSubstitutions': db,
     '../db/database': {}, '../db/syncReplica': {}, '../db/syncClient': {}, '../db/syncLogin': {}, '../db/syncReplicaSmoke': {},
+    '../db/mediaQueue': { retryStashImages: async () => {} },
     '../utils/backup': {}, '../utils/randomId': { randomId: () => 'id' },
     '../state/settingsState': { useSettingsStore: selector => selector({ auRecipe: false }) },
     '../state/voiceState': { useVoiceStore: selector => selector({ voices: [] }) },

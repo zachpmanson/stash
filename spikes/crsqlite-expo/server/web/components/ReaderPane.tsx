@@ -69,7 +69,7 @@ export function ReaderPane({
               ? "Saved link"
               : detail.type === "text"
                 ? "Note"
-                : "On your device"}
+                : detail.image ? "Saved image" : "On your device"}
           </p>
           <ItemReader
             item={detail}

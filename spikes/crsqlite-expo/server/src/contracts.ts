@@ -18,6 +18,8 @@ export type WebItem = {
   archived_at: number | null;
   folderIds: string[];
   mediaUnavailable: boolean;
+  /** Item-scoped, same-origin authenticated derivatives only; never disk paths. */
+  image?: { state: "pending" } | { state: "available"; previewUrl: string; thumbnailUrl: string };
   /** Bounded plaintext preview; list responses never include full content. */
   excerpt?: string | null;
   domain?: string | null;

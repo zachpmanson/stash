@@ -512,6 +512,13 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
         "SELECT uri, thumbnail_path FROM items WHERE id = ?",
         item.id!,
       );
+      if (item.type === "image" && item.media_id === item.id) {
+        const mapping = await db.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_media_local_v1') AS present");
+        if (mapping?.present) {
+          const downloaded = await db.getFirstAsync<{ uri: string }>("SELECT uri FROM stash_media_local_v1 WHERE item_id=?", item.id!);
+          if (downloaded) previous = { uri: downloaded.uri, thumbnail_path: null };
+        }
+      }
       if (!previous && (item.type === "image" || item.type === "file")) {
         const resources = await db.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_restore_media') AS present");
         if (resources?.present) previous = await db.getFirstAsync<{ uri: string; thumbnail_path: string | null }>("SELECT uri, thumbnail_path FROM stash_restore_media WHERE id = ?", item.id!);
@@ -531,6 +538,7 @@ export async function projectSyncReplicaToLocalOwned(db: SQLite.SQLiteDatabase):
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            type=excluded.type, uri=excluded.uri, title=excluded.title,
+           thumbnail_path=excluded.thumbnail_path,
            description=excluded.description, favicon_url=excluded.favicon_url,
            mime_type=excluded.mime_type, created_at=excluded.created_at,
            archived_at=excluded.archived_at, article_text=excluded.article_text,
