@@ -10,6 +10,7 @@ import { desktopDensity } from "./compact-browser-checks.mjs";
 import { refactorComposition } from "./refactor-browser-checks.mjs";
 import { modalConsistency } from "./modal-browser-checks.mjs";
 import { mediaInteractions } from "./media-browser-checks.mjs";
+import { faviconChecks } from "./favicon-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
 // STASH_TEST_SERVER_ENTRY optionally selects the exact built service package.
@@ -89,9 +90,10 @@ try {
   chrome = spawn(
     chromeBin,
     [
-      "--headless",
+      ...(process.env.STASH_BROWSER_HEADED === "1" ? [] : ["--headless"]),
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      "--force-device-scale-factor=1", // Keep Xvfb and headless CSS-pixel geometry identical.
       "--remote-debugging-pipe",
       `--user-data-dir=${dir}/profile`,
       "--no-first-run",
@@ -120,6 +122,7 @@ try {
       await once(chrome, "exit");
     }
   });
+  const faviconResponses = [], browserLogs = [];
   let dialog = null,
     next = 0,
     buf = "",
@@ -134,6 +137,8 @@ try {
       if (!frame) continue;
       const msg = JSON.parse(frame);
       if (msg.method === "Page.javascriptDialogOpening") dialog = msg.params;
+      if (msg.method === "Network.responseReceived") faviconResponses.push(msg.params.response);
+      if (msg.method === "Log.entryAdded") browserLogs.push(msg.params.entry);
       if (msg.id && pending.has(msg.id)) {
         const [resolve, reject, timer] = pending.get(msg.id);
         pending.delete(msg.id);
@@ -168,6 +173,8 @@ try {
     flatten: true,
   });
   await cdp("Page.enable", {}, sessionId);
+  await cdp("Network.enable", {}, sessionId);
+  await cdp("Log.enable", {}, sessionId);
   const evaluate = async (expression) => {
     const r = await cdp(
       "Runtime.evaluate",
@@ -219,6 +226,7 @@ try {
   console.log(
     "PASS real Chromium + real Caddy synthetic Basic login and authenticated API GET",
   );
+  await faviconChecks({ evaluate, cdp, sessionId, responses: faviconResponses, browserLogs, waitFor });
   // Exercise the actual static React bundle and browser FormData, not only mocked components.
   await waitFor(
     async () =>

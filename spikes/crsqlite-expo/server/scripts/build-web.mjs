@@ -26,3 +26,4 @@ execFileSync(
   { stdio: "inherit" },
 );
 await copyFile("web/index.html", "dist/public/index.html");
+await copyFile("web/favicon.svg", "dist/public/favicon.svg");
