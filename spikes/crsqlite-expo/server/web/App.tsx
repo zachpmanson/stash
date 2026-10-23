@@ -17,7 +17,7 @@ import type {
   WebItem as Item,
   WebItemPage,
 } from "../src/contracts.js";
-import { ApiResponseError, request } from "./items.js";
+import { ApiResponseError, request, uploadImage } from "./items.js";
 import { FolderDialog } from "./FolderDialog.js";
 import { FolderMenu, type FolderMenuTarget } from "./FolderMenu.js";
 import { FolderFeedDialog } from "./FolderFeedDialog.js";
@@ -46,6 +46,7 @@ export function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const mutationInFlight = useRef(false);
   const [notice, setNotice] = useState("");
   const [allLayout, setAllLayout] = useLayoutPreference();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -273,6 +274,8 @@ export function App() {
     action: () => Promise<T>,
     after?: (result: T) => void,
   ) {
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setBusy(true);
     setError("");
     setNotice("");
@@ -284,6 +287,7 @@ export function App() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Save failed");
     } finally {
+      mutationInFlight.current = false;
       setBusy(false);
     }
   }
@@ -516,15 +520,21 @@ export function App() {
             dirty.current = value;
           }}
           onCancel={cancelEditor}
-          onSave={(data) => {
+          onSave={(data, image) => {
             if (editor === "edit" && !Object.keys(data).length) {
               dirty.current = false;
               setEditor(null);
               return;
             }
             void mutate(
-              () =>
-                request<{ id: string }>(
+              async () => {
+                if (editor === "new" && image) {
+                  await uploadImage(image);
+                  return request<{ id: string }>(`/media/uploads/${encodeURIComponent(image.id)}/finalize`, "POST", {
+                    title: data.title || null, ...(folderId ? { folderId } : {}),
+                  });
+                }
+                return request<{ id: string }>(
                   editor === "new"
                     ? "/items"
                     : `/items/${encodeURIComponent(selected)}`,
@@ -533,7 +543,8 @@ export function App() {
                     ...data,
                     ...(editor === "new" && folderId ? { folderId } : {}),
                   },
-                ),
+                );
+              },
               (result) => {
                 dirty.current = false;
                 setEditor(null);

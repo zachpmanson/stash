@@ -479,9 +479,11 @@ test(
     assert.equal(media.mediaUnavailable, true);
     assert.ok(!JSON.stringify(media).includes("private"));
     assert.equal(
-      (await api("/items/media", "PATCH", { title: "No" })).status,
-      409,
+      (await api("/items/media", "PATCH", { title: "Pending image title" })).status,
+      200,
     );
+    assert.equal((await api("/items/media", "PATCH", { content: "replace original" })).status, 400);
+    assert.equal((await json("/media/items/media/status")).state, "pending");
     const badLink = await json("/items/bad-link");
     assert.equal(badLink.content, null);
     assert.ok(!("article_html" in badLink));

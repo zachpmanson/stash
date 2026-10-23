@@ -20,6 +20,13 @@ exports.createNativeHarness = async ({ actualSettings = false } = {}) => {
   class File {
     constructor(...parts) { this.uri = pathToFileURL(join(parts)).href; this.name = path.basename(localPath(this.uri)); }
     get exists() { return fs.existsSync(localPath(this.uri)); }
+    get size() { return this.exists ? fs.statSync(localPath(this.uri)).size : 0; }
+    async bytes() { return this.bytesSync(); }
+    move(dest) { fs.renameSync(localPath(this.uri), localPath(dest.uri)); this.uri = dest.uri; }
+    open() {
+      const fd = fs.openSync(localPath(this.uri), 'r+');
+      return { writeBytes: bytes => { if (options.writeFailure?.(this.uri)) throw Error('injected write failure'); return fs.writeSync(fd, bytes); }, close: () => fs.closeSync(fd) };
+    }
     create({ overwrite = false, intermediates = false } = {}) {
       if (intermediates) fs.mkdirSync(path.dirname(localPath(this.uri)), { recursive: true });
       fs.writeFileSync(localPath(this.uri), '', { flag: overwrite ? 'w' : 'wx' });
@@ -76,6 +83,11 @@ exports.createNativeHarness = async ({ actualSettings = false } = {}) => {
   let recipe = false;
   const mocks = {
     'expo-sqlite': sqlite, 'react-native': { Platform: { get OS() { return options.platform; } } },
+    'expo/fetch': { fetch: (...args) => options.nativeFetch(...args) },
+    'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'sha256' }, digest: async (algorithm, bytes) => {
+      const hash = require('node:crypto').createHash(algorithm).update(bytes).digest();
+      return hash.buffer.slice(hash.byteOffset, hash.byteOffset + hash.byteLength);
+    } },
     'expo-file-system': { File, Directory, Paths },
     'expo-file-system/legacy': { copyAsync: async ({ from, to }) => fs.copyFileSync(localPath(from), localPath(to)) },
     'expo-sharing': {},
@@ -103,6 +115,7 @@ exports.createNativeHarness = async ({ actualSettings = false } = {}) => {
     }).outputText;
     vm.runInNewContext(code, {
       module, exports: module.exports, console, Uint8Array, URL, AbortController,
+      Date: class extends Date { static now() { return options.now ?? Date.now(); } },
       __DEV__: options.dev, process: { env: { EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS: options.optIn ? "1" : undefined } }, setTimeout: (fn, ms) => setTimeout(fn, options.fastTimers ? Math.min(ms, 10) : ms), clearTimeout,
       btoa: value => Buffer.from(value).toString('base64'),
       fetch: (...args) => options.fetch(...args),

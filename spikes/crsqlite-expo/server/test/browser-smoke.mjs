@@ -9,6 +9,7 @@ import { folderInteractions } from "./folder-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
 import { refactorComposition } from "./refactor-browser-checks.mjs";
 import { modalConsistency } from "./modal-browser-checks.mjs";
+import { mediaInteractions } from "./media-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
 // Opt-in disposable browser test: no real credentials, live service or network.
 // STASH_TEST_SERVER_ENTRY optionally selects the exact built service package.
@@ -957,6 +958,14 @@ try {
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",
   );
+  await mediaInteractions({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
+    base: `http://127.0.0.1:${proxyPort}`, directory: dir,
+    confirm: async (action, accept) => {
+      const pending = action(); await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i); await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending; dialog = null;
+    },
+  });
   const protocol = Buffer.from("room=stash-backend")
     .toString("base64")
     .replace(/=+$/, "");

@@ -23,6 +23,7 @@ import {
 
 import { assertRecoveryConfigurationOwned } from "./restoreMerge";
 import { useSettingsStore } from "../state/settingsState";
+import { runStashMediaCycle, type MediaQueueStatus } from "./mediaQueue";
 
 const DATABASE_ROOM = "stash-backend";
 const CHANGE_COLUMNS = '"table", "pk", "cid", "val", "col_version", "db_version", NULL, "cl", "seq"';
@@ -55,6 +56,8 @@ export type StashSyncStatus = {
   phase: SyncPhase;
   message?: string;
   projectedAt?: number;
+  /** Separate durable byte transfers; metadata convergence is not image completion. */
+  media?: MediaQueueStatus;
   /** Established session identity only; no password or URL userinfo. */
   account?: { username: string; serverUrl: string };
   /** Stop/cancel requested, but attempt/session.done has not yet drained. */
@@ -586,6 +589,7 @@ export async function connectStashSync(
       let running = true;
       let projectedSignature = "";
       let lastProjectedAt: number | undefined;
+      let firstMediaCycle = true;
       const replica = syncReplicaRef.current!;
       const sessionFeed = {
         request: async (id: string, action: "status" | "preview" | boolean, signal?: AbortSignal) => {
@@ -664,7 +668,7 @@ export async function connectStashSync(
               }
               projectedSignature = exchange.signature;
               lastProjectedAt = Date.now();
-              const state = { phase: "synced" as const, message: "Stash data is in sync.", projectedAt: lastProjectedAt };
+              const state = { phase: "synced" as const, message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt };
               notifySessionStatus(state);
               publishProjection();
             } else if (!exchange.complete) {
@@ -672,7 +676,15 @@ export async function connectStashSync(
             } else if (!feedReady) {
               // A transient status outage need not change the DB signature.
               // Recover availability without another projection/replicated write.
-              notifySessionStatus({ phase: "synced", message: "Stash data is in sync.", projectedAt: lastProjectedAt });
+              notifySessionStatus({ phase: "synced", message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt });
+            }
+            if (exchange.complete && projectedSignature && running) {
+              const media = await runStashMediaCycle(base, account.username, authorization, attempt.controller.signal, firstMediaCycle);
+              firstMediaCycle = false;
+              if (!running) break;
+              if (media.projected) projectedSignature = ""; // recheck full metadata barrier before projecting verified paths
+              notifySessionStatus({ phase: "synced", projectedAt: lastProjectedAt, media: media.status,
+                message: media.status.pending ? `Metadata synced; ${media.status.pending} image transfer(s) pending${media.status.errors ? `, ${media.status.errors} waiting/retrying or failed` : ""}.` : "Metadata and supported image transfers are complete." });
             }
           } catch (error) {
             if (!running) break;

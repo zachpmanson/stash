@@ -11,6 +11,7 @@ import { signInStashSync, forgetSavedStashLogin, retrySavedStashLogin, subscribe
 import type { SavedLoginState } from "../db/savedSyncLogin";
 import { withAppDb, isRestorePendingOwned } from "../db/database";
 import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
+import { retryStashImages } from "../db/mediaQueue";
 
 export default function SyncSettingsScreen() {
   const [recoveryPending, setRecoveryPending] = useState(false);
@@ -117,6 +118,11 @@ export default function SyncSettingsScreen() {
               <Text style={styles.note}>{savedLogin.account.serverUrl}</Text>
             </>}
             <Text style={styles.note}>{restartRequired ? "Sign out could not finish. Restart the app before reconnecting." : teardownPending ? "Signing out…" : status.message ?? `Status: ${status.phase}`}</Text>
+            {status.media && !hideControls && <>
+              <Text style={styles.note}>Images: {status.media.pending} pending; {status.media.errors} waiting/retrying or failed. JPEG, PNG and still WebP up to 20 MiB. Other originals remain local.</Text>
+              {status.media.message && <Text style={styles.note}>{status.media.message}</Text>}
+              {status.media.pending > 0 && status.account && !recoveryPending && <Action label="Retry image transfers" onPress={() => { void retryStashImages().catch(e => showModal({ title: "Image retry failed", message: e instanceof Error ? e.message : String(e) })); }} />}
+            </>}
             {hideControls ? null : status.account ? (
               <Action label="Sign out" onPress={() => void handleSignOut()} />
             ) : savedLogin.account ? (

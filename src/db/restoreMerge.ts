@@ -121,6 +121,12 @@ export async function buildFreshRestoreOwned(source: SQLiteDatabase, fresh: SQLi
       await fresh.execAsync(RESTORE_MEDIA_SCHEMA);
       await copyTables(source, fresh, ["stash_restore_media"]);
     }
+    const downloaded = await source.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_media_local_v1') AS present");
+    if (downloaded?.present) {
+      await fresh.execAsync(RESTORE_MEDIA_SCHEMA);
+      for (const row of await source.getAllAsync<{ item_id: string; uri: string }>("SELECT item_id,uri FROM stash_media_local_v1"))
+        await fresh.runAsync("INSERT OR REPLACE INTO stash_restore_media(id,uri,thumbnail_path) VALUES (?,?,NULL)", row.item_id, row.uri);
+    }
     if (kind === "seeded") {
       const changes = await exportRestoreChangesOwned(source);
       if (!changes.length) throw new Error("Seeded backup has no historical state; refusing a partial replica.");

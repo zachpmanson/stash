@@ -6,6 +6,7 @@ import type { attachWebsocketServer } from "@vlcn.io/ws-server";
 import { DATABASE_ROOM, SCHEMA_NAME } from "../schema.js";
 import type { WebItem, WebFolder } from "./contracts.js";
 import { FeedError, feedSettings, renderFeed } from "./feeds.js";
+import { manifest } from "./media-store.js";
 
 class ApiError extends Error {
   constructor(
@@ -88,11 +89,18 @@ function item(db: Database.Database, row: ItemRow): WebItem {
       content = null;
     }
   }
+  const imageIdentity = row.type === "image" && db.prepare("SELECT id FROM sync_items WHERE id=? AND media_id=id").get(row.id);
+  const available = imageIdentity && manifest(db, row.id);
+  const image: WebItem["image"] = imageIdentity ? available ? {
+    state: "available", previewUrl: `/api/media/items/${encodeURIComponent(row.id)}/preview`,
+    thumbnailUrl: `/api/media/items/${encodeURIComponent(row.id)}/thumbnail`,
+  } : { state: "pending" } : undefined;
   return {
     ...row,
     content,
     article_text: portable ? row.article_text : null,
-    mediaUnavailable: !portable,
+    mediaUnavailable: !portable && !available,
+    ...(image ? { image } : {}),
     folderIds: (
       db.prepare(membership).all(row.id) as { folder_id: string }[]
     ).map((r) => r.folder_id),
@@ -323,8 +331,9 @@ export function installApi(
     const row = requireItem(db, itemId);
     const data = body(req.body, ["content", "title", "archived"]);
     if (!Object.keys(data).length) fail();
-    if (row.type !== "url" && row.type !== "text")
+    if (row.type !== "url" && row.type !== "text" && !(row.type === "image" && item(db, row).image))
       throw new ApiError(409, "Media is unavailable on the web");
+    if (row.type === "image" && "content" in data) fail("Original image bytes are immutable");
     if ("content" in data) {
       const content =
         row.type === "url" ? url(data.content) : text(data.content, 48000);
@@ -352,7 +361,7 @@ export function installApi(
     const itemId = id(req.params.id),
       folderId = id(req.params.folderId);
     const row = requireItem(db, itemId);
-    if (!["text", "url"].includes(row.type))
+    if (!["text", "url"].includes(row.type) && !(row.type === "image" && item(db, row).image))
       throw new ApiError(409, "Media is unavailable on the web");
     requireFolder(db, folderId);
     const data = body(req.body, ["present"]);

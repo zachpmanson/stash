@@ -269,6 +269,8 @@ async function retainDeviceResourcesOwned(current: SQLiteDatabase, fresh: SQLite
   const rows = await current.getAllAsync<{ id: string; uri: string; thumbnail_path: string | null }>("SELECT id, uri, thumbnail_path FROM items WHERE type IN ('image', 'file')");
   const resources = await current.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_restore_media') AS present");
   if (resources?.present) rows.push(...await current.getAllAsync<{ id: string; uri: string; thumbnail_path: string | null }>("SELECT id, uri, thumbnail_path FROM stash_restore_media"));
+  const downloaded = await current.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_media_local_v1') AS present");
+  if (downloaded?.present) rows.push(...await current.getAllAsync<{ id: string; uri: string; thumbnail_path: string | null }>("SELECT item_id AS id,uri,NULL AS thumbnail_path FROM stash_media_local_v1"));
   for (const row of rows) {
     if (!row.uri.startsWith("file://") || !new File(row.uri).exists) continue;
     const thumbnail = row.thumbnail_path?.startsWith("file://") && new File(row.thumbnail_path).exists ? row.thumbnail_path : null;

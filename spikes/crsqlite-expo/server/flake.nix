@@ -24,7 +24,7 @@
         version = "0.1.0";
         src = ./.;
         fetcherVersion = 3;
-        hash = "sha256-LS+u10QdEctDq3C3EJhlXboObSwOJaaX0Dtt7eAeXqg=";
+        hash = "sha256-jjSEHioBqpgwok6ZdZA75xkKpessaVIp17yQqHxOKYM=";
       };
       serverPackage = linux.stdenv.mkDerivation {
         pname = "stash-crsqlite-sync";

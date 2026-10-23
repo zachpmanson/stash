@@ -74,6 +74,7 @@ function syncHarness() {
     'expo-sqlite': h.sqlite, './database': h.api,
     './syncIdentity': load('src/db/syncIdentity.ts', {}),
     './restoreMerge': { assertRecoveryConfigurationOwned: async () => {} },
+    './mediaQueue': { runStashMediaCycle: async (...args) => h.options.mediaCycle ? h.options.mediaCycle(...args) : ({ status: { pending: 0, errors: 0 }, projected: false }) },
     '../state/settingsState': { useSettingsStore: { getState: () => ({ setAuRecipe() {} }) } },
     './syncReplica': {
       SYNC_CRR_SCHEMA_NAME: 'test', SYNC_CRR_SCHEMA_VERSION: 1n, SYNC_INITIALIZED_KEY: 'seed',
@@ -555,13 +556,13 @@ test('signout aborts and drains actual feed body reads; late success cannot cros
 });
 test('same-signature recovery after a transient outage restores feed controls without reprojection', {timeout:7000}, async () => {
   const h=feedReadyHarness(), first=h.options.statusResponse, outage=deferred(), recovered=deferred();
-  let polls=0, synced=0, projections=0;
+  let polls=0, hadOutage=false, projections=0;
   h.sync.subscribeStashSyncProjection(()=>projections++);
   h.options.statusResponse=async()=>{polls++;if(polls===2)throw Error('temporary feed outage');return first();};
   h.options.feedResponse=async()=>new Response('{}');
   const unsubscribe=h.sync.subscribeStashSyncStatus(s=>{
-    if(s.phase==='error' && /temporary feed outage/.test(s.message))outage.resolve();
-    if(s.phase==='synced' && ++synced===2)recovered.resolve();
+    if(s.phase==='error' && /temporary feed outage/.test(s.message)){hadOutage=true;outage.resolve();}
+    if(s.phase==='synced' && hadOutage)recovered.resolve();
   });
   try {
     await h.connect();await outage.promise;
@@ -570,6 +571,24 @@ test('same-signature recovery after a transient outage restores feed controls wi
     assert.equal((await h.sync.requestStashFolderFeed('f','status')).status,200);
     assert.equal(projections,1);
   } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
+});
+
+test('disconnect/restore drains active media before another account can connect and ignores cancelled byte completion', {timeout:7000}, async () => {
+  const h=feedReadyHarness(), started=deferred(), release=deferred();
+  let mediaSignal, finished=false; const statuses=[];
+  h.options.mediaCycle=async (_base, username, _authorization, signal)=>{mediaSignal=signal;started.resolve();await release.promise;return {status:{pending:7,errors:0},projected:true};};
+  const unsubscribe=h.sync.subscribeStashSyncStatus(status=>statuses.push(status));
+  try {
+    await h.connect();await started.promise;
+    const restoring=h.sync.withStashSyncRestoreLock(async()=>{finished=true;});
+    await tick();assert.equal(mediaSignal.aborted,true);assert.equal(finished,false);
+    await assert.rejects(h.sync.connectStashSync('http://localhost/',{username:'bob',password:'synthetic'}),/restore|already connected/);
+    release.resolve();await restoring;assert.equal(finished,true);
+    assert.ok(!statuses.some(status=>status.media?.pending===7),'cancelled old byte result never reaches shared UI/account state');
+    h.options.mediaCycle=async (_base,username)=>{assert.equal(username,'bob');return {status:{pending:0,errors:0},projected:false};};
+    await h.sync.connectStashSync('http://localhost/',{username:'bob',password:'synthetic'});
+    await tick();assert.equal(statuses.at(-1).account.username,'bob');
+  } finally {unsubscribe();release.resolve();await h.sync.disconnectStashSyncAndWait();}
 });
 
 function savedClientHarness(h, native) {

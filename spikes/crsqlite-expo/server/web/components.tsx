@@ -80,7 +80,7 @@ export function ItemCard({
       ? "Untitled text"
       : item.type === "url"
         ? "Link"
-        : "Media unavailable");
+        : item.image ? "Image" : "Media unavailable");
   return (
     <li className="min-w-0">
       <Button
@@ -90,7 +90,7 @@ export function ItemCard({
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
-        <span className="card-icon">
+        {item.image?.state === "available" ? <img src={item.image.thumbnailUrl} alt="Image preview" className="card-thumbnail" loading="lazy" decoding="async" /> : <span className="card-icon">
           <Icon
             name={
               item.mediaUnavailable
@@ -100,14 +100,14 @@ export function ItemCard({
                   : "text"
             }
           />
-        </span>
+        </span>}
         <span className="min-w-0 flex-1">
           <strong className="card-title" title={title}>
             {title}
           </strong>
           <small>
             <span className="card-kind">
-              {item.mediaUnavailable
+              {item.image?.state === "available" ? "Image" : item.image?.state === "pending" ? "Image · bytes pending" : item.mediaUnavailable
                 ? "Media · available on device"
                 : item.domain || (item.type === "text" ? "Note" : "Link")}
             </span>
