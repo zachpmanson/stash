@@ -1,4 +1,5 @@
 import IconButton from "@/components/IconButton";
+import HomeSyncButton from "../components/HomeSyncButton";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import { runUiAction } from "../utils/uiAction";
@@ -94,6 +95,7 @@ export default function HomeScreen() {
       >
         <Text style={styles.title}>Stash</Text>
         <View style={styles.headerActions}>
+          <HomeSyncButton />
           <IconButton onPress={() => router.push("/settings")}>⚙️</IconButton>
           <IconButton onPress={() => router.push("/archive")}>🗃️</IconButton>
         </View>

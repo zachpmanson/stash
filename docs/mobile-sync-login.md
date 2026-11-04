@@ -10,6 +10,17 @@ Eligible Android development or explicitly opted-in builds remember a login **on
 - Authentication rejection (HTTP 401/403) stops transport/status polling and forgets the rejected login. No timer retries a saved account after startup failure. During an established session, existing transient network recovery remains available; initial offline failures keep the saved identity and offer **Retry saved login** / **Forget saved login**.
 - Failed explicit login is never saved. Replacing an account first removes its old saved copy; an erase failure blocks replacement. If a verified session cannot be saved, it remains usable for this session but the UI says persistence is unconfirmed. Read/erase errors never claim the login was forgotten; retry Forget before closing the app, since an unerased record could reconnect on restart. Successful signout requires both secure removal and drained client teardown. A teardown failure still requires restart.
 
+## Home sync shortcut
+
+Eligible Android builds show a sync button in the home action bar, opening the existing **Settings → Sync** page. It observes the existing client and saved-login state without connecting, preparing a replica, or making database/network requests itself:
+
+- **Grey / cloud off:** not logged in (including rejected authentication).
+- **Amber / sync warning:** not synced, offline with a retained account, draining/restart-required, or image transfers reporting retries/failures.
+- **Blue / sync arrows:** connecting/exchanging metadata, checking the image queue, or supported image transfers pending without a reported error.
+- **Green / cloud check:** authenticated client reports metadata synced **and** a checked image queue with zero pending/errors. Saved credentials or metadata-only convergence cannot make it green.
+
+Each state has a distinct icon and screen-reader label, not colour alone. It follows live subscriptions and removes them on unmount. This is the client's last reported state, not an independent live-server audit or a promise that unsupported media is transferable. Ordinary release/iOS gates remain unchanged; the shortcut does not enable sync in those builds.
+
 ## Native storage and restore limitations
 
 The `expo-secure-store` config plugin must run on prebuild, and the native app must be rebuilt; an old APK has no SecureStore native module. Its Android backup and data-extraction resources exclude `SecureStore` preferences from cloud backup and device transfer. Keep these exclusions if adding custom Android backup rules. App ZIP/database backups contain no saved login, so restoring/moving a backup requires separate sign-in. Android uninstall removes its Keystore keys; an app-data reset/reinstall or lost key can require signing in again. Debug `.debug` and release apps have separate app sandboxes/keys. No credential migration from another app ID is attempted.
