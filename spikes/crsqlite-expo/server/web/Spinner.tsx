@@ -1,7 +1,7 @@
 import React from "react";
-import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { IconRefresh } from "@tabler/icons-react";
 
 /** Dripfeed's loading indicator; the refresh affordance stays still when idle. */
 export function Spinner({ active = true }: { active?: boolean }) {
-  return <ArrowPathIcon className={`spinner${active ? "" : " is-idle"}`} aria-hidden="true" />;
+  return <IconRefresh className={`spinner${active ? "" : " is-idle"}`} aria-hidden="true" focusable="false" size={18} stroke={1.7} />;
 }

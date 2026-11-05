@@ -15,12 +15,12 @@ importers:
 
   .:
     dependencies:
-      '@heroicons/react':
-        specifier: 2.2.0
-        version: 2.2.0(react@19.2.4)
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.13)
+      '@tabler/icons-react':
+        specifier: 3.50.0
+        version: 3.50.0(react@19.2.4)
       '@vlcn.io/crsqlite':
         specifier: 0.16.3
         version: 0.16.3(patch_hash=99199dbef07bf40cebe08c71c843e5b9c372373155c9012b4147bd68dff99c30)
@@ -417,11 +417,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@heroicons/react@2.2.0':
-    resolution: {integrity: sha512-LMcepvRaS9LYHJGsF0zzmgKCUim/X3N/DQKc4jepAXJ7l8QxJ1PmxJzqplF2Z3FE4PqBAIGyJAQ/w4B5dsqbtQ==}
-    peerDependencies:
-      react: '>= 16 || ^19.0.0-rc'
-
   '@hono/node-server@2.1.5':
     resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
     engines: {node: '>=20'}
@@ -684,6 +679,14 @@ packages:
 
   '@so-ric/colorspace@1.1.6':
     resolution: {integrity: sha512-/KiKkpHNOBgkFJwu9sh48LkHSMYGyuTcSFK/qMBdnOAlrRJzRSXAOFB5qwzaVQuDl8wAvHVMkaASQDReTahxuw==}
+
+  '@tabler/icons-react@3.50.0':
+    resolution: {integrity: sha512-X9XhFbxAmSNimQ71VAd7opfd4z84x1pLrEbBT33VCIEsFs8zWVqdhh5r/Jyi/3iJjQ861kE5Wm9ixiJfS2nwBA==}
+    peerDependencies:
+      react: '>= 16'
+
+  '@tabler/icons@3.50.0':
+    resolution: {integrity: sha512-HflLxyrH1cqC7s7jzQGSjpsTAVIoaf7+/yHjbdM59rJQBMjliibp+LYhDPFxOMcwa1M8DNpOk6ENzQiWn9a1Dg==}
 
   '@tailwindcss/cli@4.1.18':
     resolution: {integrity: sha512-sMZ+lZbDyxwjD2E0L7oRUjJ01Ffjtme5OtjvvnC+cV4CEDcbqzbp25TCpxHj6kWLU9+DlqJOiNgSOgctC2aZmg==}
@@ -1483,10 +1486,6 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@heroicons/react@2.2.0(react@19.2.4)':
-    dependencies:
-      react: 19.2.4
-
   '@hono/node-server@2.1.5(hono@4.13.13)':
     dependencies:
       hono: 4.13.13
@@ -1668,6 +1667,13 @@ snapshots:
     dependencies:
       color: 5.0.3
       text-hex: 1.0.0
+
+  '@tabler/icons-react@3.50.0(react@19.2.4)':
+    dependencies:
+      '@tabler/icons': 3.50.0
+      react: 19.2.4
+
+  '@tabler/icons@3.50.0': {}
 
   '@tailwindcss/cli@4.1.18':
     dependencies:

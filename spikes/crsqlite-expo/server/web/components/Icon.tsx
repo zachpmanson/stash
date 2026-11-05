@@ -1,39 +1,39 @@
 import React from "react";
 import {
-  ArchiveBoxIcon,
-  ArrowPathIcon,
-  Bars3Icon,
-  ChevronLeftIcon,
-  DocumentTextIcon,
-  EllipsisHorizontalIcon,
-  FolderIcon,
-  LinkIcon,
-  ListBulletIcon,
-  PencilSquareIcon,
-  PhotoIcon,
-  PlusIcon,
-  Squares2X2Icon,
-} from "@heroicons/react/24/outline";
+  IconArchive,
+  IconChevronLeft,
+  IconDots,
+  IconEdit,
+  IconFileText,
+  IconFolder,
+  IconLayoutGrid,
+  IconLink,
+  IconList,
+  IconMenu2,
+  IconPhoto,
+  IconPlus,
+  IconRefresh,
+} from "@tabler/icons-react";
 
 const icons = {
-  folder: FolderIcon,
-  all: Squares2X2Icon,
-  archive: ArchiveBoxIcon,
-  plus: PlusIcon,
-  refresh: ArrowPathIcon,
-  list: ListBulletIcon,
-  grid: Squares2X2Icon,
-  back: ChevronLeftIcon,
-  menu: Bars3Icon,
-  text: DocumentTextIcon,
-  link: LinkIcon,
-  media: PhotoIcon,
-  edit: PencilSquareIcon,
-  more: EllipsisHorizontalIcon,
+  folder: IconFolder,
+  all: IconLayoutGrid,
+  archive: IconArchive,
+  plus: IconPlus,
+  refresh: IconRefresh,
+  list: IconList,
+  grid: IconLayoutGrid,
+  back: IconChevronLeft,
+  menu: IconMenu2,
+  text: IconFileText,
+  link: IconLink,
+  media: IconPhoto,
+  edit: IconEdit,
+  more: IconDots,
 } as const;
 
 /** Decorative chrome only; the control owns its accessible name. */
 export function Icon({ name }: { name: keyof typeof icons }) {
   const Glyph = icons[name];
-  return <Glyph aria-hidden="true" width="18" height="18" strokeWidth="1.7" />;
+  return <Glyph aria-hidden="true" focusable="false" size={18} stroke={1.7} />;
 }

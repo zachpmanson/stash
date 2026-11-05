@@ -156,7 +156,7 @@ test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed 
   );
 });
 
-test("legacy Icon export remains stable; named Heroicons keep contextual 18px decorative currentColor SVGs", () => {
+test("legacy Icon export remains stable; named Tabler icons keep contextual 18px decorative currentColor SVGs", () => {
   assert.equal(LegacyIcon, Icon);
   for (const name of [
     "folder",
@@ -178,6 +178,9 @@ test("legacy Icon export remains stable; named Heroicons keep contextual 18px de
     assert.match(markup, /aria-hidden="true"/);
     assert.match(markup, /width="18" height="18"/);
     assert.match(markup, /stroke="currentColor"/);
+    assert.match(markup, /stroke-width="1.7"/);
+    assert.match(markup, /class="[^"]*\btabler-icon\b/);
+    assert.match(markup, /focusable="false"/);
     assert.doesNotMatch(markup, /<title/);
   }
 });
@@ -296,7 +299,7 @@ test("folder navigation renders complete decorative saved text while retaining n
   assert.ok(icons.every(n => n.props["aria-hidden"] === "true"));
   assert.equal(renderer.root.findAllByType("img").length, 0);
   const buttons = renderer.root.findAllByType("button");
-  assert.equal(buttons[0].findAllByType("svg").length, 1, "All items stays a Heroicon");
+  assert.equal(buttons[0].findAllByType("svg").length, 1, "All items stays a Tabler icon");
   for (const f of folders) {
     const link = buttons.find(b => b.props.title === f.name);
     assert.equal(link.props["aria-current"], f.id === "custom" ? "page" : undefined);
