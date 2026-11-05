@@ -35,7 +35,7 @@ export async function refactorComposition({
       return { button: button.getBoundingClientRect().width, icon: button.querySelector('svg').getBoundingClientRect().width };
     })()`),
     { button: 28, icon: 18 },
-    "folder ellipsis retains an 18px Heroicon inside its compact 28px control",
+    "folder ellipsis retains an 18px Tabler icon inside its compact 28px control",
   );
   await click("Edit item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
