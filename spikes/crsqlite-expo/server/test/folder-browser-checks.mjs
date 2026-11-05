@@ -227,5 +227,5 @@ export async function folderInteractions({ evaluate, cdp, click, waitFor, screen
   await cdp("Emulation.setTouchEmulationEnabled", { enabled: false });
   await cdp("Emulation.setEmulatedMedia", { features: [] });
   await cdp("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  console.log("PASS actual Stash brand/single navigation, Heroicons idle/loading/reduced motion; right-click nonselected target, keyboard menu, modal focus/trap/discard/backdrop/frozen save, live target state/deletion and 320px touch fallback");
+  console.log("PASS actual Stash brand/single navigation, Tabler idle/loading/reduced motion; right-click nonselected target, keyboard menu, modal focus/trap/discard/backdrop/frozen save, live target state/deletion and 320px touch fallback");
 }

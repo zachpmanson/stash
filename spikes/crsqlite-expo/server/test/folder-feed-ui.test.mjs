@@ -20,13 +20,20 @@ test("feed URL accepts only always-on, enabled, clean canonical HTTPS and exact 
     { ...fixture(), url: fixture().url + "/extra" }]) assert.throws(() => folderFeedUrl(data, "f1"));
 });
 
-test("actual shared Spinner uses Heroicons with aria-hidden, explicit static idle class", () => {
+test("actual shared Spinner uses Tabler with aria-hidden, explicit static idle class", () => {
   const active = renderToStaticMarkup(React.createElement(Spinner));
   const idle = renderToStaticMarkup(React.createElement(Spinner, { active: false }));
-  assert.match(active, /class="spinner"/);
-  assert.match(active, /aria-hidden="true"/);
-  assert.match(active, /viewBox="0 0 24 24"/);
-  assert.match(idle, /class="spinner is-idle"/);
+  for (const markup of [active, idle]) {
+    assert.match(markup, /class="[^"]*\bspinner\b/);
+    assert.match(markup, /\btabler-icon-refresh\b/);
+    assert.match(markup, /aria-hidden="true"/);
+    assert.match(markup, /focusable="false"/);
+    assert.match(markup, /width="18" height="18"/);
+    assert.match(markup, /stroke-width="1.7"/);
+    assert.match(markup, /viewBox="0 0 24 24"/);
+  }
+  assert.doesNotMatch(active, /\bis-idle\b/);
+  assert.match(idle, /\bspinner is-idle\b/);
 });
 
 test("actual feed dialog is GET-only, ignores late target results, exposes readonly URL and manual copy fallback", async (t) => {
