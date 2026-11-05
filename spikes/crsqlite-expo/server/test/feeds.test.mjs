@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { extensionPath } from '@vlcn.io/crsqlite';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
@@ -42,6 +43,40 @@ test('Atom parses required fields, exact plaintext Unicode/XML controls and no H
   assert.equal(entry.published,'1970-01-01T00:00:00.001Z');
   assert.doesNotMatch(output.xml,/SECRET HTML|private\/device|enclosure|listened|lat>/);
   assert.equal(render().xml,output.xml);
+  assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
+});
+test('all folder feeds and previews advertise the canonical Stash favicon, not item or folder branding', t => {
+  const {db,folder,item,add,render}=fixture(t);
+  folder('empty'); item('link','https://other.example/article',1,'url'); add('link');
+  db.exec("UPDATE sync_folders SET icon='⭐'; UPDATE sync_items SET favicon_url='https://other.example/favicon.ico'");
+  const version=db.prepare('SELECT crsql_db_version()').pluck().get();
+  const output=render();
+  for(const xml of [output.xml,render(true).xml,renderFeed(db,'empty',base).xml,renderFeed(db,'f','https://stash.example:8443').xml]) {
+    const feed=parsed(xml);
+    const origin=new URL(feed.link.find(link=>link['@_rel']==='alternate')['@_href']).origin;
+    assert.equal(feed.icon,origin+'/assets/favicon.svg');
+    assert.equal(feed.logo,feed.icon);
+    assert.doesNotMatch(xml,/other\.example\/favicon\.ico|⭐/);
+  }
+  const current=render();
+  assert.equal(parsed(current.xml).id,parsed(output.xml).id);
+  assert.equal(parsed(current.xml).entry.id,parsed(output.xml).entry.id);
+  assert.equal(parsed(current.xml).entry.updated,parsed(output.xml).entry.updated);
+  assert.deepEqual(render(true),current);
+  assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
+});
+test('existing feed metadata advances once for branding without changing its stable identity or replicated data', t => {
+  const {db,render}=fixture(t), first=render();
+  const legacyHash=createHash('sha256').update(JSON.stringify({title:'Folder & <one>',base,entries:[]})).digest('hex');
+  db.prepare('UPDATE folder_feeds SET hash=?').run(legacyHash);
+  const version=db.prepare('SELECT crsql_db_version()').pluck().get();
+  const updated=render();
+  assert.equal(parsed(updated.xml).id,parsed(first.xml).id);
+  assert.ok(Date.parse(parsed(updated.xml).updated)>Date.parse(parsed(first.xml).updated));
+  assert.notEqual(updated.etag,first.etag);
+  const changes=db.prepare('SELECT total_changes()').pluck().get();
+  assert.deepEqual(render(),updated);
+  assert.equal(db.prepare('SELECT total_changes()').pluck().get(),changes);
   assert.equal(db.prepare('SELECT crsql_db_version()').pluck().get(),version);
 });
 test('stable IDs, semantic dates/cache, rename, legacy flags and rejected mutations and no replicated writes', t => {

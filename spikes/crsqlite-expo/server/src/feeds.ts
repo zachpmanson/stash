@@ -107,12 +107,14 @@ export function renderFeed(db: Database.Database, id: string, base: string | nul
     entries.push({ ...semantic, ...e! });
   }
   const title = clipped(f.name, 200) || "Stash folder";
-  const digest = hash({ title, base, entries });
+  const favicon = `${base}/assets/favicon.svg`;
+  const digest = hash({ title, base, favicon, entries });
   if (digest !== s.hash) {
     db.prepare("UPDATE folder_feeds SET hash=?,updated_at=? WHERE folder_id=?").run(digest, Math.max(now, s.updated_at + 1), id);
     s = state(db, id)!;
   }
   const feed = new Feed({ id: s.feed_id, title, updated: new Date(s.updated_at), copyright: "", link: base,
+    favicon, image: favicon,
     feedLinks: { atom: feedUrl(base, id) }, author: { name: "Stash" }, description: "Latest 50 active text/link items. Not a full export." });
   for (const e of entries) feed.addItem({ id: e.entry_id, title: "Entry", link: e.link ?? base,
     date: new Date(e.updated_at), published: new Date(e.published_at), content: "Content" });

@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { extensionPath } from '@vlcn.io/crsqlite';
+import { XMLParser } from 'fast-xml-parser';
 import { launch } from './web-helpers.mjs';
 const config={FEED_BASE_URL:'https://feeds.example'};
 async function populate(h) {
@@ -45,6 +46,18 @@ test('HTTP management/auth/cache/HEAD/preview, strict validation and lifecycle',
   assert.equal(setting.url,`https://feeds.example/feeds/folders/${f}.atom`);
   const response=await fetchFeed(), xml=await response.text();
   assert.equal(response.status,200); assert.equal(response.headers.get('content-type'),'application/atom+xml; charset=utf-8');
+  const parser=new XMLParser();
+  for(const body of [xml,await preview.text()]) {
+    const feed=parser.parse(body).feed;
+    assert.equal(feed.icon,'https://feeds.example/assets/favicon.svg');
+    assert.equal(feed.logo,feed.icon);
+  }
+  const iconPath=new URL(parser.parse(xml).feed.icon).pathname;
+  for(const identity of [null,'attacker','web-test-owner']) {
+    const icon=await fetch(h.base+iconPath,{headers:identity?{'X-Auth-User':identity}:{}});
+    assert.equal(icon.status,identity==='web-test-owner'?200:401);
+    if(icon.status===200) { assert.match(icon.headers.get('content-type'),/image\/svg\+xml/); assert.match(await icon.text(),/<svg\b/); }
+  }
   assert.equal(response.headers.get('cache-control'),'private, no-cache'); assert.equal(response.headers.get('vary'),'Authorization');
   const etag=response.headers.get('etag'); assert.ok(etag); assert.ok(response.headers.get('last-modified'));
   assert.equal((await fetchFeed({'If-None-Match':etag})).status,304);

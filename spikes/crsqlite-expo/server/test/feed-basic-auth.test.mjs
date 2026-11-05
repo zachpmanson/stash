@@ -40,6 +40,8 @@ with urllib.request.urlopen(request, timeout=5) as response:
  feed=feedparser.parse(response.read())
 assert not feed.bozo, str(feed.get('bozo_exception'))
 assert feed.version == 'atom10', feed.version
+assert feed.feed.icon == 'https://feeds.example/assets/favicon.svg'
+assert feed.feed.logo == feed.feed.icon
 assert len(feed.entries) == 1
 assert feed.entries[0].content[0].type == 'text/plain'
 assert feed.entries[0].content[0].value == 'Synthetic Basic parser note'
