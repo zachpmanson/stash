@@ -17,7 +17,7 @@ import type {
   WebItem as Item,
   WebItemPage,
 } from "../src/contracts.js";
-import { ApiResponseError, request, uploadImage } from "./items.js";
+import { ApiResponseError, request, safeLink, uploadImage } from "./items.js";
 import { FolderDialog } from "./FolderDialog.js";
 import { FolderMenu, type FolderMenuTarget } from "./FolderMenu.js";
 import { FolderFeedDialog } from "./FolderFeedDialog.js";
@@ -533,6 +533,19 @@ export function App() {
                   return request<{ id: string }>(`/media/uploads/${encodeURIComponent(image.id)}/finalize`, "POST", {
                     title: data.title || null, ...(folderId ? { folderId } : {}),
                   });
+                }
+                if (editor === "new" && data.type === "url") {
+                  // Resolve only on explicit Save, within the existing mutation lock.
+                  // A blocked/unavailable page must not prevent saving the link.
+                  let title = (safeLink(data.content) ?? data.content).slice(0, 500);
+                  try {
+                    const result = await request<{ title: string }>("/link-title", "POST", { url: data.content });
+                    if (typeof result.title === "string" && result.title.trim()) title = result.title.slice(0, 500);
+                  } catch (cause) {
+                    if (cause instanceof ApiResponseError && cause.status === 400) throw cause;
+                    // Authentication and connectivity are still checked by the item save.
+                  }
+                  data = { ...data, title };
                 }
                 return request<{ id: string }>(
                   editor === "new"

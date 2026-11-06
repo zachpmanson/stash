@@ -10,6 +10,7 @@ import { folderEmojiChecks } from "./folder-emoji-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
 import { refactorComposition } from "./refactor-browser-checks.mjs";
 import { modalConsistency } from "./modal-browser-checks.mjs";
+import { linkEditorChecks } from "./link-browser-checks.mjs";
 import { mediaInteractions } from "./media-browser-checks.mjs";
 import { faviconChecks } from "./favicon-browser-checks.mjs";
 import { launch, waitFor } from "./web-helpers.mjs";
@@ -976,6 +977,15 @@ try {
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",
   );
+  await linkEditorChecks({
+    evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, json,
+    base: `http://127.0.0.1:${proxyPort}`,
+    confirm: async (action, accept) => {
+      const pending = action(); await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i); await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending; dialog = null;
+    },
+  });
   await mediaInteractions({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
     base: `http://127.0.0.1:${proxyPort}`, directory: dir,
     confirm: async (action, accept) => {

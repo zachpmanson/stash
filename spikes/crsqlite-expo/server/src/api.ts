@@ -8,6 +8,7 @@ import type { WebItem, WebFolder } from "./contracts.js";
 import { FeedError, feedSettings, renderFeed } from "./feeds.js";
 import { manifest } from "./media-store.js";
 import { folderIcon } from "./folder-icon.js";
+import { resolveLinkTitle } from "./link-title.js";
 
 class ApiError extends Error {
   constructor(
@@ -137,6 +138,7 @@ export function installApi(
   authUser: string,
   notify: () => void,
   feedBase: string | null,
+  linkTitle = resolveLinkTitle,
 ) {
   const router = new Hono();
   router.use("*", async (c, next) => {
@@ -172,6 +174,15 @@ export function installApi(
       onError: (c) => c.json({ error: "Request too large" }, 413),
     }),
   );
+  // Page retrieval must not hold the shared SQLite/cache handle or a transaction.
+  router.post("/link-title", async (c) => {
+    let payload: unknown;
+    try { payload = await c.req.json(); }
+    catch { throw new ApiError(400, "Invalid JSON"); }
+    const data = body(payload, ["url"]);
+    const value = url(data.url);
+    return c.json({ title: await linkTitle(value) }, 201);
+  });
   function route(
     method: "get" | "post" | "patch" | "put",
     path: string,

@@ -137,6 +137,9 @@ export function ItemEditor({
 }) {
   const contentHelpId = useId();
   const [newType, setNewType] = useState("text");
+  const isLink = (item?.type ?? newType) === "url";
+  const newLink = !item && isLink;
+  const contentDraft = useRef(item?.content ?? "");
   const [file, setFile] = useState<File | null>(null);
   const uploadId = useRef<string | null>(null);
   const [progress, setProgress] = useState(0);
@@ -170,6 +173,7 @@ export function ItemEditor({
       }}
       onSubmit={(event) => {
         event.preventDefault();
+        if (busy) return;
         const values = new FormData(event.currentTarget);
         const changes = Object.fromEntries(values) as Record<string, string>;
         if (!item && newType === "image") {
@@ -181,6 +185,7 @@ export function ItemEditor({
           for (const key of ["title", "content"] as const) {
             if (changes[key] === initial[key]) delete changes[key];
           }
+        if (newLink) delete changes.title;
         onSave(changes);
       }}
     >
@@ -196,10 +201,11 @@ export function ItemEditor({
             </select>
           </label>
         )}
-        <label>
+        <label hidden={newLink}>
           Title (optional)
           <input
             name="title"
+            disabled={newLink}
             autoFocus
             maxLength={500}
             defaultValue={initial?.title ?? ""}
@@ -212,24 +218,34 @@ export function ItemEditor({
           {busy && <p role="status">{progress < 100 ? `Uploading image: ${progress}%` : "Bytes uploaded; validating and saving…"}</p>}
           {imageError && <p role="alert">{imageError}</p>}
         </div> : item?.type === "image" ? null : <><label>
-          Content (required)
-          <textarea
+          {newLink ? "URL (required)" : "Content (required)"}
+          {newLink ? <input
+            type="url"
             required
             aria-describedby={contentHelpId}
             name="content"
-            maxLength={item?.type === "url" ? 4096 : 48000}
+            maxLength={4096}
+            placeholder="https://example.com/article"
+            defaultValue={contentDraft.current}
+            onChange={e => { contentDraft.current = e.target.value; }}
+          /> : <textarea
+            required
+            aria-describedby={contentHelpId}
+            name="content"
+            maxLength={isLink ? 4096 : 48000}
             rows={6}
-            defaultValue={initial?.content ?? ""}
-          />
+            defaultValue={contentDraft.current}
+            onChange={e => { contentDraft.current = e.target.value; }}
+          />}
         </label>
         <p id={contentHelpId} className="field-help">
-          Content is required. For links, paste a full http:// or https:// address.
+          {newLink ? "Paste a full http:// or https:// address. The page title is fetched when you save; if unavailable, the URL is used." : "Content is required. For links, paste a full http:// or https:// address."}
         </p></>}
         <div className="actions">
           <Button type="submit" className="primary">
             {busy ? "Saving…" : "Save item"}
           </Button>
-          <Button type="button" onClick={onCancel}>
+          <Button type="button" onClick={() => { if (!busy) onCancel(); }}>
             Cancel
           </Button>
         </div>
