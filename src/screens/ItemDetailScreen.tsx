@@ -48,6 +48,30 @@ import { recipeCookLabel } from "../utils/recipe";
 import { convertToAustralian, convertVolumeUnits } from "../utils/auRecipe";
 import { useRecipeCheckStore } from "../state/recipeCheckState";
 
+const ARTICLE_SYSTEM_FONTS = ["serif", "mono"];
+const ARTICLE_TEXT_PROPS = { selectable: true };
+
+// Keep the HTML tree insulated from selection/bookmark and other screen updates.
+const FormattedArticle = React.memo(function FormattedArticle({
+  html,
+  contentWidth,
+}: {
+  html: string;
+  contentWidth: number;
+}) {
+  const source = useMemo(() => ({ html }), [html]);
+  return (
+    <RenderHtml
+      contentWidth={contentWidth}
+      source={source}
+      baseStyle={styles.articleText}
+      tagsStyles={htmlTagStyles}
+      systemFonts={ARTICLE_SYSTEM_FONTS}
+      defaultTextProps={ARTICLE_TEXT_PROPS}
+    />
+  );
+});
+
 export default function ItemDetailScreen() {
   const { id: itemId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -58,7 +82,7 @@ export default function ItemDetailScreen() {
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
   const [convertVolume, setConvertVolume] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
-  const [scrollY, setScrollY] = useState(0);
+  const scrollYRef = useRef(0);
   const [selActive, setSelActive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const articleRef = useRef<View>(null);
@@ -77,6 +101,7 @@ export default function ItemDetailScreen() {
     item?.article_html,
     item?.recipe_json,
     useLargestExtraction,
+    splitBySentence,
   );
 
   const readEstimate = useMemo(() => {
@@ -113,12 +138,12 @@ export default function ItemDetailScreen() {
     // offsets aren't a global fraction of the article.
     const viewport = windowHeight ?? 0;
     const maxScroll = contentHeight - viewport;
-    const percent = maxScroll > 0 ? Math.round((scrollY / maxScroll) * 100) : 50;
+    const percent = maxScroll > 0 ? Math.round((scrollYRef.current / maxScroll) * 100) : 50;
     const clamped = Math.min(99, Math.max(1, percent));
     await updateItemListenedPercent(item.id, clamped);
     setItem(await getItemById(itemId));
     showSnackbar(`Bookmark saved at ${clamped}%`);
-  }), [item, itemId, contentHeight, scrollY, windowHeight]);
+  }), [item, itemId, contentHeight, windowHeight]);
 
   const handleScrollToBookmark = useCallback(() => {
     const pct = item?.listened_percent ?? 0;
@@ -272,7 +297,7 @@ export default function ItemDetailScreen() {
     >
       <ScrollView
         ref={scrollRef}
-        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
         onContentSizeChange={(_w, h) => setContentHeight(h)}
         contentContainerStyle={{ paddingBottom: Spacing.xl }}
@@ -372,13 +397,9 @@ export default function ItemDetailScreen() {
                     {articleState.html}
                   </Text>
                 ) : showFormatted && articleState.html && !splitBySentence ? (
-                  <RenderHtml
+                  <FormattedArticle
                     contentWidth={windowWidth - Spacing.md * 2}
-                    source={{ html: articleState.html }}
-                    baseStyle={styles.articleText}
-                    tagsStyles={htmlTagStyles}
-                    systemFonts={["serif", "mono"]}
-                    defaultTextProps={{ selectable: true }}
+                    html={articleState.html}
                   />
                 ) : splitBySentence && sentences ? (
                   sentences.map((s, i) => (

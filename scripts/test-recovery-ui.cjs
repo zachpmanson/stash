@@ -13,6 +13,7 @@ function harness({ dev = true, optIn = false, platform = 'android', effects = fa
   const reject = name => async () => { calls.push(name); throw Error('Restored data is read-only until a full merge with the sync server completes. Connect in Settings.'); };
   const react = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
+    memo: component => component,
     useState: initial => { const i = cursor++; if (!(i in states)) states[i] = initial; return [states[i], value => { states[i] = typeof value === 'function' ? value(states[i]) : value; }]; },
     useRef: value => ({ current: refCursor < refs.length ? refs[refCursor++] : value }),
     useCallback: fn => fn, useMemo: fn => fn(), useEffect(fn, deps) {
@@ -111,7 +112,7 @@ for (const remove of [false,true]) test(`actual move membership handler catches 
 test('actual item bookmark action catches recovery error and does not claim success', async () => {
   const h = harness();
   const item = { id:'id',type:'url',uri:'https://example.test' };
-  const tree = h.render('src/screens/ItemDetailScreen.tsx',[item,false,true,false,false,false,600,100,true], [null,null,{start:1,end:2}]);
+  const tree = h.render('src/screens/ItemDetailScreen.tsx',[item,false,true,false,false,false,600,true], [100,null,null,{start:1,end:2}]);
   const bookmark = nodes(tree).find(n => n.props?.children?.some(c => c?.props?.name === 'bookmark-add'));
   assert.ok(bookmark); await bookmark.props.onPress(); recoveryMessage(h,'updateItemListenedPercent');
 });

@@ -41,6 +41,8 @@ export function useArticle(
   initialHtml?: string | null,
   initialRecipeJson?: string | null,
   useLargestTextBlock?: boolean,
+  // Listening needs sentences by default; readers can defer the extra parsing.
+  needsSentences = true,
 ): {
   state: ArticleState;
   sentences: Sentence[] | undefined;
@@ -62,13 +64,13 @@ export function useArticle(
   const cancelledRef = useRef(false);
 
   const sentences = useMemo<Sentence[] | undefined>(() => {
-    if (state.kind !== "ready") return undefined;
+    if (!needsSentences || state.kind !== "ready") return undefined;
     if (state.html) return splitSentencesFromBlocks(htmlToBlocks(state.html));
     if (state.text) {
       return splitSentences(normalizeText(state.text)).map((text) => ({ text, mode: "primary" as const }));
     }
     return undefined;
-  }, [state]);
+  }, [state, needsSentences]);
 
   useEffect(() => {
     cancelledRef.current = false;
