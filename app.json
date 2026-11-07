@@ -52,6 +52,7 @@
       ],
       "./plugins/share-intent-module",
       "./plugins/media-session-module",
+      "./plugins/text-selection-module",
       "./plugins/metro-max-workers",
       "./plugins/predictive-back",
       "./plugins/debug-variant",

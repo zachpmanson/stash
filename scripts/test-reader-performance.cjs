@@ -21,23 +21,37 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
   let item = { id: 'article-1', type: 'url', uri: 'https://example.test/article', title: 'Article',
     created_at: 1, article_html: HTML, article_text: null, recipe_json: null, ...itemOverrides };
   let renderer, output, args = hookArgs ?? [item.uri, item.id, item.article_text, item.article_html, item.recipe_json, false, false];
-  let width = 400, selection = null, poll, commits = 0;
+  let width = 400, selection = null, poll, commits = 0, bookmark = null;
+  let itemRead, bookmarkRead, saveError, navigationTimerId = 0;
+  const navigationTimers = new Map(), focuses = [];
+  const Engine = React.createContext({}), Config = React.createContext({});
   const modules = new Map(), renders = [], reads = [], writes = [], fetches = [], nav = [], snackbars = [], modals = [], scrolls = [];
   const parsing = { blocks: 0, splitBlocks: 0, splitText: 0 };
   let reply = { title: 'Refreshed', html: '<p>Fresh first. Fresh second.</p>', recipe: null };
-  let fetchError;
+  let fetchError, fetchReply;
   const recipeStore = { checked: {}, toggleChecked() {}, resetRecipe() {} };
   const mocks = {
     react: React,
     'react-native': {
       ...Object.fromEntries(['View', 'Text', 'Pressable', 'ScrollView', 'RefreshControl', 'Image', 'ActivityIndicator'].map(x => [x, x])),
-      StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width, height: 600 }),
+      FlatList: React.forwardRef((props, ref) => {
+        const first = props.initialScrollIndex ?? 0;
+        return React.createElement('FlatList', { ...props, ref }, props.ListHeaderComponent,
+          props.data.slice(first, first + props.initialNumToRender).map((item, offset) => {
+            const index = first + offset;
+            return React.createElement(props.CellRendererComponent, { key: item.key, item, index,
+              onFocusCapture: event => focuses.push([index, event]) }, props.renderItem({ item, index }));
+          }));
+      }),
+      StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width, height: 600, fontScale: 1 }),
       NativeModules: { TextSelection: { getSelection: async () => selection } }, findNodeHandle: () => 1,
       Linking: { openURL: async () => {} }, Share: { share: async () => {} },
     },
-    'react-native-render-html': { __esModule: true, default: props => {
-      renders.push(props); return React.createElement('RenderedHtml', props);
-    } },
+    'react-native-render-html': {
+      TRenderEngineProvider: ({ children, ...props }) => React.createElement(Engine.Provider, { value: React.useMemo(() => props, [props.baseStyle, props.tagsStyles, props.systemFonts]) }, children),
+      RenderHTMLConfigProvider: ({ children, ...props }) => React.createElement(Config.Provider, { value: React.useMemo(() => props, [props.defaultTextProps]) }, children),
+      RenderHTMLSource: props => { const all = { ...React.useContext(Engine), ...React.useContext(Config), ...props }; renders.push(all); return React.createElement('RenderedHtml', all); },
+    },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
     'expo-router': {
       useLocalSearchParams: () => ({ id: item.id }),
@@ -58,10 +72,14 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
     '../state/settingsState': { useSettingsStore: selector => selector({ auRecipe: false }) },
     '../state/recipeCheckState': { useRecipeCheckStore: selector => selector(recipeStore) },
     '../db/items': {
-      getItemById: async id => { reads.push(id); return item; }, archiveItem: async () => {},
+      getItemById: async id => { reads.push(id); return itemRead ? itemRead(id) : item; }, archiveItem: async () => {},
       updateItemListenedPercent: async (id, percent) => { writes.push(['bookmark', id, percent]); item = { ...item, listened_percent: percent }; },
       updateItemArticleHtml: async (...values) => writes.push(['html', ...values]),
       updateItemRecipeJson: async (...values) => writes.push(['recipe', ...values]),
+    },
+    '../db/readerBookmarks': {
+      getReaderBookmark: async id => bookmarkRead ? bookmarkRead(id) : bookmark,
+      saveReaderBookmark: async (id, value) => { if (saveError) throw saveError; bookmark = value; writes.push(['bookmark', id, value]); },
     },
     '../utils/readability': {
       htmlToText: plain, findRecipe: () => null,
@@ -69,7 +87,7 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
         parsing.blocks++;
         return [...html.matchAll(/<(p|blockquote)>(.*?)<\/\1>/g)].map(m => ({ text: m[2], mode: m[1] === 'blockquote' ? 'quote' : 'primary' }));
       },
-      fetchArticle: async (url, options) => { fetches.push({ url, options }); if (fetchError) throw fetchError; return reply; },
+      fetchArticle: async (url, options) => { fetches.push({ url, options }); if (fetchError) throw fetchError; return fetchReply ? fetchReply(url) : reply; },
       archiveIsUrl: url => `https://archive.is/${url}`, archiveOrgUrl: url => `https://web.archive.org/${url}`,
     },
   };
@@ -81,9 +99,14 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
     }).outputText;
     vm.runInNewContext(code, {
       module, exports: module.exports, console,
+      setTimeout: file === 'src/utils/readerNavigation.ts' ? fn => { const id = ++navigationTimerId; navigationTimers.set(id, fn); return id; } : setTimeout,
+      clearTimeout: file === 'src/utils/readerNavigation.ts' ? id => navigationTimers.delete(id) : clearTimeout,
       setInterval: fn => { poll = fn; return 1; }, clearInterval: () => { poll = undefined; },
       require: spec => {
         if (spec in mocks) return mocks[spec];
+        if (spec === 'linkedom') return require('linkedom');
+        if (spec === '../components/VirtualArticle') return load('src/components/VirtualArticle.tsx');
+        if (['../utils/readerChunks', '../utils/readerNavigation'].includes(spec)) return load('src/utils/' + path.basename(spec) + '.ts');
         if (spec === '../theme') return load('src/theme/index.ts');
         if (spec === '../hooks/useArticle') return load('src/hooks/useArticle.ts');
         if (spec === 'src/utils/sentences') {
@@ -101,19 +124,32 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
   const useArticle = load('src/hooks/useArticle.ts').useArticle;
   const Component = screen ? load('src/screens/ItemDetailScreen.tsx').default : function Probe() { output = useArticle(...args); return null; };
   const tree = () => React.createElement(React.Profiler, { id: 'reader', onRender: () => { commits++; } }, React.createElement(Component));
-  await act(async () => { renderer = create(tree(), { createNodeMock: () => ({ scrollTo: value => scrolls.push(value) }) }); });
+  await act(async () => { renderer = create(tree(), { createNodeMock: () => ({ scrollTo: value => scrolls.push(value), scrollToIndex: value => scrolls.push({ index: value.index }), scrollToOffset: value => scrolls.push(value) }) }); });
   t.after(async () => { await act(async () => renderer.unmount()); });
   const root = () => renderer.root;
-  const scroll = () => root().findByType('ScrollView');
+  const scroll = () => root().findAllByType('FlatList')[0] ?? root().findByType('ScrollView');
+  const cell = index => root().findAllByType(scroll().props.CellRendererComponent).find(row => row.props.index === index).findByType('View');
   return {
-    parsing, renders, writes, fetches, nav, snackbars, modals, reads, scrolls,
-    output: () => output, commits: () => commits, text: () => JSON.stringify(renderer.toJSON(), (key, value) => key === 'refreshControl' ? undefined : value),
+    parsing, renders, writes, fetches, nav, snackbars, modals, reads, scrolls, focuses, cell,
+    list: () => root().findByType('FlatList'),
+    expireNavigation: async () => { await act(async () => {
+      for (const [id, callback] of [...navigationTimers]) { navigationTimers.delete(id); callback(); }
+    }); },
+    measure: async (index, y, height) => {
+      await act(async () => { cell(index).props.onLayout({ nativeEvent: { layout: { y, height } } }); }); },
+    changeItem: async next => { item = { ...item, ...next }; await act(async () => renderer.update(tree())); },
+    deferReads: (readItem, readBookmark) => { itemRead = readItem; bookmarkRead = readBookmark; },
+    rejectSave: error => { saveError = error; },
+    gesture: async () => { await act(async () => scroll().props.onScrollBeginDrag()); },
+    output: () => output, commits: () => commits, text: () => JSON.stringify(renderer.toJSON(), (key, value) => ['refreshControl', 'ListHeaderComponent'].includes(key) ? undefined : value),
     update: async next => { args = next; await act(async () => renderer.update(tree())); },
     resize: async next => { width = next; await act(async () => renderer.update(tree())); },
+    deferFetch: callback => { fetchReply = callback; },
     reply: next => { reply = next; }, fail: () => { fetchError = Error('Synthetic extraction failure'); },
     select: async next => { selection = next; await act(async () => { await poll(); }); },
     scroll: async y => { await act(async () => scroll().props.onScroll({ nativeEvent: { contentOffset: { y } } })); },
     height: async h => { await act(async () => scroll().props.onContentSizeChange(400, h)); },
+    viewport: async height => { await act(async () => scroll().props.onLayout({ nativeEvent: { layout: { height } } })); },
     bookmarkHandler: () => root().findAllByType('TopbarButton').find(n => n.findAllByType('MaterialIcons').some(i => i.props.name === 'bookmark-add'))?.props.onPress,
     menu: async title => {
       const entry = root().findByType('OverflowMenu').props.items.find(x => x.title === title);
@@ -171,27 +207,81 @@ test('disabled plain-text demand and error states never split', async t => {
   assert.equal(h.output().sentences, undefined); assert.equal(h.parsing.splitText, 0);
 });
 
-test('scroll does not commit React updates; a pre-scroll bookmark callback reads latest offset and clamps', async t => {
+test('native list is the only formatted scroller; no frame commits and a saved callback captures measured latest row', async t => {
   const h = await harness(t, { screen: true });
-  await h.height(1600);
+  const list = h.list().props;
+  assert.equal(list.initialNumToRender, 3); assert.equal(list.maxToRenderPerBatch, 3);
+  assert.equal(list.windowSize, 5); assert.equal(list.removeClippedSubviews, false); assert.equal(list.getItemLayout, undefined);
+  await h.measure(0, 300, 200); await h.measure(1, 500, 400);
   await h.select({ start: 1, end: 12, length: 12 });
   const mark = h.bookmarkHandler(); assert.ok(mark);
   const commits = h.commits(), renders = h.renders.length;
   for (const y of [10, 100, 200, 350, 720]) await h.scroll(y);
   assert.equal(h.commits(), commits); assert.equal(h.renders.length, renders);
   await h.run(mark);
-  assert.deepEqual(h.writes.at(-1), ['bookmark', 'article-1', 72]);
-  assert.equal(h.snackbars.at(-1), 'Bookmark saved at 72%');
-  await h.scroll(5000); await h.run(mark); assert.equal(h.writes.at(-1)[2], 99);
-  await h.scroll(-10); await h.run(mark); assert.equal(h.writes.at(-1)[2], 1);
-  await h.height(500); await h.run(h.bookmarkHandler()); assert.equal(h.writes.at(-1)[2], 50);
+  assert.equal(h.writes.at(-1)[0], 'bookmark');
+  const saved = h.writes.at(-1)[2]; assert.equal(saved.kind, 'article'); assert.equal(saved.offset, .55);
+  assert.equal(saved.blockKey, list.data[1].key); assert.equal(h.reads.length, 1);
+  assert.equal(h.snackbars.at(-1), 'Reading bookmark saved');
+  await h.action('Bookmark'); assert.deepEqual(json(h.scrolls.slice(-2)), [{ index: 1 }, { offset: 720, animated: false }]);
   await h.select(null); assert.equal(h.bookmarkHandler(), undefined);
   const count = h.writes.length; await h.run(mark);
   assert.equal(h.writes.length, count); assert.equal(h.modals.at(-1).title, 'Select text first');
-  await h.action('Bookmark'); assert.equal(h.scrolls.length, 1);
 });
 
-test('formatted renderer skips selection/layout updates and preserves source/config identities on resize', async t => {
+async function freshDeepBookmarkHarness(t) {
+  const html = Array.from({ length: 1000 }, (_, i) => `<p>Row ${i} with a <a href="https://example.test/${i}">link</a>.</p>`).join('');
+  const h = await harness(t, { screen: true, item: { article_html: html } });
+  await h.measure(0, 300, 200); await h.scroll(350); await h.select({ start: 1, end: 3, length: 3 });
+  await h.run(h.bookmarkHandler());
+  const saved = { ...h.writes.at(-1)[2], blockKey: h.list().props.data[950].key, offset: .5 };
+  h.deferReads(undefined, async () => saved);
+  await h.changeItem({ id: 'reopened-article' });
+  return h;
+}
+
+test('fresh deep bookmark remounts only a bounded target window, ignores stale list events and aligns measured geometry', async t => {
+  const h = await freshDeepBookmarkHarness(t), old = h.list();
+  const staleLayout = h.cell(0).props.onLayout, staleScroll = old.props.onScroll, staleDrag = old.props.onScrollBeginDrag;
+  const renders = h.renders.length, scrolls = h.scrolls.length;
+  await h.action('Bookmark');
+  const seeded = h.list(); assert.notEqual(seeded, old);
+  assert.equal(seeded.props.initialScrollIndex, 950);
+  assert.equal(seeded.props.initialNumToRender, 3); assert.equal(seeded.props.maxToRenderPerBatch, 3);
+  assert.equal(seeded.props.windowSize, 5); assert.equal(seeded.props.getItemLayout, undefined);
+  assert.equal(h.renders.length - renders, 3, 'only the seeded target window renders, not the prefix');
+  await h.run(() => {
+    staleLayout({ nativeEvent: { layout: { y: 300, height: 200 } } });
+    staleScroll({ nativeEvent: { contentOffset: { y: 12345 } } });
+    staleDrag();
+    seeded.props.onScrollToIndexFailed({ index: 950, averageItemLength: 200 });
+  });
+  assert.equal(h.scrolls.length, scrolls, 'no estimated acquisition scroll');
+  const focus = { target: 'link' }; await h.run(() => h.cell(950).props.onFocusCapture(focus));
+  assert.deepEqual(h.focuses.at(-1), [950, focus], 'custom cell forwards RN focus capture');
+  await h.measure(950, 20000, 800); assert.deepEqual(json(h.scrolls.at(-1)), { offset: 20400, animated: false });
+  await h.height(23000); assert.equal(h.scrolls.at(-1).offset, 20400);
+  await h.measure(950, 20200, 1200); assert.equal(h.scrolls.at(-1).offset, 20800);
+  const count = h.scrolls.length; await h.gesture(); await h.measure(950, 20300, 1400); await h.height(24000);
+  await h.expireNavigation(); assert.equal(h.scrolls.length, count);
+  assert.doesNotMatch(h.snackbars.at(-1), /Couldn't reach/);
+});
+
+test('unacquired deep bookmark surfaces snackbar once; gesture, geometry change and unmount cancel acquisition', async t => {
+  const h = await freshDeepBookmarkHarness(t);
+  await h.action('Bookmark'); await h.expireNavigation();
+  assert.match(h.snackbars.at(-1), /Couldn't reach this reading bookmark/);
+  const count = h.snackbars.length; await h.expireNavigation(); assert.equal(h.snackbars.length, count);
+  const scrolls = h.scrolls.length; await h.measure(950, 20000, 800); assert.equal(h.scrolls.length, scrolls);
+  // Reopen a fresh list so the next request has no measured target.
+  await h.resize(500); await h.action('Bookmark'); await h.gesture(); await h.expireNavigation();
+  await h.measure(950, 20000, 800); assert.equal(h.scrolls.length, scrolls);
+  assert.equal(h.snackbars.length, count);
+  await h.action('Bookmark'); await h.resize(600); await h.expireNavigation(); assert.equal(h.snackbars.length, count);
+  await h.action('Bookmark'); await h.menu('Show plain text'); await h.expireNavigation(); assert.equal(h.snackbars.length, count);
+});
+
+test('formatted rows skip selection/layout updates and retain shared config on geometry reset', async t => {
   const h = await harness(t, { screen: true });
   const initial = h.renders.at(-1), count = h.renders.length;
   assert.equal(initial.defaultTextProps.selectable, true);
@@ -200,9 +290,9 @@ test('formatted renderer skips selection/layout updates and preserves source/con
   assert.equal(h.renders.length, count);
   assert.deepEqual(h.parsing, { blocks: 0, splitBlocks: 0, splitText: 0 });
   await h.resize(800);
-  const resized = h.renders.at(-1); assert.equal(h.renders.length, count + 1);
+  const resized = h.renders.at(-1); assert.equal(h.renders.length, count * 2);
   assert.equal(resized.contentWidth - initial.contentWidth, 400);
-  for (const prop of ['source', 'baseStyle', 'tagsStyles', 'systemFonts', 'defaultTextProps']) assert.equal(resized[prop], initial[prop], prop);
+  for (const prop of ['baseStyle', 'tagsStyles', 'systemFonts', 'defaultTextProps']) assert.equal(resized[prop], initial[prop], prop);
   await h.refresh();
   assert.notEqual(h.renders.at(-1).source, initial.source);
   assert.match(h.renders.at(-1).source.html, /Fresh first/);
@@ -247,4 +337,78 @@ test('recipe and standalone text still render with their actions', async t => {
   const text = await harness(t, { screen: true, item: { type: 'text', uri: 'Standalone note.', article_html: null } });
   assert.match(text.text(), /Standalone note/); assert.equal(text.renders.length, 0);
   await text.action('Listen'); assert.deepEqual(text.nav, ['/listen/article-1']);
+});
+
+test('separate plain bookmark restores mode before fraction, follows image layout, then cancels on gesture/width', async t => {
+  const h = await harness(t, { screen: true, item: { listened_percent: 61 } });
+  await h.menu('Show plain text'); await h.viewport(600); await h.height(1600);
+  await h.select({ start: 1, end: 3, length: 3 }); const save = h.bookmarkHandler();
+  const commits = h.commits(); await h.scroll(720); assert.equal(h.commits(), commits);
+  await h.run(save);
+  assert.deepEqual(json(h.writes.at(-1)), ['bookmark', 'article-1', { version: 1, kind: 'scroll', mode: 'plain', fraction: .72 }]);
+  assert.match(h.text(), /61% listened/);
+  await h.menu('Show formatted'); await h.action('Bookmark');
+  assert.doesNotMatch(h.text(), /RenderedHtml/);
+  await h.viewport(600); await h.height(1600); assert.equal(h.scrolls.at(-1).y, 720);
+  await h.height(2600); assert.equal(h.scrolls.at(-1).y, 1440);
+  await h.gesture(); const count = h.scrolls.length; await h.height(3600); assert.equal(h.scrolls.length, count);
+  await h.action('Bookmark'); await h.resize(500); const afterResize = h.scrolls.length;
+  await h.height(4000); assert.equal(h.scrolls.length, afterResize);
+});
+
+test('article anchors restore through plain-mode transition, reject changed revision, cancel pending geometry work on resize', async t => {
+  const h = await harness(t, { screen: true });
+  await h.measure(0, 300, 200); await h.scroll(350); await h.select({ start: 1, end: 3, length: 3 });
+  await h.run(h.bookmarkHandler()); await h.menu('Show plain text');
+  await h.action('Bookmark'); assert.match(h.text(), /RenderedHtml/); assert.equal(h.list().props.initialScrollIndex, 0);
+  await h.measure(0, 400, 400); assert.equal(h.scrolls.at(-1).offset, 500);
+  await h.gesture(); const afterGesture = h.scrolls.length;
+  await h.measure(0, 450, 500); assert.equal(h.scrolls.length, afterGesture);
+  await h.action('Bookmark');
+  await h.resize(500); const count = h.scrolls.length; await h.measure(0, 500, 600); assert.equal(h.scrolls.length, count);
+  await h.refresh(); await h.action('Bookmark'); assert.equal(h.scrolls.length, count);
+  assert.match(h.snackbars.at(-1), /different article revision/);
+});
+
+test('item and bookmark loading races cannot leak a previous item or its navigation into a new screen', async t => {
+  const h = await harness(t, { screen: true });
+  let resolveItem, resolveBookmark;
+  h.deferReads(() => new Promise(resolve => { resolveItem = resolve; }), () => new Promise(resolve => { resolveBookmark = resolve; }));
+  await h.changeItem({ id: 'article-2', title: 'Second' });
+  const oldItem = resolveItem, oldBookmark = resolveBookmark;
+  await h.changeItem({ id: 'article-3', title: 'Third' });
+  await h.run(async () => {
+    resolveItem({ id: 'article-3', type: 'url', title: 'Third', uri: 'https://third.test', created_at: 1, article_html: HTML });
+    resolveBookmark(null);
+  });
+  await h.run(async () => {
+    oldItem({ id: 'article-2', type: 'url', title: 'Second', uri: 'https://second.test', created_at: 1 });
+    oldBookmark({ version: 1, kind: 'scroll', mode: 'raw', fraction: .9 });
+  });
+  assert.match(h.text(), /Third/); assert.doesNotMatch(h.text(), /"Second"|https:\/\/second.test/);
+  assert.match(h.text(), /RenderedHtml/); assert.equal(h.scrolls.length, 0);
+  assert.doesNotMatch(h.text(), /"Bookmark"/);
+});
+
+test('actual useArticle suppresses stale initial/refresh/archive completions and obsolete callbacks across item changes', async t => {
+  const h = await harness(t);
+  let resolve;
+  h.deferFetch(() => new Promise(done => { resolve = done; }));
+  const oldRefresh = h.output().refresh, oldArchive = h.output().loadFrom;
+  let work; await h.run(() => { work = oldRefresh(); });
+  await h.update(['https://next.test', 'next', null, '<p>Next document.</p>', null, false, false]);
+  await h.run(async () => { resolve({ title: 'Old', html: '<p>Wrong old document.</p>', recipe: RECIPE }); await work; });
+  assert.match(h.output().state.html, /Next document/); assert.equal(h.output().refreshing, false); assert.equal(h.writes.length, 0);
+  const fetches = h.fetches.length; await h.run(oldRefresh); await h.run(() => oldArchive('https://old.archive'));
+  assert.equal(h.fetches.length, fetches);
+  await h.run(() => { work = h.output().loadFrom('https://next.archive'); });
+  const oldResolve = resolve;
+  await h.update(['https://third.test', 'third', null, '<p>Third document.</p>', null, false, false]);
+  await h.run(async () => { oldResolve({ title: 'Wrong archive', html: '<p>Wrong archive.</p>', recipe: null }); await work; });
+  assert.match(h.output().state.html, /Third document/); assert.equal(h.writes.length, 0);
+  // An initial fetch cannot overwrite a subsequent stored document either.
+  await h.update(['https://fetch.test', 'fetch', null, null, null, false, false]); const initialResolve = resolve;
+  await h.update(['https://stored.test', 'stored', null, '<p>Stored.</p>', null, false, false]);
+  await h.run(async () => { initialResolve({ title: 'Late', html: '<p>Late.</p>', recipe: null }); });
+  assert.match(h.output().state.html, /Stored/); assert.equal(h.writes.length, 0);
 });

@@ -35,6 +35,8 @@ function harness({ dev = true, optIn = false, platform = 'android', effects = fa
     'src/utils/nativeShareIntent': { isShareLaunch: () => false }, 'src/utils/randomId': { randomId: () => 'id' },
     'src/state/modalState': modal, '../state/modalState': modal,
     '../db/items': db, '../db/folders': db, '../db/textSubstitutions': db,
+    '../db/readerBookmarks': { getReaderBookmark: async () => null, saveReaderBookmark: reject('saveReaderBookmark') },
+    '../utils/readerChunks': { chunkArticle: () => null },
     '../db/database': {}, '../db/syncReplica': {}, '../db/syncClient': {}, '../db/syncLogin': {}, '../db/syncReplicaSmoke': {},
     '../db/mediaQueue': { retryStashImages: async () => {} },
     '../utils/backup': {}, '../utils/randomId': { randomId: () => 'id' },
@@ -42,7 +44,7 @@ function harness({ dev = true, optIn = false, platform = 'android', effects = fa
     '../state/voiceState': { useVoiceStore: selector => selector({ voices: [] }) },
     '../state/folderState': { useFolderStore: () => ({ refresh: async () => {} }) },
     'src/state/scrollTopState': { useScrollTopState: selector => selector({ setHandler() {} }) },
-    'src/state/snackbarState': { showSnackbar() {} },
+    'src/state/snackbarState': { showSnackbar() { calls.push('snackbar'); } },
     '../hooks/useArticle': { useArticle: () => ({ state: { kind: 'loading' } }) },
     '../utils/readability': {}, '../utils/speech': {}, '../utils/recipe': {}, '../utils/auRecipe': {}, '../state/recipeCheckState': {},
     'expo-clipboard': {}, 'expo-file-system/legacy': {}, 'expo-intent-launcher': {}, 'expo-sharing': {},
@@ -112,9 +114,10 @@ for (const remove of [false,true]) test(`actual move membership handler catches 
 test('actual item bookmark action catches recovery error and does not claim success', async () => {
   const h = harness();
   const item = { id:'id',type:'url',uri:'https://example.test' };
-  const tree = h.render('src/screens/ItemDetailScreen.tsx',[item,false,true,false,false,false,600,true], [100,null,null,{start:1,end:2}]);
+  const tree = h.render('src/screens/ItemDetailScreen.tsx',[item,false,true,false,false,false,null,true], [600,400,null,null,null,null,'id',100,null,null,{start:1,end:2}]);
   const bookmark = nodes(tree).find(n => n.props?.children?.some(c => c?.props?.name === 'bookmark-add'));
-  assert.ok(bookmark); await bookmark.props.onPress(); recoveryMessage(h,'updateItemListenedPercent');
+  assert.ok(bookmark); await bookmark.props.onPress(); recoveryMessage(h,'saveReaderBookmark');
+  assert.ok(!h.calls.includes('updateItemListenedPercent')); assert.ok(!h.calls.includes('snackbar'));
 });
 
 for (const target of ['folder','folder-item','item']) test(`actual ${target} archive confirmation is caught by actual ModalHost`, async () => {
