@@ -103,7 +103,7 @@ export default function SyncSettingsScreen() {
   return (
     <Screen options={{ title: "Sync" }}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        {!STASH_SYNC_DEV_TOOLS ? <Text style={styles.note}>Sync requires an Android development or explicitly opted-in sync build.</Text> : !status ? <Text style={styles.note}>Checking sync status…</Text> : (
+        {!STASH_SYNC_DEV_TOOLS ? <Text style={styles.note}>Sync requires Android.</Text> : !status ? <Text style={styles.note}>Checking sync status…</Text> : (
           <View style={styles.panel}>
             <Text style={styles.heading}>Experimental sync (Android only)</Text>
             <Text style={styles.note}>Experimental: use a disposable Stash backup. Verified logins are saved in device secure storage. Sync requires a matching Stash server schema.</Text>

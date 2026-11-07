@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
 
-// Keep direct env access: Expo inlines EXPO_PUBLIC_* at build time.
-export const STASH_SYNC_DEV_TOOLS = Platform.OS === "android" &&
-  (__DEV__ || process.env.EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS === "1");
+// Legacy export name retained for compatibility; sync is available in every Android
+// build, not just development builds. CR-SQLite is not packaged on iOS or web.
+export const STASH_SYNC_DEV_TOOLS = Platform.OS === "android";

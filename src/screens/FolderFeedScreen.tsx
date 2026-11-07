@@ -86,7 +86,7 @@ export default function FolderFeedScreen() {
       if (generation === epoch.current) setMessage("Clean Atom URL copied (no credentials).");
     } catch { if (generation === epoch.current) setMessage("Could not copy URL."); }
   };
-  const unavailable = !STASH_SYNC_DEV_TOOLS ? "Feeds require an Android development or explicitly opted-in sync build." : !ready ? "Connect/prepare in Settings → Sync and wait for a complete exchange. Offline, recovery-pending and disconnected sessions cannot confirm publication." : "Refresh to confirm backend feed status.";
+  const unavailable = !STASH_SYNC_DEV_TOOLS ? "Feeds require Android." : !ready ? "Connect/prepare in Settings → Sync and wait for a complete exchange. Offline, recovery-pending and disconnected sessions cannot confirm publication." : "Refresh to confirm backend feed status.";
   const action = (label: string, onPress: () => void, disabled = false) => <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={[styles.button, disabled && { opacity: 0.5 }]}><Text style={styles.link}>{label}</Text></Pressable>;
   return <Screen options={{ title: "Folder feed" }}><ScrollView contentContainerStyle={styles.body}>
     <Text style={styles.heading}>{busy ? "Pending — waiting for backend confirmation…" : settings ? "Available — private authenticated feed" : "Unavailable — status not confirmed"}</Text>

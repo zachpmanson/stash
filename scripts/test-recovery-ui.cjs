@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness({ dev = true, optIn = false, platform = 'android', effects = false } = {}) {
+function harness({ dev = false, optIn = false, platform = 'android', effects = false } = {}) {
   let states = [], refs = [], cursor = 0, refCursor = 0, current = null;
   const calls = [], navigation = [], modules = new Map();
   let effectCursor = 0, effectSlots = [], pendingEffects = [], cleanups = [];
@@ -164,11 +164,12 @@ const inputs = tree => nodes(tree).filter(n => n.type === 'TextInput');
 const deferred = () => { let resolve, reject; const promise = new Promise((yes,no) => { resolve=yes; reject=no; }); return { promise, resolve, reject }; };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const builds = [
-  {dev:false,optIn:false,platform:'android',allowed:false},
+  {dev:false,optIn:false,platform:'android',allowed:true},
   {dev:false,optIn:true,platform:'android',allowed:true},
   {dev:true,optIn:false,platform:'android',allowed:true},
   {dev:true,optIn:true,platform:'ios',allowed:false},
   {dev:false,optIn:true,platform:'ios',allowed:false},
+  {dev:true,optIn:true,platform:'web',allowed:false},
 ];
 for (const build of builds) test(`actual Settings row and direct Sync page obey shared build gate: ${JSON.stringify(build)}`, () => {
   const h = harness(build), tree = h.render(settingsFile,[null,true,false]);
@@ -178,7 +179,7 @@ for (const build of builds) test(`actual Settings row and direct Sync page obey 
   assert.ok(!words(tree).includes('Prepare this install'));
   assert.ok(!words(tree).includes('Connect and sync'));
   const banner = nodes(tree).find(n => n.type === 'Text' && words(n).includes('Restored locally'));
-  assert.match(words(banner),build.allowed ? /Settings → Sync/ : /Recovery requires an Android/);
+  assert.match(words(banner),build.allowed ? /Settings → Sync/ : /Recovery requires Android/);
   assert.ok(banner.props.style.color);
   if (row) { row.props.onPress(); assert.deepEqual(h.navigation,['/settings/sync']); }
   // Effects are disabled in this gate-only case; inject the subscribed signed-out state.

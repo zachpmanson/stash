@@ -16,7 +16,7 @@ const account = { username: 'synthetic-owner', serverUrl: 'https://feeds.example
 const active = (phase = 'synced', extra = {}) => ({ phase, account, ...extra });
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
-async function harness(t, { initial = { phase: 'stopped' }, dev = true, optIn = false, platform = 'android', edit = false } = {}) {
+async function harness(t, { initial = { phase: 'stopped' }, dev = false, optIn = false, platform = 'android', edit = false } = {}) {
   let status = initial, folderId = 'folder-a', subscriptions = 0, unsubscribed = 0, renderer;
   const listeners = new Set(), nav = [], requests = [], reads = [], scroll = [], writes = [], modals = [], modules = new Map();
   const PaperMenu = ({ visible, anchor, onDismiss, children }) => React.createElement('PaperMenu', { visible, onDismiss }, anchor, visible ? children : null);
@@ -151,10 +151,11 @@ for (const phase of ['synced', 'syncing', 'error']) test(`FolderScreen shows a l
 });
 
 for (const config of [
-  { dev: false, optIn: false, platform: 'android', allowed: false },
+  { dev: false, optIn: false, platform: 'android', allowed: true },
   { dev: false, optIn: true, platform: 'android', allowed: true },
   { dev: true, optIn: false, platform: 'ios', allowed: false },
   { dev: false, optIn: true, platform: 'ios', allowed: false },
+  { dev: true, optIn: true, platform: 'web', allowed: false },
 ]) test(`FolderScreen build gate ${JSON.stringify(config)}`, async t => {
   const h = await harness(t, { ...config, initial: active() });
   await h.openMenu();

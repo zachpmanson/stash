@@ -14,7 +14,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const account = { username: 'synthetic-owner', serverUrl: 'https://sync.example/' };
 const active = (phase = 'synced', extra = {}) => ({ phase, account, media: { pending: 0, errors: 0 }, ...extra });
 
-async function harness(t, { initial = { phase: 'stopped' }, saved = { busy: false }, dev = true, optIn = false, platform = 'android', share = false } = {}) {
+async function harness(t, { initial = { phase: 'stopped' }, saved = { busy: false }, dev = false, optIn = false, platform = 'android', share = false } = {}) {
   let status = initial, login = saved, renderer;
   const listeners = new Set(), loginListeners = new Set(), nav = [];
   const subscriptions = { status: 0, login: 0, statusCleanups: 0, loginCleanups: 0 };
@@ -146,11 +146,12 @@ test('home shortcut cleans up both subscriptions, remounts fresh and never displ
 });
 
 for (const config of [
-  { dev: false, optIn: false, platform: 'android', visible: false },
+  { dev: false, optIn: false, platform: 'android', visible: true },
   { dev: false, optIn: true, platform: 'android', visible: true },
   { dev: true, optIn: false, platform: 'android', visible: true },
   { dev: true, optIn: false, platform: 'ios', visible: false },
   { dev: false, optIn: true, platform: 'ios', visible: false },
+  { dev: true, optIn: true, platform: 'web', visible: false },
   { dev: true, optIn: false, platform: 'android', share: true, visible: false },
 ]) test(`home shortcut respects build/platform/share gates ${JSON.stringify(config)}`, async t => {
   const h = await harness(t, { ...config, initial: active() });

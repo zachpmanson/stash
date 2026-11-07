@@ -36,6 +36,8 @@ Finalize retries with identical fields return the same item. Changed retry field
 
 ## Android
 
+Sync is available by default in all Android builds, including releases, without a build flag. Saved eligible logins reconnect normally at startup; preparation, authentication, recovery and signout/drain barriers are unchanged. This does not force login, seed a replica or start a background service. iOS and web-native sync remain unavailable (no packaged CR-SQLite).
+
 The separately durable device-local `stash_media_queue_v1` is keyed by normalized account + item ID; it contains direction, local source path, attempts, retry deadline and sanitized status, **never credentials**. `stash_media_local_v1` contains verified local download mappings only. These are not replicated.
 
 After the full metadata/recovery exchange, one serial byte transfer runs per cycle. Existing local images are discovered without reimport/ID changes; remote images wait normally for bytes. Network failures/404s use bounded exponential backoff, unsupported/conflicting/oversize images require explicit retry, and Settings → Sync shows pending/retrying/error counts plus **Retry image transfers**. Metadata completion is labelled separately from image completion. Reconnect rechecks completed local originals, allowing backfill after backend restore; exact bytes deduplicate. This may retransmit originals after reconnect rather than trusting stale server availability.
@@ -91,7 +93,7 @@ Media tests cover duplicate/conflicting/hash-mismatched/interrupted uploads, nat
 Self-contained ARM64 debug APK, **no installation/ADB**:
 
 ```sh
-nix develop --command bash -c 'export NODE_ENV=production EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS=1; pnpm exec expo prebuild --platform android --no-install; /home/beltino/beltino/scripts/build-capped.sh "$PWD" -- --no-daemon assembleDebug -PreactNativeArchitectures=arm64-v8a'
+nix develop --command bash -c 'export NODE_ENV=production; pnpm exec expo prebuild --platform android --no-install; /home/beltino/beltino/scripts/build-capped.sh "$PWD" -- --no-daemon assembleDebug -PreactNativeArchitectures=arm64-v8a'
 ```
 
-The capped runner takes the **project root**, not `android/`. Verify `.debug` app ID/signature, embedded JS, ARM64 `libcrsqlite.so`, compiled SecureStore class and patched persistence error string before delivery. Ordinary release sync opt-in remains unchanged.
+The capped runner takes the **project root**, not `android/`. Verify `.debug` app ID/signature, embedded JS, ARM64 `libcrsqlite.so`, compiled SecureStore class and patched persistence error string before delivery. Ordinary Android releases expose sync by default, with no build flag.

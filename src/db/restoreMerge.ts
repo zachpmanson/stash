@@ -42,7 +42,7 @@ export async function classifyRestoreSourceOwned(db: SQLiteDatabase): Promise<"l
     throw new Error("Unsupported backup sync schema or seed version; no data was replaced.");
   }
   if (!STASH_SYNC_DEV_TOOLS) {
-    throw new Error("Synced backup recovery requires an Android development or explicitly opted-in sync build. No data was replaced.");
+    throw new Error("Synced backup recovery requires Android. No data was replaced.");
   }
   await ensureCrsqliteLoaded(db);
   await assertRecoveryConfigurationOwned(db);

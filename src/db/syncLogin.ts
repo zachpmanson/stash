@@ -23,18 +23,18 @@ subscribeStashSyncStatus((status) => {
   }
 });
 
-// Keep the same Android dev/explicit opt-in gate at the actual entry points,
+// Keep the Android platform gate at the actual entry points,
 // including startup and direct routes. Bootstrap never prepares or seeds a DB.
 export const subscribeSavedStashLogin = savedLogin.subscribe;
 export function bootstrapSavedStashLogin() {
   return STASH_SYNC_DEV_TOOLS ? savedLogin.bootstrap() : Promise.resolve();
 }
 export function retrySavedStashLogin() {
-  if (!STASH_SYNC_DEV_TOOLS) return Promise.reject(new Error("Sync is not enabled in this build."));
+  if (!STASH_SYNC_DEV_TOOLS) return Promise.reject(new Error("Sync is only available on Android."));
   return savedLogin.retry();
 }
 export function signInStashSync(serverUrl: string, username: string, password: string) {
-  if (!STASH_SYNC_DEV_TOOLS) return Promise.reject(new Error("Sync is not enabled in this build."));
+  if (!STASH_SYNC_DEV_TOOLS) return Promise.reject(new Error("Sync is only available on Android."));
   return savedLogin.login(serverUrl, username, password);
 }
 export const forgetSavedStashLogin = savedLogin.forget;
