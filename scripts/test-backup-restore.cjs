@@ -250,7 +250,6 @@ test('supported local-only migrations do not require original SQLite column orde
 });
 
 for (const build of [
-  { dev: false, optIn: false, platform: 'android' },
   { dev: false, optIn: true, platform: 'ios' },
   { dev: true, optIn: false, platform: 'web' },
 ]) test(`seeded restore rejects unsupported build before touching active sync/DB/media: ${JSON.stringify(build)}`, async () => {
@@ -270,7 +269,7 @@ for (const build of [
     const media = new h.File(h.Paths.document, 'stash', 'keep.jpg'); media.create({ intermediates: true }); media.write('unchanged');
     const before = await api.withAppDb(async db => Buffer.from(await db.serializeAsync()));
     const closes = h.events.filter(event => event.includes('/document/SQLite') && event.startsWith('close:')).length;
-    await assert.rejects(h.load('src/utils/backup.ts').restoreBackup(source.directory.uri), /Android|android|opted-in/);
+    await assert.rejects(h.load('src/utils/backup.ts').restoreBackup(source.directory.uri), /Android/);
     assert.equal(stops, 0);
     assert.deepEqual(await api.withAppDb(async db => Buffer.from(await db.serializeAsync())), before);
     assert.equal(h.events.filter(event => event.includes('/document/SQLite') && event.startsWith('close:')).length, closes);
@@ -281,12 +280,12 @@ for (const build of [
   } finally { if (sync) await sync.disconnectStashSyncAndWait(); await h.cleanup(); }
 });
 
-test('explicitly opted-in Android release supports seeded recovery; non-opt-in release supports local-only restore', async () => {
+test('Android release without opt-in supports seeded recovery; local-only restore remains supported', async () => {
   for (const [seeded, platform] of [[false, 'android'], [false, 'ios'], [true, 'android']]) {
     const h = await createNativeHarness();
     try {
       const source = await fixture(h, { seeded });
-      h.options.dev = false; h.options.optIn = seeded; h.options.platform = platform;
+      h.options.dev = false; h.options.optIn = false; h.options.platform = platform;
       assert.equal((await h.load('src/utils/backup.ts').restoreBackup(source.directory.uri)).recoveryPending, seeded);
     } finally { await h.cleanup(); }
   }

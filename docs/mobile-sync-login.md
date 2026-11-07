@@ -1,6 +1,6 @@
 # Mobile saved sync login
 
-Eligible Android development or explicitly opted-in builds remember a login **only after** the existing authenticated health/schema check and client setup succeed. Root startup tries that saved account once; opening Settings is not required. Preparation is still explicit. Startup does not seed a replica, change DB ownership/schema identity, bypass recovery, or enable sync in ordinary release/iOS builds.
+All Android builds, including ordinary releases, expose sync without a build flag and remember a login **only after** the existing authenticated health/schema check and client setup succeed. Root startup tries that saved account once; opening Settings is not required. Preparation is still explicit. Startup does not seed a replica, change DB ownership/schema identity, bypass recovery, or force login. iOS and web-native sync remain unavailable because CR-SQLite is packaged only on Android.
 
 ## Trust boundaries
 
@@ -12,14 +12,14 @@ Eligible Android development or explicitly opted-in builds remember a login **on
 
 ## Home sync shortcut
 
-Eligible Android builds show a sync button in the home action bar, opening the existing **Settings → Sync** page. It observes the existing client and saved-login state without connecting, preparing a replica, or making database/network requests itself:
+All Android builds show a sync button in the home action bar, opening the existing **Settings → Sync** page. It observes the existing client and saved-login state without connecting, preparing a replica, or making database/network requests itself:
 
 - **Grey / cloud off:** not logged in (including rejected authentication).
 - **Amber / sync warning:** not synced, offline with a retained account, draining/restart-required, or image transfers reporting retries/failures.
 - **Blue / sync arrows:** connecting/exchanging metadata, checking the image queue, or supported image transfers pending without a reported error.
 - **Green / cloud check:** authenticated client reports metadata synced **and** a checked image queue with zero pending/errors. Saved credentials or metadata-only convergence cannot make it green.
 
-Each state has a distinct icon and screen-reader label, not colour alone. It follows live subscriptions and removes them on unmount. This is the client's last reported state, not an independent live-server audit or a promise that unsupported media is transferable. Ordinary release/iOS gates remain unchanged; the shortcut does not enable sync in those builds.
+Each state has a distinct icon and screen-reader label, not colour alone. It follows live subscriptions and removes them on unmount. This is the client's last reported state, not an independent live-server audit or a promise that unsupported media is transferable. Preparation, authentication, recovery and signout barriers remain unchanged; availability is not forced login, replica seeding or a background service.
 
 ## Native storage and restore limitations
 
@@ -49,9 +49,9 @@ For the final **self-contained ARM64 debug** artifact (parent owns build/deliver
 ```sh
 # Prepare pinned libraries if not already present in this checkout:
 nix develop --command ./scripts/prepare-crsqlite-android.sh
-nix develop --command bash -c 'NODE_ENV=production EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS=1 pnpm exec expo prebuild --platform android --no-install'
-NODE_ENV=production EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS=1 \
+nix develop --command bash -c 'NODE_ENV=production pnpm exec expo prebuild --platform android --no-install'
+NODE_ENV=production \
   /home/beltino/beltino/scripts/build-capped.sh "$PWD" -- assembleDebug -PreactNativeArchitectures=arm64-v8a
 ```
 
-The existing debug plugin retains `applicationIdSuffix ".debug"`, **Stash (debug)**, and `debuggableVariants = []` (JS embedded, no Metro). `ANDROID_HOME` must point to the existing SDK; use existing `.env` build throttles with the capped runner. Artifact: `android/app/build/outputs/apk/debug/app-debug.apk`. No install/deploy/ADB command is part of this task. Release build commands and the release sync opt-in gate are unchanged; do not enable sync for an ordinary release build accidentally.
+The existing debug plugin retains `applicationIdSuffix ".debug"`, **Stash (debug)**, and `debuggableVariants = []` (JS embedded, no Metro). `ANDROID_HOME` must point to the existing SDK; use existing `.env` build throttles with the capped runner. Artifact: `android/app/build/outputs/apk/debug/app-debug.apk`. No install/deploy/ADB command is part of this task. Ordinary Android release builds also expose sync by default; no sync build flag is required.

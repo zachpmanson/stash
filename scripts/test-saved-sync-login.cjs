@@ -14,7 +14,7 @@ test('Android autolinking builds patched SecureStore from source instead of a pr
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   assert.deepEqual(manifest.expo?.autolinking?.android?.buildFromSource, ['expo-secure-store']);
 });
-function harness({ allowed = true, disk = new Map() } = {}) {
+function harness({ platform = 'android', dev = false, flag, disk = new Map() } = {}) {
   const cache = new Map(), calls = [], options = {}, listeners = new Set();
   let status = {phase:'stopped'}, saved;
   const publish = next => { status=next; for (const fn of listeners) fn(next); };
@@ -41,14 +41,14 @@ function harness({ allowed = true, disk = new Map() } = {}) {
   const mocks = {
     'expo-secure-store': secure,
     'src/db/syncClient.ts': client,
-    'src/utils/syncBuildGate.ts': {STASH_SYNC_DEV_TOOLS:allowed},
+    'react-native': { Platform: { OS: platform } },
   };
   function load(file, extra='') {
     if(file in mocks) return mocks[file];
     if(cache.has(file)) return cache.get(file).exports;
     const module={exports:{}}; cache.set(file,module);
     const code=ts.transpileModule(fs.readFileSync(path.join(__dirname,'..',file),'utf8')+extra,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
-    vm.runInNewContext(code,{module,exports:module.exports,URL,console,require:spec=>{
+    vm.runInNewContext(code,{module,exports:module.exports,URL,console,__DEV__:dev,process:{env:flag === undefined ? {} : {EXPO_PUBLIC_STASH_SYNC_DEV_TOOLS:flag}},require:spec=>{
       if(spec in mocks) return mocks[spec];
       if(spec.startsWith('.')) return load(path.posix.normalize(path.posix.join(path.posix.dirname(file),spec))+'.ts');
       throw Error(`Unexpected import ${spec}`);
@@ -78,10 +78,10 @@ test('verified login alone is normalized and saved; fresh process restores once,
   const next=harness({disk:h.disk});await next.api.bootstrapSavedStashLogin();assert.equal(next.count('connect'),0);
 });
 
-test('build gate blocks both startup and actual sign-in/retry adapters, without reading secure storage',async()=>{
-  const h=harness({allowed:false});h.seed();await h.api.bootstrapSavedStashLogin();
-  await assert.rejects(h.api.signInStashSync(login.serverUrl,login.username,login.password),/not enabled/);
-  await assert.rejects(h.api.retrySavedStashLogin(),/not enabled/);assert.equal(h.calls.length,0);
+for (const platform of ['ios','web']) test(`platform gate blocks ${platform} startup and sign-in/retry even with legacy opt-in, without reading secure storage`,async()=>{
+  const h=harness({platform,dev:true,flag:'1'});h.seed();await h.api.bootstrapSavedStashLogin();
+  await assert.rejects(h.api.signInStashSync(login.serverUrl,login.username,login.password),/only available on Android/);
+  await assert.rejects(h.api.retrySavedStashLogin(),/only available on Android/);assert.equal(h.calls.length,0);
 });
 
 for(const serverUrl of ['http://sync.example/','https://alice:password@sync.example/','file:///tmp/private']) test(`unsafe server identity is never stored or connected: ${serverUrl}`,async()=>{

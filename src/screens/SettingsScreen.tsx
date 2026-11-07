@@ -101,7 +101,7 @@ export default function SettingsScreen() {
     <Screen options={{ title: "Settings" }}>
       <VoicePickerModal visible={voiceMenu !== null} mode={voiceMenu ?? "primary"} onClose={() => setVoiceMenu(null)} />
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        {recoveryPending && <Text style={styles.pendingBanner}>Restored locally — read-only until a full server merge completes. {STASH_SYNC_DEV_TOOLS ? "Open Settings → Sync to connect." : "Recovery requires an Android development or explicitly opted-in sync build."}</Text>}
+        {recoveryPending && <Text style={styles.pendingBanner}>Restored locally — read-only until a full server merge completes. {STASH_SYNC_DEV_TOOLS ? "Open Settings → Sync to connect." : "Recovery requires Android."}</Text>}
         <Row
           icon="save-alt"
           label="Back up data"
