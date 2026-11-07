@@ -21,13 +21,16 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import RenderHtml from "react-native-render-html";
+import VirtualArticle, { VirtualArticleHandle } from "../components/VirtualArticle";
+import { chunkArticle } from "../utils/readerChunks";
+import { getReaderBookmark, saveReaderBookmark } from "../db/readerBookmarks";
+import type { ReaderBookmark, ReaderMode } from "../utils/readerBookmark";
 import OverflowMenu from "src/components/OverflowMenu";
 import TopbarButton from "src/components/TopbarButton";
 import { showModal } from "src/state/modalState";
 import { showSnackbar } from "src/state/snackbarState";
 import Screen from "../components/Screen";
-import { archiveItem, getItemById, updateItemListenedPercent } from "../db/items";
+import { archiveItem, getItemById } from "../db/items";
 
 interface TextSelectionApi {
   getSelection?: (tag: number) => Promise<{ start: number; end: number; length: number } | null>;
@@ -57,13 +60,21 @@ export default function ItemDetailScreen() {
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [useLargestExtraction, setUseLargestExtraction] = useState(false);
   const [convertVolume, setConvertVolume] = useState(false);
-  const [contentHeight, setContentHeight] = useState(0);
-  const [scrollY, setScrollY] = useState(0);
+  const contentHeightRef = useRef(0);
+  const viewportHeightRef = useRef(0);
+  const [bookmark, setBookmark] = useState<ReaderBookmark | null>(null);
+  const bookmarkRef = useRef<ReaderBookmark | null>(null);
+  const pendingArticleRef = useRef<ReaderBookmark | null>(null);
+  const pendingFractionRef = useRef<{ geometry: string; fraction: number } | null>(null);
+  const virtualRef = useRef<VirtualArticleHandle>(null);
+  const activeItemRef = useRef(itemId);
+  activeItemRef.current = itemId;
+  const scrollYRef = useRef(0);
   const [selActive, setSelActive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const articleRef = useRef<View>(null);
   const selectionCacheRef = useRef<{ start: number; end: number; length: number } | null>(null);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
   const {
     state: articleState,
     sentences,
@@ -77,7 +88,29 @@ export default function ItemDetailScreen() {
     item?.article_html,
     item?.recipe_json,
     useLargestExtraction,
+    splitBySentence,
   );
+
+  const html = articleState.kind === "ready" ? articleState.html : null;
+  const document = useMemo(() => html ? chunkArticle(html) : null, [html]);
+  const virtual = item?.type === "url" && articleState.kind === "ready" && !articleState.recipe &&
+    !!document && !showRawHtml && showFormatted && !splitBySentence;
+  const mode: ReaderMode = articleState.kind === "ready" && articleState.recipe ? "recipe" :
+    showRawHtml && html ? "raw" : splitBySentence ? "sentences" : "plain";
+  const geometryKey = `${itemId}:${document?.revision}:${virtual}:${mode}:${windowWidth}:${fontScale}`;
+  useEffect(() => {
+    scrollYRef.current = 0;
+    contentHeightRef.current = 0;
+    selectionCacheRef.current = null;
+    setSelActive(false);
+    const pending = pendingFractionRef.current;
+    if (pending && pending.geometry !== geometryKey) pendingFractionRef.current = null;
+  }, [geometryKey]);
+  const applyFraction = useCallback(() => {
+    const pending = pendingFractionRef.current;
+    if (!pending || pending.geometry !== geometryKey || virtual || contentHeightRef.current <= 0) return;
+    scrollRef.current?.scrollTo({ y: pending.fraction * Math.max(0, contentHeightRef.current - viewportHeightRef.current), animated: false });
+  }, [geometryKey, virtual]);
 
   const readEstimate = useMemo(() => {
     // Recipe items show cook time instead of reading time.
@@ -99,35 +132,75 @@ export default function ItemDetailScreen() {
   );
 
   const handleMarkBookmark = useCallback(() => runUiAction(async () => {
-    if (!item || item.type !== "url") return;
+    if (!item || item.id !== activeItemRef.current || item.type !== "url") return;
     if (!selectionCacheRef.current) {
-      showModal({
-        title: "Select text first",
-        message: "Long-press the article and highlight your bookmark phrase, then tap the bookmark button.",
-      });
+      showModal({ title: "Select text first", message: "Long-press the article and highlight your bookmark phrase, then tap the bookmark button." });
       return;
     }
-    // Percent is based on scroll position (the reader's actual position), which
-    // round-trips with scroll-to-bookmark. Char offsets from native are only used
-    // to know that a selection exists — RN fragments text across views, so local
-    // offsets aren't a global fraction of the article.
-    const viewport = windowHeight ?? 0;
-    const maxScroll = contentHeight - viewport;
-    const percent = maxScroll > 0 ? Math.round((scrollY / maxScroll) * 100) : 50;
-    const clamped = Math.min(99, Math.max(1, percent));
-    await updateItemListenedPercent(item.id, clamped);
-    setItem(await getItemById(itemId));
-    showSnackbar(`Bookmark saved at ${clamped}%`);
-  }), [item, itemId, contentHeight, scrollY, windowHeight]);
+    const next: ReaderBookmark | null = virtual ? virtualRef.current?.capture() ?? null : {
+      version: 1, kind: "scroll", mode,
+      fraction: Math.max(0, Math.min(1, scrollYRef.current / Math.max(1, contentHeightRef.current - viewportHeightRef.current))),
+    };
+    if (!next) { showSnackbar("Reading position is not ready yet. Please try again."); return; }
+    const savedItem = item.id;
+    await saveReaderBookmark(savedItem, next);
+    if (activeItemRef.current !== savedItem) return;
+    bookmarkRef.current = next;
+    setBookmark(next);
+    showSnackbar("Reading bookmark saved");
+  }), [item, itemId, virtual, mode]);
+
+  const handleArticleRestoreFailed = useCallback(() => {
+    showSnackbar("Couldn't reach this reading bookmark. Please try again.");
+  }, []);
 
   const handleScrollToBookmark = useCallback(() => {
-    const pct = item?.listened_percent ?? 0;
-    if (pct <= 0 || contentHeight <= 0) return;
-    scrollRef.current?.scrollTo({ y: (pct / 100) * contentHeight, animated: true });
-  }, [item, contentHeight]);
+    if (item?.id !== activeItemRef.current) return;
+    const saved = bookmarkRef.current;
+    if (saved?.kind === "article") {
+      if (!document || saved.revision !== document.revision || !document.blocks.some(block => block.key === saved.blockKey) ||
+        (articleState.kind === "ready" && articleState.recipe)) {
+        showSnackbar("This bookmark belongs to a different article revision."); return;
+      }
+      setShowRawHtml(false); setSplitBySentence(false); setShowFormatted(true);
+      pendingArticleRef.current = saved;
+      if (virtualRef.current) { virtualRef.current.restore(saved); pendingArticleRef.current = null; }
+      return;
+    }
+    if (saved?.kind === "scroll") {
+      if ((saved.mode === "recipe") !== (articleState.kind === "ready" && !!articleState.recipe) || (saved.mode === "raw" && !html)) {
+        showSnackbar("This bookmark belongs to a different reader mode."); return;
+      }
+      setShowRawHtml(saved.mode === "raw"); setSplitBySentence(saved.mode === "sentences"); setShowFormatted(false);
+      pendingFractionRef.current = { geometry: `${itemId}:${document?.revision}:false:${saved.mode}:${windowWidth}:${fontScale}`, fraction: saved.fraction };
+      // Same-mode navigation has no React/layout transition to trigger the effect.
+      if (!virtual && saved.mode === mode) applyFraction();
+      return;
+    }
+    // Legacy listening progress remains approximate and is never migrated.
+    const fraction = (item?.listened_percent ?? 0) / 100;
+    if (fraction <= 0) return;
+    if (virtual) virtualRef.current?.scrollToFraction(fraction);
+    else scrollRef.current?.scrollTo({ y: fraction * contentHeightRef.current, animated: true });
+  }, [item, itemId, document, articleState, virtual, html, mode, applyFraction, windowWidth, fontScale]);
+  useEffect(() => {
+    const pending = pendingArticleRef.current;
+    if (pending && virtualRef.current) {
+      if (pending.kind === "article" && pending.revision === document?.revision) virtualRef.current.restore(pending);
+      pendingArticleRef.current = null;
+    }
+    applyFraction();
+  }, [geometryKey, document, applyFraction]);
 
   useEffect(() => {
-    getItemById(itemId).then(setItem);
+    let cancelled = false;
+    setItem(null); setBookmark(null); bookmarkRef.current = null;
+    pendingArticleRef.current = null; pendingFractionRef.current = null;
+    getItemById(itemId).then(value => { if (!cancelled) setItem(value); }).catch(() => {});
+    getReaderBookmark(itemId).then(value => {
+      if (!cancelled && bookmarkRef.current === null) { bookmarkRef.current = value; setBookmark(value); }
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [itemId]);
 
   // While focused, poll the native text selection so the bookmark button appears
@@ -137,23 +210,26 @@ export default function ItemDetailScreen() {
     useCallback(() => {
       const getSel = TextSelection?.getSelection;
       if (!getSel) return;
+      let cancelled = false;
       const tick = async () => {
         const tag = findNodeHandle(articleRef.current);
         if (!tag) return;
         try {
           const sel = await getSel(tag);
+          if (cancelled) return;
           const active = !!sel && sel.start >= 0 && sel.end > sel.start && sel.length > 0;
           selectionCacheRef.current = active ? sel : null;
           setSelActive(active);
         } catch {
+          if (cancelled) return;
           selectionCacheRef.current = null;
           setSelActive(false);
         }
       };
       tick();
       const id = setInterval(tick, 400);
-      return () => clearInterval(id);
-    }, []),
+      return () => { cancelled = true; clearInterval(id); };
+    }, [geometryKey]),
   );
 
   const handleOpen = useCallback(() => {
@@ -213,7 +289,79 @@ export default function ItemDetailScreen() {
     });
   }, [item, router]);
 
-  if (!item) return null;
+  if (!item || item.id !== itemId) return null;
+
+  const header = (<>
+        {item.type === "image" && (
+          <Pressable onPress={handleOpenImage}>
+            <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />
+          </Pressable>
+        )}
+
+        {item.type === "url" && item.thumbnail_path && (
+          <Image source={{ uri: item.thumbnail_path }} style={styles.ogImage} resizeMode="cover" />
+        )}
+
+        <View style={styles.body}>
+          {item.title ? <Text style={styles.title}>{item.title}</Text> : null}
+
+          {item.type === "url" && (
+            <Pressable onPress={handleOpen}>
+              <Text style={styles.url} numberOfLines={3}>
+                {item.uri}
+              </Text>
+            </Pressable>
+          )}
+
+          {item.type === "text" && (
+            <Text style={styles.textContent} selectable>
+              {item.uri}
+            </Text>
+          )}
+
+          {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
+
+          <Text style={styles.meta}>
+            Saved {new Date(item.created_at).toLocaleString()}
+            {readEstimate ? ` · ${readEstimate}` : ""}
+            {(item.listened_percent ?? 0) > 0 ? ` · ${item.listened_percent}% listened` : ""}
+          </Text>
+
+          {(item.listened_percent ?? 0) > 0 && (item.listened_percent ?? 0) < 100 && (item.type === "url" || item.type === "text") && (
+            <View style={styles.listenProgressBar}>
+              <View style={[styles.listenProgressFill, { width: `${item.listened_percent ?? 0}%` }]} />
+            </View>
+          )}
+
+          <View style={styles.actions}>
+            {item.lat != null && item.lng != null && (
+              <ActionButton
+                label="Open in Maps"
+                icon="📍"
+                onPress={() =>
+                  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`)
+                }
+              />
+            )}
+            {item.type === "url" && (
+              <>
+                <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
+                {(bookmark || (item.listened_percent ?? 0) > 0) && (
+                  <ActionButton label="Bookmark" icon="🔖" onPress={handleScrollToBookmark} />
+                )}
+                <ActionButton label="Open" icon="🌐" onPress={handleOpen} />
+                <ActionButton label="Copy" icon="📋" onPress={handleCopy} />
+              </>
+            )}
+            {item.type === "text" && (
+              <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
+            )}
+            <ActionButton label="Share" icon="↗️" onPress={handleShare} />
+            <ActionButton label="Archive" icon="🗃️" onPress={handleArchive} danger />
+          </View>
+
+        </View>
+  </>);
 
   return (
     <Screen
@@ -270,11 +418,26 @@ export default function ItemDetailScreen() {
         </>
       }
     >
-      <ScrollView
+      <View ref={articleRef} collapsable={false} style={{ flex: 1 }}>
+      {virtual && document ? <VirtualArticle
+        key={geometryKey}
+        ref={virtualRef}
+        document={document}
+        width={windowWidth - Spacing.md * 2}
+        header={<>{header}<View style={[styles.article, { marginHorizontal: Spacing.md }]} /></>}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshArticle} tintColor={Colors.accent} />}
+        baseStyle={styles.articleText}
+        tagsStyles={htmlTagStyles}
+        onScroll={e => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+        onRestoreFailed={handleArticleRestoreFailed}
+      /> : <ScrollView
+        key={geometryKey}
         ref={scrollRef}
-        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
-        onContentSizeChange={(_w, h) => setContentHeight(h)}
+        onContentSizeChange={(_w, h) => { contentHeightRef.current = h; applyFraction(); }}
+        onLayout={event => { viewportHeightRef.current = event.nativeEvent.layout.height; }}
+        onScrollBeginDrag={() => { pendingFractionRef.current = null; pendingArticleRef.current = null; }}
         contentContainerStyle={{ paddingBottom: Spacing.xl }}
         refreshControl={
           item.type === "url" ? (
@@ -282,76 +445,9 @@ export default function ItemDetailScreen() {
           ) : undefined
         }
       >
-        {item.type === "image" && (
-          <Pressable onPress={handleOpenImage}>
-            <Image source={{ uri: item.uri }} style={styles.fullImage} resizeMode="contain" />
-          </Pressable>
-        )}
-
-        {item.type === "url" && item.thumbnail_path && (
-          <Image source={{ uri: item.thumbnail_path }} style={styles.ogImage} resizeMode="cover" />
-        )}
-
-        <View style={styles.body}>
-          {item.title ? <Text style={styles.title}>{item.title}</Text> : null}
-
+        {header}
           {item.type === "url" && (
-            <Pressable onPress={handleOpen}>
-              <Text style={styles.url} numberOfLines={3}>
-                {item.uri}
-              </Text>
-            </Pressable>
-          )}
-
-          {item.type === "text" && (
-            <Text style={styles.textContent} selectable>
-              {item.uri}
-            </Text>
-          )}
-
-          {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
-
-          <Text style={styles.meta}>
-            Saved {new Date(item.created_at).toLocaleString()}
-            {readEstimate ? ` · ${readEstimate}` : ""}
-            {(item.listened_percent ?? 0) > 0 ? ` · ${item.listened_percent}% listened` : ""}
-          </Text>
-
-          {(item.listened_percent ?? 0) > 0 && (item.listened_percent ?? 0) < 100 && (item.type === "url" || item.type === "text") && (
-            <View style={styles.listenProgressBar}>
-              <View style={[styles.listenProgressFill, { width: `${item.listened_percent ?? 0}%` }]} />
-            </View>
-          )}
-
-          <View style={styles.actions}>
-            {item.lat != null && item.lng != null && (
-              <ActionButton
-                label="Open in Maps"
-                icon="📍"
-                onPress={() =>
-                  Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`)
-                }
-              />
-            )}
-            {item.type === "url" && (
-              <>
-                <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
-                {(item.listened_percent ?? 0) > 0 && (
-                  <ActionButton label="Bookmark" icon="🔖" onPress={handleScrollToBookmark} />
-                )}
-                <ActionButton label="Open" icon="🌐" onPress={handleOpen} />
-                <ActionButton label="Copy" icon="📋" onPress={handleCopy} />
-              </>
-            )}
-            {item.type === "text" && (
-              <ActionButton label="Listen" icon="🎧" onPress={() => router.push(`/listen/${item.id}`)} />
-            )}
-            <ActionButton label="Share" icon="↗️" onPress={handleShare} />
-            <ActionButton label="Archive" icon="🗃️" onPress={handleArchive} danger />
-          </View>
-
-          {item.type === "url" && (
-            <View style={styles.article} ref={articleRef}>
+            <View style={[styles.article, { marginHorizontal: Spacing.md }]}>
               {articleState.kind === "loading" && (
                 <View style={styles.articleStatus}>
                   <ActivityIndicator color={Colors.accent} />
@@ -371,15 +467,6 @@ export default function ItemDetailScreen() {
                   <Text style={styles.rawHtml} selectable>
                     {articleState.html}
                   </Text>
-                ) : showFormatted && articleState.html && !splitBySentence ? (
-                  <RenderHtml
-                    contentWidth={windowWidth - Spacing.md * 2}
-                    source={{ html: articleState.html }}
-                    baseStyle={styles.articleText}
-                    tagsStyles={htmlTagStyles}
-                    systemFonts={["serif", "mono"]}
-                    defaultTextProps={{ selectable: true }}
-                  />
                 ) : splitBySentence && sentences ? (
                   sentences.map((s, i) => (
                     <Text
@@ -399,8 +486,8 @@ export default function ItemDetailScreen() {
                 ))}
             </View>
           )}
-        </View>
-      </ScrollView>
+      </ScrollView>}
+      </View>
     </Screen>
   );
 }

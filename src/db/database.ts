@@ -201,6 +201,12 @@ export async function initSchema(db: SQLite.SQLiteDatabase, seedDefaultInbox = t
       lng REAL
     );
 
+    CREATE TABLE IF NOT EXISTS reader_bookmarks (
+      item_id TEXT PRIMARY KEY,
+      bookmark_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS item_folders (
       item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
       folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,

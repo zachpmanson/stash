@@ -41,6 +41,8 @@ export function useArticle(
   initialHtml?: string | null,
   initialRecipeJson?: string | null,
   useLargestTextBlock?: boolean,
+  // Listening needs sentences by default; readers can defer the extra parsing.
+  needsSentences = true,
 ): {
   state: ArticleState;
   sentences: Sentence[] | undefined;
@@ -59,22 +61,28 @@ export function useArticle(
       : { kind: "idle" },
   );
   const [refreshing, setRefreshing] = useState(false);
-  const cancelledRef = useRef(false);
+  const requestRef = useRef(0);
+  const scope = JSON.stringify([url, itemId, useLargestTextBlock]);
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
 
   const sentences = useMemo<Sentence[] | undefined>(() => {
-    if (state.kind !== "ready") return undefined;
+    if (!needsSentences || state.kind !== "ready") return undefined;
     if (state.html) return splitSentencesFromBlocks(htmlToBlocks(state.html));
     if (state.text) {
       return splitSentences(normalizeText(state.text)).map((text) => ({ text, mode: "primary" as const }));
     }
     return undefined;
-  }, [state]);
+  }, [state, needsSentences]);
 
   useEffect(() => {
-    cancelledRef.current = false;
+    const request = ++requestRef.current;
+    const current = () => request === requestRef.current && scope === scopeRef.current;
+    const cleanup = () => { requestRef.current++; };
+    setRefreshing(false);
     if (!url) {
       setState({ kind: "idle" });
-      return;
+      return cleanup;
     }
     if ((initialHtml || initialText) && !useLargestTextBlock) {
       setState(
@@ -85,12 +93,12 @@ export function useArticle(
           storedRecipe(initialRecipeJson, initialHtml ?? null),
         ),
       );
-      return;
+      return cleanup;
     }
     setState({ kind: "loading" });
     fetchArticle(url, { useLargestTextBlock })
       .then(({ title, html, recipe }) => {
-        if (cancelledRef.current) return;
+        if (!current()) return;
         setState(buildReady(title, html, null, recipe ?? null));
         if (itemId) {
           updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null).catch(() => {});
@@ -98,49 +106,56 @@ export function useArticle(
         }
       })
       .catch((err) => {
-        if (cancelledRef.current) return;
+        if (!current()) return;
         setState({ kind: "error", message: err?.message ?? "Failed to load article" });
       });
-    return () => {
-      cancelledRef.current = true;
-    };
+    return cleanup;
   }, [url, itemId, initialText, initialHtml, initialRecipeJson, useLargestTextBlock]);
 
   const refresh = useCallback(async () => {
-    if (!url) return;
+    if (!url || scope !== scopeRef.current) return;
+    const request = ++requestRef.current;
+    const current = () => request === requestRef.current && scope === scopeRef.current;
     setRefreshing(true);
     try {
       const { title, html, recipe } = await fetchArticle(url, { useLargestTextBlock });
+      if (!current()) return;
       setState(buildReady(title, html, null, recipe ?? null));
       if (itemId) {
         await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
-        if (recipe) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
+        if (recipe && current()) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
       }
     } catch (err) {
+      if (!current()) return;
       setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
     } finally {
-      setRefreshing(false);
+      if (current()) setRefreshing(false);
     }
-  }, [url, itemId, useLargestTextBlock]);
+  }, [url, itemId, useLargestTextBlock, scope]);
 
   const loadFrom = useCallback(
     async (sourceUrl: string) => {
+      if (scope !== scopeRef.current) return;
+      const request = ++requestRef.current;
+      const current = () => request === requestRef.current && scope === scopeRef.current;
       setRefreshing(true);
       setState({ kind: "loading" });
       try {
         const { title, html, recipe } = await fetchArticle(sourceUrl, { useLargestTextBlock });
+        if (!current()) return;
         setState(buildReady(title, html, null, recipe ?? null));
         if (itemId) {
           await updateItemArticleHtml(itemId, html, html ? htmlToText(html) : null);
-          if (recipe) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
+          if (recipe && current()) await updateItemRecipeJson(itemId, JSON.stringify(recipe));
         }
       } catch (err) {
+        if (!current()) return;
         setState({ kind: "error", message: (err as Error)?.message ?? "Failed to load article" });
       } finally {
-        setRefreshing(false);
+        if (current()) setRefreshing(false);
       }
     },
-    [itemId, useLargestTextBlock],
+    [itemId, useLargestTextBlock, scope],
   );
 
   return { state, sentences, refresh, loadFrom, refreshing };

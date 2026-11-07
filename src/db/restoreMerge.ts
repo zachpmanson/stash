@@ -116,6 +116,9 @@ export async function buildFreshRestoreOwned(source: SQLiteDatabase, fresh: SQLi
   }
   await fresh.withTransactionAsync(async () => {
     await copyTables(source, fresh, APP_TABLES);
+    // Optional device-local state: older local and seeded snapshots lack this table.
+    const bookmarks = await source.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'reader_bookmarks') AS present");
+    if (bookmarks?.present) await copyTables(source, fresh, ["reader_bookmarks"]);
     const resources = await source.getFirstAsync<{ present: number }>("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'stash_restore_media') AS present");
     if (resources?.present) {
       await fresh.execAsync(RESTORE_MEDIA_SCHEMA);
