@@ -22,8 +22,8 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
     created_at: 1, article_html: HTML, article_text: null, recipe_json: null, ...itemOverrides };
   let renderer, output, args = hookArgs ?? [item.uri, item.id, item.article_text, item.article_html, item.recipe_json, false, false];
   let width = 400, selection = null, poll, commits = 0, bookmark = null;
-  let itemRead, bookmarkRead, saveError, navigationTimerId = 0;
-  const navigationTimers = new Map(), focuses = [];
+  let itemRead, bookmarkRead, saveError, navigationTimerId = 0, engine;
+  const navigationTimers = new Map();
   const Engine = React.createContext({}), Config = React.createContext({});
   const modules = new Map(), renders = [], reads = [], writes = [], fetches = [], nav = [], snackbars = [], modals = [], scrolls = [];
   const parsing = { blocks: 0, splitBlocks: 0, splitText: 0 };
@@ -34,18 +34,38 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
     react: React,
     'react-native': {
       ...Object.fromEntries(['View', 'Text', 'Pressable', 'ScrollView', 'RefreshControl', 'Image', 'ActivityIndicator'].map(x => [x, x])),
-      FlatList: React.forwardRef((props, ref) => {
-        const first = props.initialScrollIndex ?? 0;
-        return React.createElement('FlatList', { ...props, ref }, props.ListHeaderComponent,
-          props.data.slice(first, first + props.initialNumToRender).map((item, offset) => {
-            const index = first + offset;
-            return React.createElement(props.CellRendererComponent, { key: item.key, item, index,
-              onFocusCapture: event => focuses.push([index, event]) }, props.renderItem({ item, index }));
-          }));
-      }),
       StyleSheet: { create: x => x }, useWindowDimensions: () => ({ width, height: 600, fontScale: 1 }),
       NativeModules: { TextSelection: { getSelection: async () => selection } }, findNodeHandle: () => 1,
       Linking: { openURL: async () => {} }, Share: { share: async () => {} },
+    },
+    '@shopify/flash-list': {
+      FlashList: React.forwardRef((props, ref) => {
+        const [first, setFirst] = React.useState(0);
+        const state = React.useRef({ layouts: new Map(), y: 0, pending: null, header: 300 }).current;
+        engine = state;
+        React.useImperativeHandle(ref, () => ({
+          scrollToIndex: value => {
+            scrolls.push({ index: value.index }); setFirst(value.index);
+            return new Promise(resolve => {
+              state.pending = { index: value.index, resolve };
+              if (state.layouts.get(value.index)?.isHeightMeasured) { state.pending = null; resolve(); }
+            });
+          },
+          scrollToOffset: value => { assert.equal(value.skipFirstItemOffset, true); state.y = value.offset; scrolls.push(value); },
+          getLayout: index => state.layouts.get(index), getFirstItemOffset: () => state.header,
+          getAbsoluteLastScrollOffset: () => state.y,
+          getFirstVisibleIndex: () => {
+            for (const [index, cell] of state.layouts) if (state.y >= state.header + cell.y && state.y < state.header + cell.y + cell.height) return index;
+            return state.y < state.header ? 0 : -1;
+          },
+        }), []);
+        React.useEffect(() => { props.onLoad(); }, []);
+        // This boundary models the installed v2 contract, not its native engine:
+        // dynamic layout is data-relative; headers live outside that container.
+        return React.createElement('FlashList', props, props.ListHeaderComponent,
+          props.data.slice(first, first + 3).map((item, offset) => React.createElement(React.Fragment,
+            { key: props.keyExtractor(item) }, props.renderItem({ item, index: first + offset, target: 'Cell' }))));
+      }),
     },
     'react-native-render-html': {
       TRenderEngineProvider: ({ children, ...props }) => React.createElement(Engine.Provider, { value: React.useMemo(() => props, [props.baseStyle, props.tagsStyles, props.systemFonts]) }, children),
@@ -127,16 +147,19 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
   await act(async () => { renderer = create(tree(), { createNodeMock: () => ({ scrollTo: value => scrolls.push(value), scrollToIndex: value => scrolls.push({ index: value.index }), scrollToOffset: value => scrolls.push(value) }) }); });
   t.after(async () => { await act(async () => renderer.unmount()); });
   const root = () => renderer.root;
-  const scroll = () => root().findAllByType('FlatList')[0] ?? root().findByType('ScrollView');
-  const cell = index => root().findAllByType(scroll().props.CellRendererComponent).find(row => row.props.index === index).findByType('View');
+  const scroll = () => root().findAllByType('FlashList')[0] ?? root().findByType('ScrollView');
   return {
-    parsing, renders, writes, fetches, nav, snackbars, modals, reads, scrolls, focuses, cell,
-    list: () => root().findByType('FlatList'),
+    parsing, renders, writes, fetches, nav, snackbars, modals, reads, scrolls,
+    list: () => root().findByType('FlashList'),
     expireNavigation: async () => { await act(async () => {
       for (const [id, callback] of [...navigationTimers]) { navigationTimers.delete(id); callback(); }
     }); },
     measure: async (index, y, height) => {
-      await act(async () => { cell(index).props.onLayout({ nativeEvent: { layout: { y, height } } }); }); },
+      await act(async () => {
+        engine.layouts.set(index, { x: 0, width: 400, y: y - engine.header, height, isHeightMeasured: true });
+        if (engine.pending?.index === index) { engine.pending.resolve(); engine.pending = null; }
+        scroll().props.onCommitLayoutEffect();
+      }); },
     changeItem: async next => { item = { ...item, ...next }; await act(async () => renderer.update(tree())); },
     deferReads: (readItem, readBookmark) => { itemRead = readItem; bookmarkRead = readBookmark; },
     rejectSave: error => { saveError = error; },
@@ -147,7 +170,7 @@ async function harness(t, { screen = false, item: itemOverrides = {}, hookArgs }
     deferFetch: callback => { fetchReply = callback; },
     reply: next => { reply = next; }, fail: () => { fetchError = Error('Synthetic extraction failure'); },
     select: async next => { selection = next; await act(async () => { await poll(); }); },
-    scroll: async y => { await act(async () => scroll().props.onScroll({ nativeEvent: { contentOffset: { y } } })); },
+    scroll: async y => { await act(async () => { if (engine) engine.y = y; scroll().props.onScroll({ nativeEvent: { contentOffset: { y } } }); }); },
     height: async h => { await act(async () => scroll().props.onContentSizeChange(400, h)); },
     viewport: async height => { await act(async () => scroll().props.onLayout({ nativeEvent: { layout: { height } } })); },
     bookmarkHandler: () => root().findAllByType('TopbarButton').find(n => n.findAllByType('MaterialIcons').some(i => i.props.name === 'bookmark-add'))?.props.onPress,
@@ -210,8 +233,9 @@ test('disabled plain-text demand and error states never split', async t => {
 test('native list is the only formatted scroller; no frame commits and a saved callback captures measured latest row', async t => {
   const h = await harness(t, { screen: true });
   const list = h.list().props;
-  assert.equal(list.initialNumToRender, 3); assert.equal(list.maxToRenderPerBatch, 3);
-  assert.equal(list.windowSize, 5); assert.equal(list.removeClippedSubviews, false); assert.equal(list.getItemLayout, undefined);
+  assert.equal(list.maxItemsInRecyclePool, 0); assert.equal(list.drawDistance, 500);
+  assert.equal(list.maintainVisibleContentPosition.disabled, true);
+  for (const prop of ['getItemLayout', 'initialScrollIndex', 'initialNumToRender', 'onScrollToIndexFailed', 'CellRendererComponent']) assert.equal(list[prop], undefined);
   await h.measure(0, 300, 200); await h.measure(1, 500, 400);
   await h.select({ start: 1, end: 12, length: 12 });
   const mark = h.bookmarkHandler(); assert.ok(mark);
@@ -223,7 +247,7 @@ test('native list is the only formatted scroller; no frame commits and a saved c
   const saved = h.writes.at(-1)[2]; assert.equal(saved.kind, 'article'); assert.equal(saved.offset, .55);
   assert.equal(saved.blockKey, list.data[1].key); assert.equal(h.reads.length, 1);
   assert.equal(h.snackbars.at(-1), 'Reading bookmark saved');
-  await h.action('Bookmark'); assert.deepEqual(json(h.scrolls.slice(-2)), [{ index: 1 }, { offset: 720, animated: false }]);
+  await h.action('Bookmark'); assert.deepEqual(json(h.scrolls.slice(-2)), [{ index: 1 }, { offset: 720, animated: false, skipFirstItemOffset: true }]);
   await h.select(null); assert.equal(h.bookmarkHandler(), undefined);
   const count = h.writes.length; await h.run(mark);
   assert.equal(h.writes.length, count); assert.equal(h.modals.at(-1).title, 'Select text first');
@@ -240,26 +264,14 @@ async function freshDeepBookmarkHarness(t) {
   return h;
 }
 
-test('fresh deep bookmark remounts only a bounded target window, ignores stale list events and aligns measured geometry', async t => {
+test('fresh deep bookmark delegates precise acquisition to the engine with no remount, then follows measured late layouts', async t => {
   const h = await freshDeepBookmarkHarness(t), old = h.list();
-  const staleLayout = h.cell(0).props.onLayout, staleScroll = old.props.onScroll, staleDrag = old.props.onScrollBeginDrag;
-  const renders = h.renders.length, scrolls = h.scrolls.length;
+  const renders = h.renders.length;
   await h.action('Bookmark');
-  const seeded = h.list(); assert.notEqual(seeded, old);
-  assert.equal(seeded.props.initialScrollIndex, 950);
-  assert.equal(seeded.props.initialNumToRender, 3); assert.equal(seeded.props.maxToRenderPerBatch, 3);
-  assert.equal(seeded.props.windowSize, 5); assert.equal(seeded.props.getItemLayout, undefined);
-  assert.equal(h.renders.length - renders, 3, 'only the seeded target window renders, not the prefix');
-  await h.run(() => {
-    staleLayout({ nativeEvent: { layout: { y: 300, height: 200 } } });
-    staleScroll({ nativeEvent: { contentOffset: { y: 12345 } } });
-    staleDrag();
-    seeded.props.onScrollToIndexFailed({ index: 950, averageItemLength: 200 });
-  });
-  assert.equal(h.scrolls.length, scrolls, 'no estimated acquisition scroll');
-  const focus = { target: 'link' }; await h.run(() => h.cell(950).props.onFocusCapture(focus));
-  assert.deepEqual(h.focuses.at(-1), [950, focus], 'custom cell forwards RN focus capture');
-  await h.measure(950, 20000, 800); assert.deepEqual(json(h.scrolls.at(-1)), { offset: 20400, animated: false });
+  assert.equal(h.list(), old, 'no seeded list remount');
+  assert.deepEqual(json(h.scrolls.at(-1)), { index: 950 });
+  assert.equal(h.renders.length - renders, 3, 'mock engine engages only a bounded destination window');
+  await h.measure(950, 20000, 800); assert.deepEqual(json(h.scrolls.at(-1)), { offset: 20400, animated: false, skipFirstItemOffset: true });
   await h.height(23000); assert.equal(h.scrolls.at(-1).offset, 20400);
   await h.measure(950, 20200, 1200); assert.equal(h.scrolls.at(-1).offset, 20800);
   const count = h.scrolls.length; await h.gesture(); await h.measure(950, 20300, 1400); await h.height(24000);
@@ -274,8 +286,15 @@ test('unacquired deep bookmark surfaces snackbar once; gesture, geometry change 
   const count = h.snackbars.length; await h.expireNavigation(); assert.equal(h.snackbars.length, count);
   const scrolls = h.scrolls.length; await h.measure(950, 20000, 800); assert.equal(h.scrolls.length, scrolls);
   // Reopen a fresh list so the next request has no measured target.
+  const stale = h.list().props;
   await h.resize(500); await h.action('Bookmark'); await h.gesture(); await h.expireNavigation();
-  await h.measure(950, 20000, 800); assert.equal(h.scrolls.length, scrolls);
+  const afterCancel = h.scrolls.length;
+  await h.measure(950, 20000, 800); assert.equal(h.scrolls.length, afterCancel);
+  await h.run(() => {
+    stale.onLoad(); stale.onCommitLayoutEffect(); stale.onContentSizeChange(400, 25000);
+    stale.onScroll({ nativeEvent: { contentOffset: { y: 99999 } } }); stale.onScrollBeginDrag();
+  });
+  assert.equal(h.scrolls.length, afterCancel, 'disposed list callbacks cannot revive acquisition');
   assert.equal(h.snackbars.length, count);
   await h.action('Bookmark'); await h.resize(600); await h.expireNavigation(); assert.equal(h.snackbars.length, count);
   await h.action('Bookmark'); await h.menu('Show plain text'); await h.expireNavigation(); assert.equal(h.snackbars.length, count);
@@ -360,7 +379,7 @@ test('article anchors restore through plain-mode transition, reject changed revi
   const h = await harness(t, { screen: true });
   await h.measure(0, 300, 200); await h.scroll(350); await h.select({ start: 1, end: 3, length: 3 });
   await h.run(h.bookmarkHandler()); await h.menu('Show plain text');
-  await h.action('Bookmark'); assert.match(h.text(), /RenderedHtml/); assert.equal(h.list().props.initialScrollIndex, 0);
+  await h.action('Bookmark'); assert.match(h.text(), /RenderedHtml/); assert.equal(h.list().props.initialScrollIndex, undefined);
   await h.measure(0, 400, 400); assert.equal(h.scrolls.at(-1).offset, 500);
   await h.gesture(); const afterGesture = h.scrolls.length;
   await h.measure(0, 450, 500); assert.equal(h.scrolls.length, afterGesture);

@@ -66,81 +66,89 @@ test('bookmark parser rejects malformed/versioned/nonfinite/unbounded/missing an
 });
 
 function navigationHarness(blockCount = 20) {
-  const timers = new Map(); let seq = 0, now = 0;
+  const timers = new Map(), layouts = new Map(), operations = []; let seq = 0, now = 0, y = 0, header = 300, visible = 0;
   const { ReaderNavigation } = load('src/utils/readerNavigation.ts', {
-    Date: class extends Date { static now() { return now; } },
     setTimeout: (fn, delay) => { const id = ++seq; timers.set(id, { fn, at: now + delay }); return id; },
     clearTimeout: id => timers.delete(id),
   });
-  const doc = chunkArticle(Array.from({ length: blockCount }, (_, i) => `<p>Block ${i}</p>`).join(''));
-  const calls = []; let navigation;
-  const list = { scrollToIndex: value => calls.push(['index', value.index]), scrollToOffset: value => calls.push(['offset', value.offset]) };
-  navigation = new ReaderNavigation(doc, () => list, index => calls.push(['seed', index]), () => calls.push(['failure']));
-  return { navigation, calls, doc, timers,
+  const doc = chunkArticle(Array.from({ length: blockCount }, (_, i) => '<p>Block ' + i + '</p>').join(''));
+  const calls = [];
+  const list = {
+    scrollToIndex: value => { calls.push(['index', value.index]); return new Promise((resolve, reject) => operations.push({ resolve, reject })); },
+    scrollToOffset: value => { calls.push(['offset', value.offset]); assert.equal(value.skipFirstItemOffset, true); },
+    getLayout: index => layouts.get(index), getFirstItemOffset: () => header,
+    getAbsoluteLastScrollOffset: () => y, getFirstVisibleIndex: () => visible,
+  };
+  const navigation = new ReaderNavigation(doc, () => list, () => calls.push(['failure']));
+  return { navigation, calls, doc, timers, operations,
     anchor: (index, offset) => ({ version: 1, kind: 'article', revision: doc.revision, blockKey: doc.blocks[index].key, offset }),
+    measure: (index, y, height, measured = true) => { layouts.set(index, { x: 0, width: 400, y, height, isHeightMeasured: measured }); navigation.align(); },
+    viewport: (index, offset) => { visible = index; y = offset; },
+    header: value => { header = value; navigation.align(); },
+    finish: async (index = operations.length - 1) => { operations[index].resolve(); await Promise.resolve(); },
     advance: milliseconds => { now += milliseconds; for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); } },
   };
 }
 
-test('navigation captures actual measured list-cell offsets and aligns normalized offset after image layout', () => {
+test('capture uses engine native-measured geometry and adds the actual header exactly once', async () => {
   const h = navigationHarness(), n = h.navigation;
-  assert.equal(n.capture(), null);
-  n.measure(0, { y: 500, height: 200 }); n.measure(1, { y: 700, height: 800 });
-  n.scrollY = 100; assert.deepEqual(json(n.capture()), h.anchor(0, 0));
-  n.scrollY = 900; assert.deepEqual(json(n.capture()), h.anchor(1, .25));
-  assert.equal(n.restore(n.capture()), true);
-  assert.deepEqual(h.calls, [['index', 1], ['offset', 900]]);
-  n.measure(1, { y: 800, height: 1000 }); assert.deepEqual(h.calls.at(-1), ['offset', 1050]);
-  h.advance(10000); n.measure(1, { y: 900, height: 1200 });
-  assert.deepEqual(h.calls.at(-1), ['offset', 1200], 'late image layout retains the mounted anchor until a gesture');
-  n.unmeasure(1); assert.equal(n.capture(), null);
+  assert.equal(n.capture(), null); n.onLoad();
+  h.measure(0, 0, 200); h.measure(1, 200, 800); h.viewport(0, 100);
+  assert.deepEqual(json(n.capture()), h.anchor(0, 0));
+  h.viewport(1, 700); assert.deepEqual(json(n.capture()), h.anchor(1, .25));
+  assert.equal(n.restore(n.capture()), true); assert.deepEqual(h.calls, [['index', 1]]);
+  await h.finish(); assert.deepEqual(h.calls.at(-1), ['offset', 700]);
+  h.measure(1, 300, 1000); assert.deepEqual(h.calls.at(-1), ['offset', 850]);
+  h.header(400); assert.deepEqual(h.calls.at(-1), ['offset', 950]);
+  h.advance(10000); h.measure(1, 400, 1200); assert.deepEqual(h.calls.at(-1), ['offset', 1100]);
+  h.measure(1, 400, 1200, false); assert.equal(n.capture(), null);
   n.cancel(); assert.equal(h.timers.size, 0);
 });
 
-test('fresh-list deep target seeds a bounded window instead of repeated clamped average jumps, then aligns native geometry', () => {
+test('cold deep restore waits for load and engine completion, never aligns provisional prefix estimates', async () => {
   const h = navigationHarness(1000), n = h.navigation;
-  n.measure(0, { y: 300, height: 100 }); n.scrollY = 320;
-  n.restore(h.anchor(950, .5)); assert.deepEqual(h.calls, [['seed', 950]]);
-  assert.equal(n.capture(), null, 'old list geometry was discarded');
-  for (let i = 0; i < 12; i++) { n.failed({ index: 950, averageItemLength: 100 }); h.advance(100); }
-  assert.deepEqual(h.calls, [['seed', 950]], 'no prefix traversal, estimated offsets, retries or remount loop');
-  n.measure(950, { y: 2300, height: 600 }); assert.deepEqual(h.calls.at(-1), ['offset', 2600]);
+  n.restore(h.anchor(950, .5)); assert.deepEqual(h.calls, []);
+  n.onLoad(); assert.deepEqual(h.calls, [['index', 950]]);
+  h.measure(950, 190000, 200, false); n.align(); assert.equal(h.calls.length, 1);
+  h.measure(950, 20000, 600); assert.equal(h.calls.length, 1, 'engine acquisition owns the scroll');
+  await h.finish(); assert.deepEqual(h.calls.at(-1), ['offset', 20600]);
   assert.equal(h.timers.size, 0);
-  n.align(); assert.deepEqual(h.calls.at(-1), ['offset', 2600], 'content-size alignment after RN initial index jump');
-  h.advance(10000); n.measure(950, { y: 2500, height: 900 });
-  assert.deepEqual(h.calls.at(-1), ['offset', 2950]);
+  h.advance(10000); h.measure(950, 20200, 1000); assert.deepEqual(h.calls.at(-1), ['offset', 21000]);
+  n.cancel(); const count = h.calls.length; h.measure(950, 20300, 1200); assert.equal(h.calls.length, count);
+  h.viewport(949, 20400); h.measure(949, 20000, 200);
+  assert.deepEqual(json(n.capture()), h.anchor(949, .5), 'backscroll captures the current row, not the restore target');
 });
 
-test('unacquired seeded window reports failure once within bounds; cancellation prevents failure and late alignment', () => {
-  const h = navigationHarness(), n = h.navigation;
-  n.restore(h.anchor(19, .2));
-  for (let i = 0; i < 12; i++) { n.failed({ index: 19, averageItemLength: 90 }); h.advance(100); }
-  h.advance(2800); assert.deepEqual(h.calls, [['seed', 19], ['failure']]);
-  const count = h.calls.length; h.advance(10000); n.measure(19, { y: 2500, height: 900 }); n.align();
-  assert.equal(h.calls.length, count); assert.equal(h.timers.size, 0);
-  n.restore(h.anchor(15, .5)); n.cancel(); const cancelled = h.calls.length;
-  h.advance(5000); n.measure(15, { y: 2500, height: 900 }); n.failed({ index: 15 }); n.align();
-  assert.equal(h.calls.length, cancelled); assert.equal(h.timers.size, 0);
+test('unacquired or unmeasured destinations fail once; late promises and layouts cannot revive them', async () => {
+  for (const complete of [false, true]) {
+    const h = navigationHarness(), n = h.navigation; n.onLoad();
+    n.restore(h.anchor(19, .2)); h.measure(19, 2000, 200, false);
+    if (complete) await h.finish();
+    h.advance(4000); assert.deepEqual(h.calls, [['index', 19], ['failure']]);
+    if (!complete) await h.finish();
+    h.measure(19, 2200, 800); h.advance(10000); n.align(); assert.equal(h.calls.length, 2);
+  }
 });
 
-test('window seeds stay at valid first/last indices and newer bookmarks supersede acquisition', () => {
-  const h = navigationHarness(), n = h.navigation;
+test('cancel/dispose and superseding requests guard asynchronous completions and layout callbacks', async () => {
+  const h = navigationHarness(), n = h.navigation; n.onLoad();
   n.restore(h.anchor(0, 0)); n.restore(h.anchor(19, 1));
-  assert.deepEqual(h.calls, [['seed', 0], ['seed', 19]]);
-  n.measure(0, { y: 300, height: 100 }); assert.equal(h.calls.length, 2);
-  n.measure(19, { y: 2200, height: 800 }); assert.deepEqual(h.calls.at(-1), ['offset', 3000]);
-  h.advance(5000); assert.equal(h.calls.length, 3); assert.equal(h.timers.size, 0);
+  h.measure(0, 0, 200); h.measure(19, 2200, 800);
+  await h.finish(0); assert.equal(h.calls.length, 2);
+  await h.finish(1); assert.deepEqual(h.calls.at(-1), ['offset', 3300]);
+  n.restore(h.anchor(15, .5)); n.cancel(); const cancelled = h.calls.length;
+  await h.finish(); h.measure(15, 2000, 200); h.advance(5000); assert.equal(h.calls.length, cancelled);
+  n.restore(h.anchor(3, .7)); n.dispose(); const disposed = h.calls.length;
+  await h.finish(); n.onLoad(); h.measure(3, 500, 500); h.advance(5000); assert.equal(h.calls.length, disposed);
+  assert.equal(n.restore(h.anchor(0, 0)), false); assert.equal(n.capture(), null);
 });
 
-test('revision mismatch/missing anchors are rejected without unrelated jumps; new navigation cancels old expiry', () => {
-  const h = navigationHarness(), n = h.navigation;
+test('revision/anchor validation rejects unrelated jumps and engine rejection reports failure', async () => {
+  const h = navigationHarness(), n = h.navigation; n.onLoad();
   for (const bad of [{ ...h.anchor(1, .5), revision: 'changed' }, { ...h.anchor(1, .5), blockKey: 'missing' }, { ...h.anchor(1, .5), offset: NaN }]) assert.equal(n.restore(bad), false);
-  assert.equal(h.calls.length, 0);
-  n.restore(h.anchor(10, .1)); n.failed({ index: 10, averageItemLength: 80 });
-  n.restore(h.anchor(3, .7)); const count = h.calls.length; h.advance(100);
-  assert.equal(h.calls.length, count);
-  h.advance(4000); assert.deepEqual(h.calls.at(-1), ['failure']);
-  n.measure(3, { y: 600, height: 200 }); assert.equal(h.calls.length, count + 1);
+  assert.equal(h.calls.length, 0); n.restore(h.anchor(10, .1));
+  h.operations[0].reject(Error('engine failure')); await Promise.resolve();
+  assert.deepEqual(h.calls, [['index', 10], ['failure']]); h.advance(5000); assert.equal(h.calls.length, 2);
 });
 
 test('actual bookmark DB API is independent of listening/sync, validates JSON, uses ownership and recovery guards', async () => {
