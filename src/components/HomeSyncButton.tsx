@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { Pressable, StyleSheet } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Pressable, StyleSheet } from "react-native";
 import type { SavedLoginState } from "../db/savedSyncLogin";
 import { subscribeSavedStashLogin } from "../db/syncLogin";
 import { subscribeStashSyncStatus, type StashSyncStatus } from "../db/syncClient";
@@ -25,6 +25,25 @@ function EnabledHomeSyncButton() {
   }, []);
 
   const indicator = syncStatusIndicator(status, login);
+  const syncing = indicator.icon === "sync";
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!syncing) return;
+    const animation = Animated.loop(Animated.timing(rotation, {
+      toValue: 1,
+      duration: 1000,
+      easing: Easing.linear,
+      useNativeDriver: true,
+      isInteraction: false,
+    }));
+    animation.start();
+    return () => {
+      animation.stop();
+      rotation.setValue(0);
+    };
+  }, [rotation, syncing]);
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -34,7 +53,9 @@ function EnabledHomeSyncButton() {
       onPress={() => router.push("/settings/sync")}
       style={({ pressed }) => [styles.button, { backgroundColor: indicator.color }, pressed && styles.pressed]}
     >
-      <MaterialIcons name={indicator.icon} size={22} color={Colors.bg} accessible={false} importantForAccessibility="no" />
+      <Animated.View style={{ transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }] }}>
+        <MaterialIcons name={indicator.icon} size={22} color={Colors.bg} accessible={false} importantForAccessibility="no" />
+      </Animated.View>
     </Pressable>
   );
 }
