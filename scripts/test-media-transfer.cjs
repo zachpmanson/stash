@@ -142,6 +142,45 @@ test('disk failure, cancellation and delete-during-download never expose incompl
   } finally { await h.cleanup(); }
 });
 
+test('image progress counts verified completions, reports before I/O and scopes discovery, retries and reconnect to the account', async () => {
+  const h = await createNativeHarness();
+  try {
+    const { app, queue } = await setup(h, 'image-a');
+    await app.withAppDb(async db => {
+      for (const id of ['image-b', 'image-c']) await db.runAsync("INSERT INTO sync_items(id,type,media_id) VALUES (?,'image',?)", id, id);
+    });
+    const counts = status => [status.completed, status.total, status.pending, status.errors];
+    h.options.fetch = async () => Response.json(descriptor);
+    let started, release;
+    const ready = new Promise(resolve => { started = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    h.options.nativeFetch = async () => { started(); await gate; return response(); };
+    const progress = [];
+    const first = queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, false, status => progress.push(counts(status)));
+    await ready;
+    assert.deepEqual(progress, [[0, 3, 3, 0]], 'show the discovered total before the first transfer finishes');
+    release();
+    assert.deepEqual(counts((await first).status), [1, 3, 2, 0]);
+    h.options.fetch = async () => new Response(null, { status: 503 });
+    assert.deepEqual(counts((await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal)).status), [1, 3, 2, 1], 'failed transfer is not completion');
+    h.options.fetch = async () => Response.json(descriptor);
+    h.options.nativeFetch = async () => response();
+    assert.deepEqual(counts((await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal)).status), [2, 3, 1, 1]);
+    await queue.retryStashImages();
+    assert.deepEqual(counts((await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal)).status), [3, 3, 0, 0]);
+    await h.restart();
+    const restarted = h.load('src/db/mediaQueue.ts');
+    assert.deepEqual(counts((await restarted.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal)).status), [3, 3, 0, 0], 'progress derives from durable rows, not UI estimates');
+    assert.deepEqual(counts((await restarted.runStashMediaCycle(base, 'bob', 'Basic synthetic-bob', new AbortController().signal)).status), [1, 3, 2, 0], 'another account cannot inherit completed rows');
+    await h.load('src/db/database.ts').withAppDb(db => db.runAsync("DELETE FROM sync_items WHERE id='image-c'"));
+    assert.deepEqual(counts((await restarted.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal)).status), [2, 2, 0, 0], 'deleted images leave the denominator');
+    const reconnectProgress = [];
+    const rechecked = await restarted.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, true, status => reconnectProgress.push(counts(status)));
+    assert.deepEqual(reconnectProgress, [[0, 2, 2, 0]], 'reconnect revalidation resets completed work truthfully');
+    assert.deepEqual(counts(rechecked.status), [1, 2, 1, 0]);
+  } finally { await h.cleanup(); }
+});
+
 test('cancelling active verified-download I/O drains the reader and retains a retryable job without publishing paths', async () => {
   const h=await createNativeHarness();
   try {

@@ -1,7 +1,7 @@
 import type * as SQLite from "expo-sqlite";
 import { withAppDb, assertAppDbWritableOwned, getAppDbGeneration, assertAppDbGenerationOwned } from "./database";
 import { localImageExists, uploadLocalImage, downloadPrivateImage, MediaTransferError, type ImageDescriptor } from "./mediaFiles";
-export type MediaQueueStatus = { pending: number; errors: number; message?: string };
+export type MediaQueueStatus = { total: number; completed: number; pending: number; errors: number; message?: string };
 type Job = { item_id: string; direction: "upload" | "download"; source_uri: string | null; attempts: number };
 const TABLE = "stash_media_queue_v1";
 async function initialize(db: SQLite.SQLiteDatabase) {
@@ -23,7 +23,7 @@ export async function retryStashImages(): Promise<void> {
  * The owning sync session awaits this function and cancels/drains it on restore.
  * Jobs/attempts survive restart; secrets, auth headers and bytes never enter SQL.
  */
-export async function runStashMediaCycle(base: URL, username: string, authorization: string, signal: AbortSignal, reconnect = false): Promise<{ status: MediaQueueStatus; projected: boolean }> {
+export async function runStashMediaCycle(base: URL, username: string, authorization: string, signal: AbortSignal, reconnect = false, onProgress?: (status: MediaQueueStatus) => void): Promise<{ status: MediaQueueStatus; projected: boolean }> {
   const account = JSON.stringify([base.toString(), username]);
   const generation = getAppDbGeneration();
   const owned = <T>(fn: (db: SQLite.SQLiteDatabase) => Promise<T>) => withAppDb(async db => {
@@ -31,6 +31,14 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
     assertAppDbGenerationOwned(generation); await assertAppDbWritableOwned(db);
     return fn(db);
   });
+  const readStatus = async (db: SQLite.SQLiteDatabase): Promise<MediaQueueStatus> => {
+    const counts = await db.getFirstAsync<{ total: number; completed: number; pending: number; errors: number }>(`SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN state='complete' THEN 1 ELSE 0 END),0) AS completed,
+      COALESCE(SUM(CASE WHEN state!='complete' THEN 1 ELSE 0 END),0) AS pending,
+      COALESCE(SUM(CASE WHEN state IN ('error','retry') THEN 1 ELSE 0 END),0) AS errors FROM ${TABLE} WHERE account=?`, account);
+    const last = await db.getFirstAsync<{ message: string }>(`SELECT message FROM ${TABLE} WHERE account=? AND message IS NOT NULL ORDER BY attempts DESC LIMIT 1`, account);
+    return { total: counts?.total ?? 0, completed: counts?.completed ?? 0, pending: counts?.pending ?? 0, errors: counts?.errors ?? 0, ...(last?.message ? { message: last.message } : {}) };
+  };
   let projected = false;
   const job = await owned(async db => {
     await initialize(db);
@@ -52,6 +60,10 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
       WHERE account=? AND state!='complete' AND (next_retry IS NOT NULL AND next_retry<=?)
       ORDER BY attempts,item_id LIMIT 1`, account, Date.now());
   });
+  // Publish the discovered queue before I/O too: the first large image must
+  // show 0/N, not an unmeasured activity bar until its transfer has finished.
+  if (onProgress) onProgress(await owned(readStatus));
+  if (signal.aborted) throw new Error("Image session cancelled");
   if (job) {
     const controller = new AbortController(); const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
@@ -99,11 +111,6 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
         terminal ? "error" : "retry", terminal ? null : Date.now() + Math.min(300_000, 2000 * 2 ** Math.min(job.attempts, 8)), message, account, job.item_id));
     } finally { clearTimeout(timeout); signal.removeEventListener("abort", abort); }
   }
-  const status = await owned(async db => {
-    const counts = await db.getFirstAsync<{ pending: number; errors: number }>(`SELECT COUNT(*) AS pending,
-      COALESCE(SUM(CASE WHEN state IN ('error','retry') THEN 1 ELSE 0 END),0) AS errors FROM ${TABLE} WHERE account=? AND state!='complete'`, account);
-    const last = await db.getFirstAsync<{ message: string }>(`SELECT message FROM ${TABLE} WHERE account=? AND message IS NOT NULL ORDER BY attempts DESC LIMIT 1`, account);
-    return { pending: counts?.pending ?? 0, errors: counts?.errors ?? 0, ...(last?.message ? { message: last.message } : {}) };
-  });
+  const status = await owned(readStatus);
   return { status, projected };
 }

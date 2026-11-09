@@ -573,10 +573,35 @@ test('same-signature recovery after a transient outage restores feed controls wi
   } finally {unsubscribe();await h.sync.disconnectStashSyncAndWait();}
 });
 
+test('session publishes discovered image progress before transfer and retains it through path reprojection', {timeout:7000}, async () => {
+  const h = feedReadyHarness(), first = deferred(), second = deferred(), release = deferred();
+  const statuses = []; let cycles = 0;
+  h.options.mediaCycle = async (_base, _username, _authorization, _signal, _reconnect, onProgress) => {
+    cycles++;
+    if (cycles === 1) {
+      onProgress({ total: 3, completed: 0, pending: 3, errors: 0 });
+      first.resolve();
+      return { status: { total: 3, completed: 1, pending: 2, errors: 0 }, projected: true };
+    }
+    onProgress({ total: 3, completed: 1, pending: 2, errors: 0 });
+    second.resolve(); await release.promise;
+    return { status: { total: 3, completed: 2, pending: 1, errors: 0 }, projected: true };
+  };
+  const unsubscribe = h.sync.subscribeStashSyncStatus(status => statuses.push(status));
+  try {
+    await h.connect(); await first.promise; await second.promise;
+    const measured = statuses.slice(statuses.findIndex(s => s.media?.total === 3));
+    assert.equal(measured[0].media.completed, 0);
+    assert.ok(measured.some(s => s.media?.completed === 1));
+    assert.ok(measured.some(s => /checking image/.test(s.message) && s.media?.completed === 1));
+    assert.ok(measured.every(s => s.phase !== 'synced' || s.media?.total === 3), 'metadata path projection must not reset the progress bar');
+  } finally { unsubscribe(); release.resolve(); await h.sync.disconnectStashSyncAndWait(); }
+});
+
 test('disconnect/restore drains active media before another account can connect and ignores cancelled byte completion', {timeout:7000}, async () => {
   const h=feedReadyHarness(), started=deferred(), release=deferred();
   let mediaSignal, finished=false; const statuses=[];
-  h.options.mediaCycle=async (_base, username, _authorization, signal)=>{mediaSignal=signal;started.resolve();await release.promise;return {status:{pending:7,errors:0},projected:true};};
+  h.options.mediaCycle=async (_base, username, _authorization, signal, _reconnect, onProgress)=>{mediaSignal=signal;started.resolve();await release.promise;onProgress?.({total:7,completed:0,pending:7,errors:0});return {status:{total:7,completed:0,pending:7,errors:0},projected:true};};
   const unsubscribe=h.sync.subscribeStashSyncStatus(status=>statuses.push(status));
   try {
     await h.connect();await started.promise;

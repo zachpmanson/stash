@@ -248,6 +248,31 @@ test('actual Sync progress bar follows connecting, metadata and image sync witho
   }
 });
 
+test('actual Sync image progress uses verified completed/total counts through errors and completion', () => {
+  const u = syncUi();
+  const account = { username: 'stored-user', serverUrl: 'https://sync.example/' };
+  for (const [completed, errors, expectedPercent] of [[0, 0, 0], [1, 0, 33], [2, 1, 66], [3, 0, 100]]) {
+    u.publish({ phase: 'synced', account, media: { total: 3, completed, pending: 3 - completed, errors } });
+    const tree = u.render();
+    const bars = nodes(tree).filter(n => n.type === 'ProgressBar');
+    assert.equal(bars.length, 1);
+    assert.equal(bars[0].props.indeterminate, false);
+    assert.equal(bars[0].props.progress, completed / 3);
+    assert.equal(bars[0].props.color, errors ? '#fbbf24' : '#60a5fa');
+    const label = `Images synced: ${completed} of 3 (${expectedPercent}%)`;
+    assert.equal(bars[0].props.accessibilityLabel, label);
+    assert.ok(words(tree).includes(label));
+  }
+  u.publish({ phase: 'synced', account, media: { total: 1000, completed: 999, pending: 1, errors: 0 } });
+  assert.match(words(u.render()), /999 of 1000 \(99%\)/, 'unfinished work must not round up to 100%');
+  u.publish({ phase: 'synced', account, media: { total: 0, completed: 0, pending: 0, errors: 0 } });
+  assert.equal(nodes(u.render()).filter(n => n.type === 'ProgressBar').length, 0);
+  for (const extra of [{ disconnecting: true }, { restartRequired: true }, { authenticationRequired: true }, { phase: 'error' }]) {
+    u.publish({ phase: 'synced', account, media: { total: 3, completed: 1, pending: 2, errors: 0 }, ...extra });
+    assert.equal(nodes(u.render()).filter(n => n.type === 'ProgressBar').length, 0);
+  }
+});
+
 test('actual Sync progress bar includes saved-login reconnect and hides on unsupported platforms', () => {
   for (const platform of ['android', 'ios', 'web']) {
     const h = harness({ platform });

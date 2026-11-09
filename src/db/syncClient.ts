@@ -590,6 +590,13 @@ export async function connectStashSync(
       let projectedSignature = "";
       let lastProjectedAt: number | undefined;
       let firstMediaCycle = true;
+      let lastMediaStatus: MediaQueueStatus | undefined;
+      const notifyMediaStatus = (media: MediaQueueStatus) => {
+        if (!running) return;
+        lastMediaStatus = media;
+        notifySessionStatus({ phase: "synced", projectedAt: lastProjectedAt, media,
+          message: media.pending ? `Metadata synced; ${media.pending} image transfer(s) pending${media.errors ? `, ${media.errors} waiting/retrying or failed` : ""}.` : "Metadata and supported image transfers are complete." });
+      };
       const replica = syncReplicaRef.current!;
       const sessionFeed = {
         request: async (id: string, action: "status" | "preview" | boolean, signal?: AbortSignal) => {
@@ -668,7 +675,7 @@ export async function connectStashSync(
               }
               projectedSignature = exchange.signature;
               lastProjectedAt = Date.now();
-              const state = { phase: "synced" as const, message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt };
+              const state = { phase: "synced" as const, message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt, media: lastMediaStatus };
               notifySessionStatus(state);
               publishProjection();
             } else if (!exchange.complete) {
@@ -676,15 +683,14 @@ export async function connectStashSync(
             } else if (!feedReady) {
               // A transient status outage need not change the DB signature.
               // Recover availability without another projection/replicated write.
-              notifySessionStatus({ phase: "synced", message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt });
+              notifySessionStatus({ phase: "synced", message: "Metadata synced; checking image transfers…", projectedAt: lastProjectedAt, media: lastMediaStatus });
             }
             if (exchange.complete && projectedSignature && running) {
-              const media = await runStashMediaCycle(base, account.username, authorization, attempt.controller.signal, firstMediaCycle);
+              const media = await runStashMediaCycle(base, account.username, authorization, attempt.controller.signal, firstMediaCycle, notifyMediaStatus);
               firstMediaCycle = false;
               if (!running) break;
               if (media.projected) projectedSignature = ""; // recheck full metadata barrier before projecting verified paths
-              notifySessionStatus({ phase: "synced", projectedAt: lastProjectedAt, media: media.status,
-                message: media.status.pending ? `Metadata synced; ${media.status.pending} image transfer(s) pending${media.status.errors ? `, ${media.status.errors} waiting/retrying or failed` : ""}.` : "Metadata and supported image transfers are complete." });
+              notifyMediaStatus(media.status);
             }
           } catch (error) {
             if (!running) break;
