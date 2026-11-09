@@ -105,7 +105,7 @@ export default function SyncSettingsScreen() {
   const media = status?.phase === "synced" && !status.authenticationRequired ? status.media : undefined;
   const imageProgress = media && media.total > 0 ? media.completed / media.total : undefined;
   const imageProgressLabel = media && imageProgress !== undefined
-    ? `Images synced: ${media.completed} of ${media.total} (${Math.floor(imageProgress * 100)}%)`
+    ? `Images synced: ${media.completed} of ${media.total} (${Math.floor(media.completed * 100 / media.total)}%)`
     : "Sync in progress";
 
   return (

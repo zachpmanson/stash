@@ -263,6 +263,8 @@ test('actual Sync image progress uses verified completed/total counts through er
     assert.equal(bars[0].props.accessibilityLabel, label);
     assert.ok(words(tree).includes(label));
   }
+  u.publish({ phase: 'synced', account, media: { total: 100, completed: 29, pending: 71, errors: 0 } });
+  assert.match(words(u.render()), /29 of 100 \(29%\)/, 'exact percentages must not lose a point to floating-point rounding');
   u.publish({ phase: 'synced', account, media: { total: 1000, completed: 999, pending: 1, errors: 0 } });
   assert.match(words(u.render()), /999 of 1000 \(99%\)/, 'unfinished work must not round up to 100%');
   u.publish({ phase: 'synced', account, media: { total: 0, completed: 0, pending: 0, errors: 0 } });
