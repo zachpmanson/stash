@@ -53,7 +53,7 @@ function EnabledHomeSyncButton() {
       onPress={() => router.push("/settings/sync")}
       style={({ pressed }) => [styles.button, { backgroundColor: indicator.color }, pressed && styles.pressed]}
     >
-      <Animated.View style={{ transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }] }}>
+      <Animated.View style={{ transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "-360deg"] }) }] }}>
         <MaterialIcons name={indicator.icon} size={22} color={Colors.bg} accessible={false} importantForAccessibility="no" />
       </Animated.View>
     </Pressable>

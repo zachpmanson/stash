@@ -145,7 +145,7 @@ test('sync icon spins continuously through metadata and image sync, stops on com
   assert.equal(timing.isInteraction, false);
   const interpolation = h.animation.interpolations.at(-1);
   assert.deepEqual(Array.from(interpolation.inputRange), [0, 1]);
-  assert.deepEqual(Array.from(interpolation.outputRange), ['0deg', '360deg']);
+  assert.deepEqual(Array.from(interpolation.outputRange), ['0deg', '-360deg'], 'spin must follow the sync glyph arrows');
   await h.publish(active('syncing'));
   await h.publish(active('synced', { media: { pending: 2, errors: 0 } }));
   assert.equal(h.animation.starts, 1, 'status updates must not restart the loop');
