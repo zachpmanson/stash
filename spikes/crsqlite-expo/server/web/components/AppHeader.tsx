@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "./Icon.js";
-import { Button, IconButton } from "./controls.js";
+import { IconButton, TooltipIconButton } from "./controls.js";
 import { Spinner } from "../Spinner.js";
 
 export function AppHeader({
@@ -10,7 +10,6 @@ export function AppHeader({
   busy,
   loading,
   onToggleSidebar,
-  onToggleArchive,
   onRefresh,
   onNew,
 }: {
@@ -20,7 +19,6 @@ export function AppHeader({
   busy: boolean;
   loading: boolean;
   onToggleSidebar: () => void;
-  onToggleArchive: () => void;
   onRefresh: () => void;
   onNew: () => void;
 }) {
@@ -37,33 +35,22 @@ export function AppHeader({
       </IconButton>
       <h1 className="text-xl font-semibold tracking-tight">Stash</h1>
       <div className="ml-auto flex items-center gap-2">
-        <IconButton
-          aria-label="Archive"
-          aria-pressed={archived}
-          disabled={busy}
-          onClick={onToggleArchive}
-        >
-          <Icon name="archive" />
-          <span className="hidden min-[381px]:inline">Archive</span>
-        </IconButton>
-        <IconButton
+        <TooltipIconButton
           aria-label="Refresh"
           disabled={loading || busy}
           onClick={onRefresh}
         >
           <Spinner active={loading} />
-          <span className="hidden sm:inline">Refresh</span>
-        </IconButton>
+        </TooltipIconButton>
         {!archived && (
-          <Button
+          <TooltipIconButton
             className="primary"
             aria-label="New item"
             disabled={busy}
             onClick={onNew}
           >
             <Icon name="plus" />
-            New item
-          </Button>
+          </TooltipIconButton>
         )}
       </div>
     </header>

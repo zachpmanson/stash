@@ -45,10 +45,22 @@ async function harness(t,{dev=true,optIn=false,platform='android',initial={phase
   const unmount=async()=>act(()=>renderer.unmount());
   return {calls,copies,nav,text,button,click,status,reply,folder,unmount};
 }
-for(const config of [{dev:false,optIn:false,platform:'android'},{dev:true,platform:'ios'}]) test('feed controls preserve sync build gate '+JSON.stringify(config),async t=>{
+// Current native gate allows every Android build; iOS/web remain unavailable.
+// Only this stale server-side expectation changed, not native production code.
+for(const config of [{dev:false,optIn:false,platform:'android'},{dev:true,platform:'ios'},{dev:false,platform:'web'}]) test('feed controls preserve platform build gate '+JSON.stringify(config),async t=>{
   const h=await harness(t,{...config,initial:active()});
-  assert.match(h.text(),/requires? an Android|require an Android/); assert.equal(h.calls.length,0);
-  assert.equal(h.button('Preview Atom XML').props.disabled,true);
+  if(config.platform==='android') {
+    assert.match(h.text(),/Pending/); assert.equal(h.calls.length,1);
+    assert.equal(h.calls[0].action,'status');
+    assert.equal(h.button('Preview Atom XML').props.disabled,true);
+    await h.reply(settings());
+    assert.match(h.text(),/Available — private authenticated feed/);
+    assert.equal(h.button('Preview Atom XML').props.disabled,false);
+    await h.click('Copy Atom URL');assert.deepEqual(h.copies,['https://feeds.example/feeds/folders/f.atom']);
+  } else {
+    assert.match(h.text(),/Feeds require Android\./); assert.equal(h.calls.length,0);
+    assert.equal(h.button('Preview Atom XML').props.disabled,true);
+  }
   await h.click('Settings → Sync');assert.deepEqual(h.nav,['/settings/sync']);
 });
 test('actual read-only handlers: unavailable, pending, automatic private status, clean copy and non-WebView preview',async t=>{

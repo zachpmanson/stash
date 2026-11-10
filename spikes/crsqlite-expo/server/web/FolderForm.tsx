@@ -1,3 +1,5 @@
+import { Input } from "@base-ui/react/input";
+import { Field } from "@base-ui/react/field";
 import { Button } from "./components/controls.js";
 import React, { useState } from "react";
 import { Spinner } from "./Spinner.js";
@@ -33,9 +35,9 @@ export function FolderForm({
         if (!busy && name) onSave(name === baseline ? null : name);
       }}
     >
-      <label>
-        Folder name
-        <input
+      <Field.Root className="form-field" disabled={busy} validationMode="onBlur">
+        <Field.Label>Folder name</Field.Label>
+        <Input
           autoFocus
           disabled={busy}
           required
@@ -43,7 +45,9 @@ export function FolderForm({
           maxLength={200}
           defaultValue={baseline ?? ""}
         />
-      </label>
+        <Field.Description className="field-help">Up to 200 characters.</Field.Description>
+        <Field.Error className="field-error" match="valueMissing">Enter a folder name.</Field.Error>
+      </Field.Root>
       <div className="dialog-actions">
         <Button type="submit" className="primary" disabled={busy} aria-live="polite">
           {busy && <Spinner />}

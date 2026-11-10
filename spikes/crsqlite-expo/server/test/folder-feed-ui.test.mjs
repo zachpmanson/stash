@@ -1,3 +1,4 @@
+import { clickEvent } from "./renderer-base-ui.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
@@ -60,10 +61,10 @@ test("actual feed dialog is GET-only, ignores late target results, exposes reado
   assert.equal(input.props.value, fixture("f2").url);
   assert.equal(input.props.readOnly, true);
   const copy = () => renderer.root.findAllByType("button").find(b => b.children.includes("Copy URL"));
-  await flush(() => copy().props.onClick());
+  await flush(() => copy().props.onClick(clickEvent()));
   assert.match(renderer.root.findByProps({ role: "alert" }).children.join(""), /copy it manually/);
   failCopy = false;
-  await flush(() => copy().props.onClick());
+  await flush(() => copy().props.onClick(clickEvent()));
   assert.equal(copied, fixture("f2").url);
   assert.ok(calls.every(c => c.method === "GET"));
   await flush(() => renderer.update(React.createElement(FolderFeedDialog, { ...props, id: "f3" })));

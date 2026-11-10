@@ -1,3 +1,5 @@
+import { Input } from "@base-ui/react/input";
+import { Field } from "@base-ui/react/field";
 import { Button } from "./components/controls.js";
 import React, { useEffect, useState } from "react";
 import { CompactDialog } from "./CompactDialog.js";
@@ -43,10 +45,12 @@ export function FolderFeedDialog({ id, name, returnFocus, onClose }: {
     return () => { live = false; };
   }, [id, attempt]);
   return <CompactDialog title={`Atom feed · ${name}`} id="folder-feed-title" returnFocus={returnFocus} onCancel={onClose}>
-    <p className="field-help">Private feed. Your feed reader must support HTTP Basic authentication. Enter your Stash credentials in the reader, never in this URL.</p>
+    <Field.Root className="form-field">
+    <Field.Description className="field-help">Private feed. Your feed reader must support HTTP Basic authentication. Enter your Stash credentials in the reader, never in this URL.</Field.Description>
     {loading && <p role="status" className="feed-status"><Spinner /> Loading feed…</p>}
     {error && <p role="alert">{error}</p>}
-    {url && <label>Atom feed URL<input name="feed-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></label>}
+    {url && <><Field.Label>Atom feed URL</Field.Label><Input name="feed-url" readOnly value={url} onFocus={(e) => e.currentTarget.select()} /></>}
+    </Field.Root>
     <div className="dialog-actions">
       {url && <Button disabled={copying} onClick={async () => {
         setCopying(true);

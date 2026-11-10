@@ -1,6 +1,7 @@
 import React from "react";
 import { Icon } from "./Icon.js";
-import { IconButton, SegmentedControl } from "./controls.js";
+import { ToggleGroup } from "@base-ui/react/toggle-group";
+import { Toggle } from "@base-ui/react/toggle";
 
 export function ItemToolbar({
   folderName,
@@ -22,26 +23,26 @@ export function ItemToolbar({
         {heading}
         {archived && <span className="sr-only"> · Archived items only</span>}
       </h2>
-      <SegmentedControl className="ml-auto" aria-label="Collection layout">
-        <IconButton
+      <ToggleGroup className="layout-toggle ml-auto" aria-label="Collection layout"
+        value={[layout]} disabled={busy} onValueChange={(values) => {
+          const next = values[0];
+          if (next === "list" || next === "grid") onLayout(next);
+        }}>
+        <Toggle
           title="List layout"
           aria-label="List layout"
-          aria-pressed={layout === "list"}
-          disabled={busy}
-          onClick={() => onLayout("list")}
+          value="list"
         >
           <Icon name="list" />
-        </IconButton>
-        <IconButton
+        </Toggle>
+        <Toggle
           title="Grid layout"
           aria-label="Grid layout"
-          aria-pressed={layout === "grid"}
-          disabled={busy}
-          onClick={() => onLayout("grid")}
+          value="grid"
         >
           <Icon name="grid" />
-        </IconButton>
-      </SegmentedControl>
+        </Toggle>
+      </ToggleGroup>
     </div>
   );
 }

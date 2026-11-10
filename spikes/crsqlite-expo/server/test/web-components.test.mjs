@@ -1,3 +1,4 @@
+import { clickEvent } from "./renderer-base-ui.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
@@ -42,7 +43,7 @@ test("shared buttons forward native attributes, currentTarget and the actual but
         ref,
         "aria-label": "Actions",
         title: "Actions",
-        disabled: true,
+        disabled: false,
         "aria-pressed": true,
         "aria-expanded": false,
         "aria-haspopup": "menu",
@@ -62,7 +63,7 @@ test("shared buttons forward native attributes, currentTarget and the actual but
   assert.equal(ref.current, nativeButton);
   assert.equal(button.props.type, "button");
   for (const [key, value] of Object.entries({
-    disabled: true,
+    disabled: false,
     title: "Actions",
     "aria-label": "Actions",
     "aria-pressed": true,
@@ -71,7 +72,7 @@ test("shared buttons forward native attributes, currentTarget and the actual but
     "data-target": "f1",
   }))
     assert.equal(button.props[key], value);
-  button.props.onClick({ currentTarget: nativeButton });
+  button.props.onClick(clickEvent(nativeButton));
   assert.equal(current, nativeButton);
   assert.equal(renderer.toJSON().type, "button");
   assert.equal(renderer.root.findByType("svg").props["aria-hidden"], "true");
@@ -101,7 +102,6 @@ test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed 
       loading: false,
       archived: true,
       onToggleSidebar() {},
-      onToggleArchive() {},
       onRefresh() {},
       onNew() {},
     }),
@@ -113,7 +113,7 @@ test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed 
     },
   );
   assert.equal(ref.current, nativeButton);
-  assert.equal(h.root.findAllByType("button").length, 3);
+  assert.equal(h.root.findAllByType("button").length, 2);
   assert.equal(h.root.findAllByType("button")[0].props["aria-expanded"], true);
   const changes = [];
   const toolbar = await mount(
@@ -139,7 +139,7 @@ test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed 
         b.props.title === b.props["aria-label"] && b.props.type === "button",
     ),
   );
-  await flush(() => buttons[0].props.onClick());
+  await flush(() => buttons[0].props.onClick(clickEvent()));
   assert.deepEqual(changes, ["list"]);
   await flush(() =>
     toolbar.update(
@@ -305,7 +305,7 @@ test("folder navigation renders complete decorative saved text while retaining n
     assert.equal(link.props["aria-current"], f.id === "custom" ? "page" : undefined);
     assert.equal(link.findAllByType("svg").length, 0);
     assert.equal(link.findByProps({ className: "truncate" }).children.join(""), f.name);
-    await flush(() => link.props.onClick());
+    await flush(() => link.props.onClick(clickEvent()));
     const control = buttons.find(b => b.props["aria-label"] === `Actions for ${f.name}`);
     assert.equal(control.props["aria-haspopup"], "menu");
     assert.equal(control.findAllByType("svg").length, 1);

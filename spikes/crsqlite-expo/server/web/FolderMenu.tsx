@@ -1,5 +1,5 @@
-import { Button } from "./components/controls.js";
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Menu } from "@base-ui/react/menu";
 import type { WebFolder } from "../src/contracts.js";
 
 export type FolderMenuTarget = { id: string; x: number; y: number; trigger: HTMLElement };
@@ -13,45 +13,58 @@ export function FolderMenu({ target, folder, busy, onClose, onRename, onArchive,
   onFeed: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ left: target.x, top: target.y });
+  const outsideClose = useRef(false);
   useLayoutEffect(() => {
-    const node = menu.current;
-    if (!node) return;
-    const fit = () => {
-      const box = node.getBoundingClientRect();
-      setPosition({ left: Math.max(8, Math.min(target.x, window.innerWidth - box.width - 8)),
-        top: Math.max(8, Math.min(target.y, window.innerHeight - box.height - 8)) });
-    };
-    fit();
-    node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
-    const outside = (event: PointerEvent) => { if (!node.contains(event.target as Node)) onClose(); };
-    document.addEventListener("pointerdown", outside);
-    window.addEventListener("resize", onClose);
     return () => {
-      document.removeEventListener("pointerdown", outside);
-      window.removeEventListener("resize", onClose);
-      if (node.contains(document.activeElement)) {
-        const fallback = target.trigger.isConnected ? target.trigger : document.querySelector<HTMLElement>(".folder-link");
-        fallback?.focus({ preventScroll: true });
-      }
+      const node = menu.current;
+      // Capture ownership before React removes the portal. Resolve a surviving
+      // target after the commit (the folder trigger may be removed in it too).
+      if (!node?.contains(document.activeElement) || outsideClose.current) return;
+      window.setTimeout?.(() => {
+        if (node.isConnected || document.querySelector('[role="dialog"]') ||
+            (document.activeElement !== document.body && !node.contains(document.activeElement))) return;
+        const visible = (element: HTMLElement | null): element is HTMLElement =>
+          !!element?.isConnected && element.getClientRects().length > 0 &&
+          getComputedStyle(element).visibility !== "hidden" && !element.matches(":disabled");
+        const fallback = visible(target.trigger) ? target.trigger :
+          [...document.querySelectorAll<HTMLElement>(".folder-link")].find(visible);
+        // The surviving control may be above the sidebar's scroll viewport.
+        // Native focus scrolling reveals it without moving unrelated panes.
+        fallback?.focus();
+      }, 0);
     };
   }, [target]);
-  return <div ref={menu} role="menu" aria-label={`Actions for ${folder.name}`} className="folder-menu" style={position}
-    onKeyDown={(e) => {
-      e.stopPropagation();
-      if (["Escape", "Tab"].includes(e.key)) { e.preventDefault(); onClose(); }
-      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
-        e.preventDefault();
-        const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
-        const index = items.indexOf(document.activeElement as HTMLButtonElement);
-        items[e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 :
-          (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
-      }
-    }}>
-    <Button role="menuitem" disabled={busy} onClick={onRename}>Rename</Button>
-    <Button role="menuitem" disabled={busy} onClick={onArchive}>
-      {folder.archived_at === null ? "Archive folder" : "Unarchive folder"}
-    </Button>
-    <Button role="menuitem" disabled={busy || folder.archived_at !== null} onClick={onFeed}>Atom feed</Button>
-  </div>;
+  const anchor = useMemo(() => ({
+    getBoundingClientRect: () => ({ x: target.x, y: target.y, left: target.x, right: target.x,
+      top: target.y, bottom: target.y, width: 0, height: 0, toJSON() {} }),
+  }), [target]);
+  useEffect(() => {
+    window.addEventListener("resize", onClose);
+    return () => window.removeEventListener("resize", onClose);
+  }, [target]);
+  return <Menu.Root open modal={false} onOpenChangeComplete={(open) => {
+    if (open) menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }} onOpenChange={(open, details) => {
+    if (!open) {
+      outsideClose.current = details.reason === "outside-press" || details.reason === "focus-out";
+      onClose();
+    }
+  }}>
+    <Menu.Portal>
+      <Menu.Positioner anchor={anchor} positionMethod="fixed" align="start" collisionPadding={8} sticky collisionAvoidance={{ side: "shift", align: "shift" }} className="folder-menu-positioner">
+        <Menu.Popup ref={menu} id="folder-actions-menu" aria-label={`Actions for ${folder.name}`} className="folder-menu"
+          finalFocus={false} onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Tab") { e.preventDefault(); onClose(); }
+          }}>
+          {/* App closes only after its discard guard accepts the action. */}
+          <Menu.Item render={<button type="button" />} nativeButton closeOnClick={false} disabled={busy} onClick={onRename}>Rename</Menu.Item>
+          <Menu.Item render={<button type="button" />} nativeButton closeOnClick={false} disabled={busy} onClick={onArchive}>
+            {folder.archived_at === null ? "Archive folder" : "Unarchive folder"}
+          </Menu.Item>
+          <Menu.Item render={<button type="button" />} nativeButton closeOnClick={false} disabled={busy || folder.archived_at !== null} onClick={onFeed}>Atom feed</Menu.Item>
+        </Menu.Popup>
+      </Menu.Positioner>
+    </Menu.Portal>
+  </Menu.Root>;
 }

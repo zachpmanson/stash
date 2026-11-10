@@ -1,3 +1,5 @@
+import { selectArchive } from "./select-browser-helpers.mjs";
+import { archiveChecks } from "./archive-browser-checks.mjs";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
@@ -5,6 +7,7 @@ import { once } from "node:events";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
+import { baseUiChecks } from "./base-ui-browser-checks.mjs";
 import { folderInteractions } from "./folder-browser-checks.mjs";
 import { folderEmojiChecks } from "./folder-emoji-browser-checks.mjs";
 import { desktopDensity } from "./compact-browser-checks.mjs";
@@ -238,11 +241,11 @@ try {
   await waitFor(
     async () =>
       await evaluate(
-        `[...document.querySelectorAll('button')].some(b=>b.textContent==='New item')`,
+        `[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='New item')`,
       ),
   );
   await evaluate(
-    `[...document.querySelectorAll('button')].find(b=>b.textContent==='New item').click()`,
+    `[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='New item').click()`,
   );
   await waitFor(
     async () =>
@@ -268,7 +271,7 @@ try {
     content: "Concurrent synthetic phone content",
   });
   await evaluate(
-    `[...document.querySelectorAll('button')].find(b=>b.textContent==='Refresh').click()`,
+    `[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Refresh').click()`,
   );
   await waitFor(
     async () =>
@@ -300,7 +303,7 @@ try {
     await waitFor(() =>
       evaluate(`(()=>{const b=${selector};return !!b && !b.disabled})()`),
     );
-    assert.ok(await evaluate(`(()=>{const modal=document.querySelector('dialog[open]');return !modal || modal.contains(${selector})})()`), `Cannot click inert background: ${label}`);
+    assert.ok(await evaluate(`(()=>{const modal=document.querySelector('[role="dialog"]');return !modal || modal.contains(${selector})})()`), `Cannot click inert background: ${label}`);
     return evaluate(`(${selector}).click()`);
   };
   const screenshot = async (name) => {
@@ -321,10 +324,10 @@ try {
     { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false },
     sessionId,
   );
-  assert.ok(await evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · No folders')`));
+  assert.ok(await evaluate(`document.querySelector('.organise-trigger')?.textContent.includes('Organise · No folders')`));
   await evaluate(`document.documentElement.dataset.fixtureReload='old'`);
   await cdp('Page.reload', {}, sessionId);
-  await waitFor(() => evaluate(`!document.documentElement.dataset.fixtureReload && !!document.querySelector('.organise summary') && document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
+  await waitFor(() => evaluate(`!document.documentElement.dataset.fixtureReload && !!document.querySelector('.organise-trigger') && document.querySelector('.collection').getAttribute('aria-busy')==='false'`));
   // The busy probe delays only synthetic local writes; no production traffic.
   await evaluate(`(()=>{const original=window.fetch;window.fetch=async (...args)=>{if(window.fixtureDelayWrite && args[1]?.method && args[1].method!=='GET')await new Promise(r=>setTimeout(r,350));return original(...args)}})()`);
   if (process.env.STASH_DENSITY_REFERENCE !== "1") {
@@ -363,7 +366,7 @@ try {
   await waitFor(() => evaluate(`!!document.querySelector('input[name=name]')`));
   await evaluate(`(()=>{const n=document.querySelector('input[name=name]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Keep empty-state draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
   // Empty CTA is now natively inert; dirty dismissal is tested via the modal Cancel.
-  assert.ok(await evaluate(`document.querySelector('dialog').matches(':modal') && !document.querySelector('textarea')`));
+  assert.ok(await evaluate(`document.querySelector('[role=dialog]').getAttribute('aria-modal')==='true' && !document.querySelector('textarea')`));
   assert.equal(await evaluate(`document.querySelector('input[name=name]').value`), 'Keep empty-state draft');
   const cancelEmptyDraft = click('Cancel');
   await waitFor(() => !!dialog);
@@ -373,7 +376,7 @@ try {
   await waitFor(() => evaluate(`!!document.querySelector('.empty button')`));
   await evaluate(`document.querySelector('.empty button').click()`);
   await waitFor(() => evaluate(`!!document.querySelector('textarea')`));
-  assert.ok(await evaluate(`(()=>{const f=document.querySelector('textarea').form,c=f.elements.content;return f.querySelectorAll('button.primary[type=submit]').length===1 && f.elements.title.closest('label').textContent.includes('optional') && !f.elements.title.required && c.required && document.getElementById(c.getAttribute('aria-describedby')).textContent.includes('http:// or https://') && f.querySelector('button[type=button]').textContent.trim()==='Cancel'})()`));
+  assert.ok(await evaluate(`(()=>{const f=document.querySelector('textarea').form,c=f.elements.content;return f.querySelectorAll('button.primary[type=submit]').length===1 && f.elements.title.labels[0].textContent.includes('optional') && !f.elements.title.required && c.required && document.getElementById(c.getAttribute('aria-describedby')).textContent.includes('http:// or https://') && f.querySelector('.actions button[type=button]').textContent.trim()==='Cancel'})()`));
   await screenshot("desktop-item-form");
   await evaluate(
     `(()=>{const f=document.querySelector('textarea').form;f.elements.title.value='A quiet place for ideas';f.elements.content.value='This is a synthetic notebook, created only for interface review.\\n\\nA library does not need to be loud. Keep a thought, save a link, and come back when there is time to enjoy it.\\n\\n'+('A note for another day: make space for the things that catch your eye. Read slowly, follow an interesting thread, and leave a little room for something unexpected.\\n\\n').repeat(18)+'Long-word wrapping check: '+ 'x'.repeat(90);f.requestSubmit()})()`,
@@ -434,7 +437,7 @@ try {
     filedId,
   );
   assert.ok(await evaluate(`(()=>{const cards=[...document.querySelectorAll('.item-card')];return cards.length===3 && document.querySelector('.layout-toggle').getAttribute('role')==='group' && [...document.querySelectorAll('.layout-toggle button')].every(b=>b.title===b.getAttribute('aria-label'))})()`));
-  assert.ok(await evaluate(`document.querySelector('.organise summary').textContent.includes('Organise · 1 folder')`));
+  assert.ok(await evaluate(`document.querySelector('.organise-trigger').textContent.includes('Organise · 1 folder')`));
   assert.ok(await evaluate(`[...document.querySelectorAll('.item-card small')].some(n=>n.textContent.startsWith('Note')) && [...document.querySelectorAll('.item-card small')].some(n=>n.textContent.startsWith('example.com'))`));
   assert.ok(await evaluate(`(()=>{const b=[...document.querySelectorAll('.layout-toggle button')];return getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='true')).backgroundColor!==getComputedStyle(b.find(n=>n.getAttribute('aria-pressed')==='false')).backgroundColor})()`));
   console.log('UI10_LIST_GEOMETRY ' + JSON.stringify(await evaluate(`[...document.querySelectorAll('.item-card')].map(c=>({title:c.querySelector('.card-title').textContent,height:c.getBoundingClientRect().height}))`)));
@@ -445,10 +448,10 @@ try {
   await json(`/folders/${archivedMembership}`, 'PATCH', { archived: true });
   await json(`/items/${filedId}/folders/${archivedMembership}`, 'PUT', { present: true });
   await click('Refresh');
-  await waitFor(() => evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · 2 folders')`));
-  await evaluate(`document.querySelector('.organise').open=true;[...document.querySelectorAll('.organise label')].find(n=>n.textContent.includes('Synthetic archived membership')).querySelector('input').click()`);
-  await waitFor(() => evaluate(`document.querySelector('.organise summary')?.textContent.includes('Organise · 1 folder')`));
-  await evaluate(`document.querySelector('.organise').open=false`);
+  await waitFor(() => evaluate(`document.querySelector('.organise-trigger')?.textContent.includes('Organise · 2 folders')`));
+  await evaluate(`if(document.querySelector('.organise-trigger').getAttribute('aria-expanded')!=='true')document.querySelector('.organise-trigger').click();[...document.querySelectorAll('.organise label')].find(n=>n.textContent.includes('Synthetic archived membership')).querySelector('[role=checkbox]').click()`);
+  await waitFor(() => evaluate(`document.querySelector('.organise-trigger')?.textContent.includes('Organise · 1 folder')`));
+  await evaluate(`document.querySelector('.organise-trigger').click()`);
   const linkId = (await json(`/items?folderId=${folderId}`)).items.find(i => i.type === 'url').id;
   await evaluate(`document.querySelector('[data-item-id="${linkId}"]').click()`);
   await waitFor(() => evaluate(`!!document.querySelector('.reader a')`));
@@ -529,7 +532,7 @@ try {
   await evaluate(
     `(()=>{const n=document.querySelector('input[name=title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(n,'Unsaved synthetic draft');n.dispatchEvent(new Event('input',{bubbles:true}))})()`,
   );
-  const abandoning = click("Archive");
+  const abandoning = selectArchive({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), waitFor }, true);
   await waitFor(() => !!dialog);
   assert.match(dialog.message, /unsaved/i);
   await cdp("Page.handleJavaScriptDialog", { accept: false }, sessionId);
@@ -561,10 +564,10 @@ try {
   );
   await waitFor(() =>
     evaluate(
-      `![...document.querySelectorAll('button')].find(b=>b.textContent==='Archive').disabled`,
+      `!document.querySelector('.archive-select').disabled`,
     ),
   );
-  await click("Archive");
+  await selectArchive({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), waitFor }, true);
   await waitFor(() =>
     evaluate(
       `new URLSearchParams(location.search).get('archive')==='1' && !document.querySelector('[aria-label="New item"]')`,
@@ -667,7 +670,7 @@ try {
     ),
   );
   await evaluate(`document.querySelector('[aria-label="List layout"]').focus()`);
-  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }, sessionId);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 }, sessionId);
   assert.ok(await evaluate(`document.activeElement.getAttribute('aria-label')==='Grid layout' && getComputedStyle(document.activeElement).outlineStyle!=='none'`));
   await screenshot('320-layout-focus');
   if (process.env.STASH_DENSITY_REFERENCE !== "1") {
@@ -761,16 +764,16 @@ try {
     { width: 720, height: 500, deviceScaleFactor: 2, mobile: false },
   ]) {
     await cdp('Emulation.setDeviceMetricsOverride', metrics, sessionId);
-    assert.ok(await evaluate(`(()=>{const pane=document.querySelector('.collection'),h=document.querySelector('.collection-heading');pane.scrollTop=320;const a=h.getBoundingClientRect(),p=pane.getBoundingClientRect();return Math.abs(a.top-p.top)<2 && a.bottom<p.bottom && getComputedStyle(h).position==='sticky' && getComputedStyle(h).backgroundColor!=='rgba(0, 0, 0, 0)' && document.documentElement.scrollWidth<=innerWidth})()`));
-    await screenshot('sticky-' + metrics.width);
-    // Keyboard focus cannot be hidden underneath the sticky toolbar.
+    assert.ok(await evaluate(`(()=>{const pane=document.querySelector('.collection-scroll'),h=document.querySelector('.collection-heading');pane.scrollTop=320;const a=h.getBoundingClientRect(),p=pane.getBoundingClientRect();return a.bottom<=p.top && a.top>=document.querySelector('.collection').getBoundingClientRect().top && getComputedStyle(h).position!=='sticky' && getComputedStyle(h).backgroundColor!=='rgba(0, 0, 0, 0)' && document.documentElement.scrollWidth<=innerWidth})()`));
+    await screenshot('toolbar-' + metrics.width);
+    // Keyboard focus stays in the content viewport, below the separate toolbar.
     await evaluate(`document.querySelectorAll('.item-card')[10].focus()`);
     await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 }, sessionId);
-    assert.ok(await evaluate(`document.activeElement.classList.contains('item-card') && document.activeElement.getBoundingClientRect().top>=document.querySelector('.collection-heading').getBoundingClientRect().bottom+5`));
+    assert.ok(await evaluate(`document.activeElement.classList.contains('item-card') && document.activeElement.getBoundingClientRect().top>=document.querySelector('.collection-heading').getBoundingClientRect().bottom`));
   }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sessionId);
   await evaluate(
-    `document.querySelector('.collection').scrollTop=320;document.querySelector('.item-card').click()`,
+    `document.querySelector('.collection-scroll').scrollTop=320;document.querySelector('.item-card').click()`,
   );
   await waitFor(() =>
     evaluate(
@@ -778,7 +781,7 @@ try {
     ),
   );
   assert.equal(
-    await evaluate(`document.querySelector('.collection').scrollTop`),
+    await evaluate(`document.querySelector('.collection-scroll').scrollTop`),
     320,
   );
   const selectionBeforeLayout = await evaluate(
@@ -789,7 +792,7 @@ try {
     evaluate(`document.querySelector('.items').classList.contains('flex')`),
   );
   assert.equal(
-    await evaluate(`document.querySelector('.collection').scrollTop`),
+    await evaluate(`document.querySelector('.collection-scroll').scrollTop`),
     320,
   );
   assert.equal(
@@ -972,7 +975,7 @@ try {
   });
   console.log(process.env.STASH_DENSITY_REFERENCE === '1'
     ? 'PASS baseline behavior; density metrics recorded only (compact acceptance intentionally disabled)'
-    : 'PASS compact density/chrome/panes/grid/touch controls and preserved UI safeguards: compact list/sticky toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');
+    : 'PASS compact density/chrome/panes/grid/touch controls and preserved UI safeguards: compact list/fixed pane toolbar/empty CTAs/forms+busy/help/membership/layout group/card labels/new-tab hint/truthful pagination');
   console.log("PASS real remote filter removal preserves unrelated new-folder DOM/value/dirty protection and invalidates owned rename");
   console.log(
     "PASS Tailwind static CSS, exact two-column odd grid, independent scrolling/retention, layout persistence, folder creation/atomic filing, deep link/Back, real dirty-draft confirmation, item/folder-removal invalidation, archive/Undo, keyboard/focus, narrow drawers and 200% layout",
@@ -988,6 +991,16 @@ try {
   });
   await mediaInteractions({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, screenshot, json,
     base: `http://127.0.0.1:${proxyPort}`, directory: dir,
+    confirm: async (action, accept) => {
+      const pending = action(); await waitFor(() => !!dialog);
+      assert.match(dialog.message, /unsaved/i); await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);
+      await pending; dialog = null;
+    },
+  });
+  await baseUiChecks({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, json,
+    base: `http://127.0.0.1:${proxyPort}` });
+  await archiveChecks({ evaluate, cdp: (method, params) => cdp(method, params, sessionId), click, waitFor, json,
+    base: `http://127.0.0.1:${proxyPort}`,
     confirm: async (action, accept) => {
       const pending = action(); await waitFor(() => !!dialog);
       assert.match(dialog.message, /unsaved/i); await cdp("Page.handleJavaScriptDialog", { accept }, sessionId);

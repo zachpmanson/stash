@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { selectType } from "./select-browser-helpers.mjs";
 import { writeFile } from "node:fs/promises";
 
 /** Actual private UI + XHR + decoder + Caddy using synthetic raster files only. */
@@ -12,7 +13,8 @@ export async function mediaInteractions({ evaluate, cdp, click, waitFor, screens
   await waitFor(() => evaluate(`document.querySelector('.collection')?.getAttribute('aria-busy')==='false'`));
   async function newImage(title, method) {
     await click("New item");
-    await evaluate(`(()=>{const n=document.querySelector('select[name=type]');n.value='image';n.dispatchEvent(new Event('change',{bubbles:true}));const t=document.querySelector('input[name=title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(t,${JSON.stringify(title)});t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+    await selectType({ evaluate, cdp, waitFor }, 'image');
+    await evaluate(`(()=>{const t=document.querySelector('input[name=title]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(t,${JSON.stringify(title)});t.dispatchEvent(new Event('input',{bubbles:true}))})()`);
     await waitFor(() => evaluate(`!!document.querySelector('input[type=file]')`));
     if (method === "pick") {
       const { root } = await cdp("DOM.getDocument");

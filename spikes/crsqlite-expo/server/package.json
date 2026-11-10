@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "test": "NODE_PATH=./node_modules node --import tsx --test test/*.test.mjs",
+    "test": "NODE_PATH=./node_modules node --experimental-test-module-mocks --import tsx --import ./test/renderer-base-ui.mjs --test test/*.test.mjs",
     "build": "tsc --outDir dist && node scripts/build-web.mjs",
     "db": "node scripts/db-admin.mjs",
     "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
     "@hono/node-server": "2.1.5",
     "@tabler/icons-react": "3.50.0",
     "@vlcn.io/crsqlite": "0.16.3",

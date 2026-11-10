@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { selectType } from "./select-browser-helpers.mjs";
 
 /** Actual browser form semantics and persistence, with synthetic metadata only. */
 export async function linkEditorChecks({ evaluate, cdp, click, waitFor, json, base, confirm }) {
@@ -21,16 +22,17 @@ export async function linkEditorChecks({ evaluate, cdp, click, waitFor, json, ba
     Object.getOwnPropertyDescriptor(n instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(n,${JSON.stringify(value)});
     n.dispatchEvent(new Event('input',{bubbles:true}));
   })()`);
-  const mode = value => evaluate(`(() => {const n=document.querySelector('select[name=type]');n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const mode = value => selectType({ evaluate, cdp, waitFor }, value);
   await click("New item");
   await waitFor(() => evaluate(`!!document.querySelector('textarea[name=content]')`));
+  assert.ok(await evaluate(`(()=>{const title=document.querySelector('input[name=title]'),content=document.querySelector('textarea');return title.labels[0].textContent==='Title (optional)' && title.maxLength===500 && content.labels[0].textContent==='Content (required)' && content.getAttribute('aria-describedby').split(' ').every(id=>!!document.getElementById(id)) && title.getAttribute('aria-describedby').split(' ').some(id=>document.getElementById(id)?.textContent.includes('500'))})()`), "composed fields retain native labels, descriptions and maxLength");
   await input('input[name=title]', 'Keep this text draft, not a link title');
   await input('textarea[name=content]', 'https://example.com/synthetic-link-title');
   await mode("url");
   await waitFor(() => evaluate(`!!document.querySelector('input[type=url]')`));
   assert.deepEqual(await evaluate(`(() => {
     const form=document.querySelector('.reader form'),url=form.elements.content,title=form.elements.title;
-    return {label:url.closest('label').firstChild.textContent,value:url.value,required:url.required,max:url.maxLength,titleVisible:!!title.getBoundingClientRect().height,titleInPayload:new FormData(form).has('title')};
+    return {label:document.querySelector('label[for="'+url.id+'"]').textContent,value:url.value,required:url.required,max:url.maxLength,titleVisible:!!title.getBoundingClientRect().height,titleInPayload:new FormData(form).has('title')};
   })()`), { label: "URL (required)", value: "https://example.com/synthetic-link-title", required: true, max: 4096, titleVisible: false, titleInPayload: false });
   await mode("text");
   await waitFor(() => evaluate(`!!document.querySelector('textarea[name=content]')`));
@@ -41,14 +43,17 @@ export async function linkEditorChecks({ evaluate, cdp, click, waitFor, json, ba
   for (const invalid of ['', 'not a URL']) {
     await input('input[type=url]', invalid);
     assert.equal(await evaluate(`document.querySelector('input[type=url]').checkValidity()`), false);
-    await evaluate(`document.querySelector('.reader form').requestSubmit()`);
+    await evaluate(`document.querySelector('input[type=url]').focus();document.querySelector('input[type=url]').blur();document.querySelector('.reader form').requestSubmit()`);
+    await waitFor(() => evaluate(`!!document.querySelector('.field-error')`));
     assert.equal(await evaluate(`window.linkCalls.length`), 0, 'invalid URLs must not submit metadata or item requests');
     assert.equal(await evaluate(`document.querySelector('.reader fieldset').disabled`), false);
+    assert.ok(await evaluate(`document.querySelector('input[type=url]').labels[0].textContent==='URL (required)' && document.querySelector('.field-error')?.textContent.length>0`), "Base UI Field validation accompanies native invalid URL blocking");
   }
   await input('input[type=url]', 'https://example.com/synthetic-link-title');
   await evaluate(`document.querySelector('.reader form').requestSubmit();document.querySelector('.reader form').requestSubmit()`);
   await waitFor(() => evaluate(`document.querySelector('.reader fieldset')?.disabled`));
-  await evaluate(`document.querySelector('.reader form button[type=button]').click()`);
+  assert.ok(await evaluate(`(()=>{const type=document.querySelector('.type-select'),archive=document.querySelector('.archive-select');type.click();archive.click();return type.disabled && archive.disabled && type.getAttribute('aria-expanded')==='false' && archive.getAttribute('aria-expanded')==='false'})()`), "busy Select buttons cannot open or navigate");
+  await evaluate(`document.querySelector('.reader form .actions button[type=button]').click()`);
   assert.equal(await evaluate(`!!document.querySelector('input[type=url]')`), true);
   await waitFor(() => evaluate(`document.querySelector('.reader h2')?.textContent==='Synthetic & decoded page'`));
   const id = await evaluate(`new URLSearchParams(location.search).get('item')`);

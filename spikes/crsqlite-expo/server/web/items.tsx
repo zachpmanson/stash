@@ -1,3 +1,7 @@
+import { Input } from "@base-ui/react/input";
+import { Select } from "@base-ui/react/select";
+import { Field } from "@base-ui/react/field";
+import { IconChevronDown, IconCheck } from "@tabler/icons-react";
 import { Button } from "./components/controls.js";
 import React, { useId, useState, useRef } from "react";
 import { uploadImage, type ImageUpload } from "./media.js";
@@ -122,6 +126,8 @@ export function ItemReader({
     </>
   );
 }
+const itemTypes = { text: "Text", url: "Link", image: "Image" };
+
 export function ItemEditor({
   item,
   busy,
@@ -136,6 +142,8 @@ export function ItemEditor({
   onDirty?: (dirty: boolean) => void;
 }) {
   const contentHelpId = useId();
+  const contentId = useId();
+  const fileId = useId();
   const [newType, setNewType] = useState("text");
   const isLink = (item?.type ?? newType) === "url";
   const newLink = !item && isLink;
@@ -192,34 +200,49 @@ export function ItemEditor({
       <h2>{item ? "Edit item" : "New item"}</h2>
       <fieldset disabled={busy}>
         {!item && (
-          <label>
-            Type
-            <select name="type" defaultValue="text" onChange={e => setNewType(e.target.value)}>
-              <option value="text">Text</option>
-              <option value="url">Link</option>
-              <option value="image">Image</option>
-            </select>
-          </label>
+          <Field.Root className="form-field" disabled={busy}>
+            <Field.Label>Type</Field.Label>
+            <Select.Root name="type" items={itemTypes} value={newType} disabled={busy}
+              onValueChange={value => { if (value) { setNewType(value); onDirty?.(true); } }}>
+              <Select.Trigger className="type-select"><Select.Value /><Select.Icon><IconChevronDown size={14} aria-hidden="true" /></Select.Icon></Select.Trigger>
+              <Select.Portal>
+                <Select.Positioner alignItemWithTrigger={false} sideOffset={4} collisionPadding={8} className="type-select-positioner">
+                  <Select.Popup className="type-select-popup">
+                    <Select.List>
+                      {Object.entries(itemTypes).map(([value, label]) => <Select.Item key={value} value={value} className="type-select-item">
+                        <Select.ItemText>{label}</Select.ItemText><Select.ItemIndicator><IconCheck size={14} aria-hidden="true" /></Select.ItemIndicator>
+                      </Select.Item>)}
+                    </Select.List>
+                  </Select.Popup>
+                </Select.Positioner>
+              </Select.Portal>
+            </Select.Root>
+          </Field.Root>
         )}
-        <label hidden={newLink}>
-          Title (optional)
-          <input
+        <Field.Root className="form-field" hidden={newLink} disabled={busy || newLink}>
+          <Field.Label>Title (optional)</Field.Label>
+          <Input
             name="title"
             disabled={newLink}
             autoFocus
             maxLength={500}
             defaultValue={initial?.title ?? ""}
           />
-        </label>
+          <Field.Description className="field-help">Up to 500 characters.</Field.Description>
+        </Field.Root>
         {!item && newType === "image" ? <div className="image-drop-zone" tabIndex={0}>
-          <label>Image <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { if (e.target.files) chooseFile(e.target.files); }} /></label>
-          <p>Choose, drop or paste one JPEG, PNG or still WebP image. Maximum 20 MiB, 24 megapixels and 12,000 pixels per edge. Animated images, HEIC, AVIF and SVG are not supported; your original is never modified.</p>
+          <Field.Root className="form-field" disabled={busy}>
+          <Field.Label htmlFor={fileId}>Image</Field.Label>
+          <input id={fileId} type="file" aria-describedby={`${fileId}-help`} accept="image/jpeg,image/png,image/webp" onChange={e => { if (e.target.files) chooseFile(e.target.files); }} />
+          <Field.Description id={`${fileId}-help`} className="field-help">Choose, drop or paste one JPEG, PNG or still WebP image. Maximum 20 MiB, 24 megapixels and 12,000 pixels per edge. Animated images, HEIC, AVIF and SVG are not supported; your original is never modified.</Field.Description>
+          </Field.Root>
           {file && <p>{file.name} · {Math.ceil(file.size / 1024)} KiB</p>}
           {busy && <p role="status">{progress < 100 ? `Uploading image: ${progress}%` : "Bytes uploaded; validating and saving…"}</p>}
           {imageError && <p role="alert">{imageError}</p>}
-        </div> : item?.type === "image" ? null : <><label>
-          {newLink ? "URL (required)" : "Content (required)"}
-          {newLink ? <input
+        </div> : item?.type === "image" ? null : <Field.Root className="form-field" disabled={busy} validationMode="onBlur">
+          <Field.Label htmlFor={contentId}>{newLink ? "URL (required)" : "Content (required)"}</Field.Label>
+          {newLink ? <Input
+            id={contentId}
             type="url"
             required
             aria-describedby={contentHelpId}
@@ -229,6 +252,7 @@ export function ItemEditor({
             defaultValue={contentDraft.current}
             onChange={e => { contentDraft.current = e.target.value; }}
           /> : <textarea
+            id={contentId}
             required
             aria-describedby={contentHelpId}
             name="content"
@@ -237,10 +261,11 @@ export function ItemEditor({
             defaultValue={contentDraft.current}
             onChange={e => { contentDraft.current = e.target.value; }}
           />}
-        </label>
-        <p id={contentHelpId} className="field-help">
+        <Field.Description id={contentHelpId} className="field-help">
           {newLink ? "Paste a full http:// or https:// address. The page title is fetched when you save; if unavailable, the URL is used." : "Content is required. For links, paste a full http:// or https:// address."}
-        </p></>}
+        </Field.Description>
+        {newLink && <><Field.Error className="field-error" match="valueMissing">Enter a URL.</Field.Error><Field.Error className="field-error" match="typeMismatch">Enter a full URL.</Field.Error></>}
+        </Field.Root>}
         <div className="actions">
           <Button type="submit" className="primary">
             {busy ? "Saving…" : "Save item"}

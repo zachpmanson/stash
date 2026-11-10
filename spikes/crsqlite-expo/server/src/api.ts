@@ -227,7 +227,7 @@ export function installApi(
     const folders = db
       .prepare(
         `SELECT f.id, f.name, f.icon, f.created_at, f.archived_at, f.layout
-      FROM sync_folders f WHERE ${visibleFolder} ORDER BY f.created_at DESC, f.id`,
+      FROM sync_folders f WHERE ${visibleFolder} ORDER BY f.name COLLATE NOCASE, f.id`,
       )
       .all() as (Omit<WebFolder, "icon"> & { icon: string | null })[];
     return folders.map((folder): WebFolder => ({ ...folder, icon: folderIcon(folder) }));

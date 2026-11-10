@@ -1,3 +1,6 @@
+import { FolderSidebar } from "../web/components/FolderSidebar.tsx";
+import { Checkbox } from "@base-ui/react/checkbox";
+import { clickEvent } from "./renderer-base-ui.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
@@ -139,9 +142,9 @@ test("component flows: loading, read, create, edit, membership, archive, filters
     const itemButton = buttons().find(
       (node) => node.props["data-item-id"] === 'i1',
     );
-    await flush(() => itemButton.props.onClick());
+    await flush(() => itemButton.props.onClick(clickEvent()));
     assert.ok(renderer.root.findByType(ItemReader));
-    await flush(() => button("Edit item").props.onClick());
+    await flush(() => button("Edit item").props.onClick(clickEvent()));
     await flush(() =>
       renderer.root
         .find(
@@ -152,26 +155,19 @@ test("component flows: loading, read, create, edit, membership, archive, filters
     );
     assert.equal(item.content, "Changed");
     await flush(() =>
-      renderer.root
-        .findAllByType("input")
-        .find(
-          (node) =>
-            node.props.type === "checkbox" &&
-            node.props.checked === false &&
-            node.props.onChange,
-        )
-        .props.onChange({ target: { checked: true } }),
+      renderer.root.findAllByType(Checkbox.Root).find(node => node.props.checked === false)
+        .props.onCheckedChange(true),
     );
     assert.deepEqual(item.folderIds, ["f1"]);
-    await flush(() => button("Archive item").props.onClick());
+    await flush(() => button("Archive item").props.onClick(clickEvent()));
     assert.equal(item.archived_at, 1);
     assert.equal(renderer.root.findAllByType(ItemReader).length, 0);
-    await flush(() => buttons().find(node => node.props['aria-pressed'] === false && node.props['aria-label'] === 'Archive').props.onClick());
-    await flush(() => buttons().find(node => node.props['data-item-id'] === 'i1').props.onClick());
+    await flush(() => renderer.root.findByType(FolderSidebar).props.onArchive(true));
+    await flush(() => buttons().find(node => node.props['data-item-id'] === 'i1').props.onClick(clickEvent()));
     assert.ok(button("Unarchive item"));
-    await flush(() => button("Unarchive item").props.onClick());
-    await flush(() => buttons().find(node => node.props['aria-pressed'] === true && node.props['aria-label'] === 'Archive').props.onClick());
-    await flush(() => button("New item").props.onClick());
+    await flush(() => button("Unarchive item").props.onClick(clickEvent()));
+    await flush(() => renderer.root.findByType(FolderSidebar).props.onArchive(false));
+    await flush(() => button("New item").props.onClick(clickEvent()));
     await flush(() =>
       renderer.root
         .find(
@@ -196,16 +192,16 @@ test("component flows: loading, read, create, edit, membership, archive, filters
             call.credentials === "same-origin",
         ),
     );
-    await flush(() => buttons().find(node => node.props.title === 'Reading').props.onClick());
+    await flush(() => buttons().find(node => node.props.title === 'Reading').props.onClick(clickEvent()));
     assert.ok(calls.some((call) => call.url.includes("folderId=f1")));
     fail = true;
-    await flush(() => button("Refresh").props.onClick());
+    await flush(() => button("Refresh").props.onClick(clickEvent()));
     assert.match(
       renderer.root.findByProps({ role: "alert" }).children.join(""),
       /Unavailable/,
     );
     fail = false;
-    await flush(() => button("Retry").props.onClick());
+    await flush(() => button("Retry").props.onClick(clickEvent()));
     assert.equal(renderer.root.findAllByProps({ role: "alert" }).length, 0);
   } finally {
     if (renderer) await act(() => renderer.unmount());

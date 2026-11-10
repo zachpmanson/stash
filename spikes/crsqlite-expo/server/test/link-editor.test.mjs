@@ -1,3 +1,7 @@
+import { Field } from "@base-ui/react/field";
+import { Select } from "@base-ui/react/select";
+import { Input } from "@base-ui/react/input";
+import { clickEvent } from "./renderer-base-ui.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
@@ -36,9 +40,9 @@ async function fixture(t, app = false, item = null) {
   await flush(() => { renderer = create(React.createElement(app ? App : ItemEditor, app ? {} : editorProps)); });
   t.after(async () => { await flush(() => renderer.unmount()); Object.assign(globalThis, old); });
   const button = label => renderer.root.findAllByType("button").find(n => n.props["aria-label"] === label || n.children.join("") === label);
-  if (app) await flush(() => button("New item").props.onClick());
+  if (app) await flush(() => button("New item").props.onClick(clickEvent()));
   const editor = () => renderer.root.findByType(ItemEditor);
-  const setType = type => flush(() => editor().findByType("select").props.onChange({ target: { value: type } }));
+  const setType = type => flush(() => editor().findByType(Select.Root).props.onValueChange(type));
   const submit = fields => flush(() => editor().findByType("form").props.onSubmit(event(fields)));
   return { state, renderer, button, editor, setType, submit, editorProps };
 }
@@ -50,16 +54,17 @@ test("new link has a required URL field, hides/disables title, preserves content
   await flush(() => h.editor().findByType("textarea").props.onChange({ target: { value: "https://example.com/draft" } }));
   await h.setType("url");
   const input = h.editor().findByProps({ name: "content" });
-  assert.equal(input.type, "input");
+  assert.equal(input.type, Input);
+  assert.equal(input.findByType("input").props.type, "url");
   assert.equal(input.props.type, "url");
   assert.equal(input.props.required, true);
   assert.equal(input.props.maxLength, 4096);
   assert.equal(input.props.defaultValue, "https://example.com/draft");
-  assert.equal(input.parent.children[0], "URL (required)");
+  assert.equal(input.parent.findByType(Field.Label).props.children, "URL (required)");
   const title = h.editor().findByProps({ name: "title" });
   assert.equal(title.parent.props.hidden, true);
   assert.equal(title.props.disabled, true);
-  assert.match(h.editor().findByProps({ className: "field-help" }).children.join(""), /title is fetched when you save/);
+  assert.match(h.editor().findAllByProps({ className: "field-help" }).map(n => n.children.join("")).join(""), /title is fetched when you save/);
   await h.submit({ type: "url", content: "https://example.com/draft", title: "Must not leak from Text" });
   assert.deepEqual(h.state.saved, [{ type: "url", content: "https://example.com/draft" }]);
   await h.setType("text");
@@ -74,7 +79,7 @@ test("new link has a required URL field, hides/disables title, preserves content
 
 test("editing an existing link retains editable title and dirty-only content/title patches", async t => {
   const h = await fixture(t, false, sample);
-  assert.equal(h.editor().findAllByType("select").length, 0);
+  assert.equal(h.editor().findAllByType(Select.Root).length, 0);
   assert.equal(h.editor().findByProps({ name: "title" }).parent.props.hidden, false);
   await h.submit({ title: sample.title, content: sample.content });
   await h.submit({ title: "Edited title", content: sample.content });
@@ -105,14 +110,14 @@ test("metadata waits within App mutation lock, ignores duplicate submits/cancel,
   const originalSubmit = h.editor().findByType("form").props.onSubmit;
   await flush(() => { originalSubmit(event(fields)); originalSubmit(event(fields)); });
   assert.equal(h.editor().props.busy, true);
-  await flush(() => h.button("Cancel").props.onClick());
+  await flush(() => h.button("Cancel").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 1);
   assert.equal(h.state.calls.filter(c => c.url === "/api/link-title").length, 1);
   assert.equal(h.state.calls.filter(c => c.url === "/api/items").length, 0);
   await flush(() => release());
   assert.equal(h.editor().props.busy, false);
   assert.match(h.renderer.root.findByProps({ role: "alert" }).children.join(""), /Save failed/);
-  assert.equal(h.editor().findByProps({ name: "type" }).props.defaultValue, "text");
+  assert.equal(h.editor().findByType(Select.Root).props.value, "url");
   assert.equal(h.editor().findByProps({ name: "content" }).props.type, "url", "failed save retains link mode");
   h.state.failSave = false;
   await h.submit(fields);
@@ -123,7 +128,7 @@ test("metadata waits within App mutation lock, ignores duplicate submits/cancel,
 test("Cancel before Save performs no metadata request or item write", async t => {
   const h = await fixture(t, true);
   await h.setType("url");
-  await flush(() => h.button("Cancel").props.onClick());
+  await flush(() => h.button("Cancel").props.onClick(clickEvent()));
   assert.equal(h.state.calls.filter(c => c.method !== "GET").length, 0);
   assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
 });

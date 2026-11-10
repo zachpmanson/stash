@@ -1,3 +1,6 @@
+import { Dialog } from "@base-ui/react/dialog";
+import { Checkbox } from "@base-ui/react/checkbox";
+import { clickEvent } from "./renderer-base-ui.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -157,11 +160,11 @@ async function fixture(t, initial = "/?folder=f1") {
     flush(() =>
       buttons()
         .find((b) => b.props["data-item-id"] === id)
-        .props.onClick(),
+        .props.onClick(clickEvent()),
     );
   return {
     state,
-    newTrigger: { isConnected: false },
+    newTrigger: { isConnected: false, focus() {} },
     renderer,
     buttons,
     button,
@@ -178,10 +181,10 @@ async function fixture(t, initial = "/?folder=f1") {
 test("folder layout persists only after success; All items preference remains browser-local", async (t) => {
   const h = await fixture(t);
   h.state.failWrite = true;
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assert.equal(h.button("List layout").props["aria-pressed"], true);
   h.state.failWrite = false;
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assert.equal(h.button("Grid layout").props["aria-pressed"], true);
   assert.equal(h.state.folders[0].layout, "grid");
   const ul = h.renderer.root.findByProps({
@@ -196,11 +199,11 @@ test("folder layout persists only after success; All items preference remains br
     "i1",
     "reselecting the same item must not clear detail without a new fetch",
   );
-  await flush(() => h.button("List layout").props.onClick());
+  await flush(() => h.button("List layout").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i1");
-  await flush(() => h.button("All items").props.onClick());
+  await flush(() => h.button("All items").props.onClick(clickEvent()));
   const before = h.state.calls.filter((c) => c.method !== "GET").length;
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assert.equal(h.storage.get("stash.all.layout"), "grid");
   assert.equal(h.state.calls.filter((c) => c.method !== "GET").length, before);
 });
@@ -214,7 +217,7 @@ test("deep link, selection, browser history and dirty draft navigation protectio
     "i1",
     "same-URL history entries must not blank the reader",
   );
-  await flush(() => h.button("Edit item").props.onClick());
+  await flush(() => h.button("Edit item").props.onClick(clickEvent()));
   await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
   await h.select("i2");
   assert.equal(h.state.prompts, 1);
@@ -232,7 +235,7 @@ test("deep link, selection, browser history and dirty draft navigation protectio
 
 test("create attaches current folder, archive selects next, Undo restores, toggle retains folder and hides create", async (t) => {
   const h = await fixture(t);
-  await flush(() => h.button("New item").props.onClick());
+  await flush(() => h.button("New item").props.onClick(clickEvent()));
   await flush(() =>
     h.renderer.root
       .findByType(ItemEditor)
@@ -241,14 +244,14 @@ test("create attaches current folder, archive selects next, Undo restores, toggl
   const create = h.state.calls.find((c) => c.method === "POST");
   assert.equal(JSON.parse(create.body).folderId, "f1");
   await h.select("i1");
-  await flush(() => h.button("Archive item").props.onClick());
+  await flush(() => h.button("Archive item").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i2");
   assert.ok(h.button("Undo"));
-  await flush(() => h.button("Undo").props.onClick());
+  await flush(() => h.button("Undo").props.onClick(clickEvent()));
   assert.equal(h.state.items[1].archived_at, null);
   await h.select("i1");
-  await flush(() => h.button("Archive item").props.onClick());
-  await flush(() => h.button("Archive").props.onClick());
+  await flush(() => h.button("Archive item").props.onClick(clickEvent()));
+  await flush(() => h.renderer.root.findByType(FolderSidebar).props.onArchive(true));
   assert.ok(
     h.location.search.includes("folder=f1") &&
       h.location.search.includes("archive=1"),
@@ -257,7 +260,7 @@ test("create attaches current folder, archive selects next, Undo restores, toggl
   assert.equal(h.button("New folder"), undefined);
   assert.ok(h.buttons().some((b) => b.props.title === "Reading"));
   await h.select("i1");
-  await flush(() => h.button("Unarchive item").props.onClick());
+  await flush(() => h.button("Unarchive item").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(ItemReader).length, 0);
   assert.equal(h.state.items[1].archived_at, null);
 });
@@ -350,21 +353,21 @@ for (const action of ["New folder", "Rename"]) {
     await flush(() => h.button(action).props.onClick({ currentTarget: h.newTrigger }));
     await typeFolderDraft(h, "Unsaved folder draft");
     const form = h.renderer.root.findByType(FolderForm);
-    await flush(() => h.button("Edit item").props.onClick());
+    await flush(() => h.button("Edit item").props.onClick(clickEvent()));
     assert.equal(h.state.prompts, 1);
     assert.ok(h.renderer.root.findByType(FolderForm) === form, "folder form must survive rejected navigation");
     assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
-    await flush(() => h.button("All items").props.onClick());
+    await flush(() => h.button("All items").props.onClick(clickEvent()));
     assert.equal(h.state.prompts, 2);
     assert.equal(h.location.search, "?folder=f1&item=i1");
     let prevented = false;
     h.listeners.get("beforeunload")({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
     h.state.confirm = true;
-    await flush(() => h.button("Edit item").props.onClick());
+    await flush(() => h.button("Edit item").props.onClick(clickEvent()));
     assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
     assert.equal(h.renderer.root.findByType(ItemEditor).props.item.id, "i1");
-    await flush(() => h.button("All items").props.onClick());
+    await flush(() => h.button("All items").props.onClick(clickEvent()));
     assert.equal(h.state.prompts, 3, "accepted discard must not leave a stale folder dirty flag");
     assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
   });
@@ -376,11 +379,11 @@ test("new-folder form identity and dirty protection survive remote selected-fold
   await typeFolderDraft(h, "Unrelated new folder draft");
   const form = h.renderer.root.findByType(FolderForm);
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.location.search, "");
   assert.ok(h.renderer.root.findByType(FolderForm) === form,
     "changing the filter must not remount the uncontrolled new-folder input");
-  await flush(() => h.button("Archive").props.onClick());
+  await flush(() => h.renderer.root.findByType(FolderSidebar).props.onArchive(true));
   assert.equal(h.state.prompts, 1);
   assert.ok(h.renderer.root.findByType(FolderForm) === form, "folder form must survive rejected navigation");
 });
@@ -388,12 +391,12 @@ test("new-folder form identity and dirty protection survive remote selected-fold
 test("remote folder removal still invalidates its owned rename draft", async (t) => {
   const h = await fixture(t);
   await h.openMenu();
-  await flush(() => h.button("Rename").props.onClick());
+  await flush(() => h.button("Rename").props.onClick(clickEvent()));
   await typeFolderDraft(h, "Removed folder rename");
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
-  await flush(() => h.button("Archive").props.onClick());
+  await flush(() => h.renderer.root.findByType(FolderSidebar).props.onArchive(true));
   assert.equal(h.state.prompts, 0);
 });
 
@@ -401,11 +404,11 @@ test("Back to collection guards and explicitly closes a discarded folder draft",
   const h = await fixture(t, "/?folder=f1&item=i1");
   await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
   await typeFolderDraft(h, "Unsaved folder draft");
-  await flush(() => h.button("Back to collection").props.onClick());
+  await flush(() => h.button("Back to collection").props.onClick(clickEvent()));
   assert.equal(h.state.prompts, 1);
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
   h.state.confirm = true;
-  await flush(() => h.button("Back to collection").props.onClick());
+  await flush(() => h.button("Back to collection").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
   assert.equal(h.location.search, "?folder=f1");
 });
@@ -422,13 +425,11 @@ test("collection toolbar groups layout choices with tooltips; compact list and t
   assert.equal(h.renderer.root.findAllByProps({ className: "collection-heading" }).length, 1);
   const ul = h.renderer.root.findByType("ul");
   assert.match(ul.props.className, /flex flex-col/);
-  const pane = { scrollTop: 320, querySelector: () => ({ getBoundingClientRect: () => ({ bottom: 180 }) }) };
-  ul.props.onFocusCapture({ currentTarget: { parentElement: pane }, target: { getBoundingClientRect: () => ({ top: 150 }) } });
-  assert.equal(pane.scrollTop, 284, "focus obscured by the sticky toolbar is revealed");
-  ul.props.onFocusCapture({ currentTarget: { parentElement: pane }, target: { getBoundingClientRect: () => ({ top: 240 }) } });
-  assert.equal(pane.scrollTop, 284, "unobscured focus must not move the collection");
+  const scroller = h.renderer.root.findByProps({ className: "collection-scroll" });
+  assert.equal(ul.parent, scroller, "only content belongs to the scrolling pane");
+  assert.equal(scroller.findAllByProps({ className: "collection-heading" }).length, 0, "toolbar is outside the scroller; no overlap correction needed");
   await h.select("i1");
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assert.match(h.renderer.root.findByType("ul").props.className, /grid-cols-2/);
   assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i1");
 });
@@ -437,20 +438,20 @@ for (const archived of [false, true]) {
   test(`empty ${archived ? "archive" : "active"} CTA keeps folder and guards dirty folder draft`, async (t) => {
     const h = await fixture(t, `/?folder=f1${archived ? "&archive=1" : ""}`);
     h.state.items = [];
-    await flush(() => h.button("Refresh").props.onClick());
+    await flush(() => h.button("Refresh").props.onClick(clickEvent()));
     const empty = h.renderer.root.findByProps({ className: "empty" });
     const cta = empty.findByType("button");
     assert.equal(textOf(cta), archived ? "Back to collection" : "New item");
     if (!archived) {
       await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
       await typeFolderDraft(h, "Keep this draft");
-      await flush(() => cta.props.onClick());
+      await flush(() => cta.props.onClick(clickEvent()));
       assert.equal(h.state.prompts, 1);
       assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
       assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
       h.state.confirm = true;
     }
-    await flush(() => cta.props.onClick());
+    await flush(() => cta.props.onClick(clickEvent()));
     assert.equal(h.location.search.includes("folder=f1"), true);
     assert.equal(h.location.search.includes("archive=1"), false);
     assert.equal(h.renderer.root.findAllByType(ItemEditor).length, archived ? 0 : 1);
@@ -476,8 +477,9 @@ test("item and folder forms have one primary submit, secondary Cancel and disabl
       assert.equal(primary.length, 1);
       assert.equal(primary[0].props.type, "submit");
       assert.equal(textOf(primary[0]), saving ? busy : idle);
-      assert.equal(buttons[1].props.type, "button");
-      assert.notEqual(buttons[1].props.className, "primary");
+      const cancel = buttons.find(b => textOf(b) === "Cancel");
+      assert.equal(cancel.props.type, "button");
+      assert.notEqual(cancel.props.className, "primary");
       assert.equal(Component === ItemEditor ? renderer.root.findByType("fieldset").props.disabled : primary[0].props.disabled, saving);
       if (Component === ItemEditor) {
         const title = renderer.root.findByProps({ name: "title" });
@@ -499,13 +501,13 @@ test("Organise summary counts only existing memberships, including archived fold
   h.state.folders[1].archived_at = 1;
   for (const [ids, expected] of [[[], "No folders"], [["f2", "missing"], "1 folder"], [["f1", "f2"], "2 folders"]]) {
     h.state.items[1].folderIds = ids;
-    await flush(() => h.button("Refresh").props.onClick());
-    assert.equal(textOf(h.renderer.root.findByType("summary")), `Folder membership: Organise · ${expected}`);
+    await flush(() => h.button("Refresh").props.onClick(clickEvent()));
+    assert.equal(textOf(h.renderer.root.findByProps({ className: "organise-trigger" })), `Folder membership: Organise · ${expected}`);
   }
-  const checkbox = h.renderer.root.findAllByProps({ type: "checkbox" })[0];
-  await flush(() => checkbox.props.onChange({ target: { checked: false } }));
+  const checkbox = h.renderer.root.findAllByType(Checkbox.Root)[0];
+  await flush(() => checkbox.props.onCheckedChange(false));
   assert.equal(h.state.calls.at(-1).method, "GET");
-  assert.equal(textOf(h.renderer.root.findByType("summary")), "Folder membership: Organise · 1 folder");
+  assert.equal(textOf(h.renderer.root.findByProps({ className: "organise-trigger" })), "Folder membership: Organise · 1 folder");
   assert.ok(h.state.calls.some(c => c.method === "PUT" && c.body === '{"present":false}'));
 });
 
@@ -543,33 +545,33 @@ test("safe external reader URL retains security attributes and associated visibl
 test("pagination shows loaded range without invented totals, blank zero range, or changing offset/history", async (t) => {
   const h = await fixture(t, "/?folder=f1&offset=100");
   h.state.items = Array.from({ length: 103 }, (_, n) => ({ ...h.state.items[0], id: `page-${n}` }));
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   const nav = h.renderer.root.findByProps({ "aria-label": "Item pages" });
   assert.match(textOf(nav), /Items 101–103/);
   assert.doesNotMatch(textOf(nav), / of /);
   assert.equal(h.button("Next").props.disabled, true);
-  await flush(() => h.button("Previous").props.onClick());
+  await flush(() => h.button("Previous").props.onClick(clickEvent()));
   assert.equal(h.location.search, "?folder=f1");
   assert.match(textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" })), /Items 1–100/);
   assert.equal(h.button("Previous").props.disabled, true);
-  await flush(() => h.button("Next").props.onClick());
+  await flush(() => h.button("Next").props.onClick(clickEvent()));
   assert.equal(h.location.search, "?folder=f1&offset=100");
   h.state.items = [];
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.doesNotMatch(textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" })), /Items|1–0/);
 });
 
 test("failed next page retains cards without a false range, even when mutations clear errors; retry commits its range", async (t) => {
   const h = await fixture(t);
   h.state.items = Array.from({ length: 103 }, (_, n) => ({ ...h.state.items[0], id: `page-${n}` }));
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   const range = () => textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" }));
   const cards = () => h.renderer.root.findAllByType(ItemCard).map(c => c.props.item.id);
   const firstPage = cards();
   assert.equal(firstPage.length, 100);
   assert.match(range(), /Items 1–100/);
   h.state.failPage = q => q.get("offset") === "100";
-  await flush(() => h.button("Next").props.onClick());
+  await flush(() => h.button("Next").props.onClick(clickEvent()));
   assert.equal(h.location.search, "?folder=f1&offset=100");
   assert.match(textOf(h.renderer.root.findByProps({ role: "alert" })), /Synthetic page failed/);
   assert.equal(h.button("Refresh").props.disabled, false, "failed fetch has settled");
@@ -580,13 +582,13 @@ test("failed next page retains cards without a false range, even when mutations 
   assert.doesNotMatch(range(), /Items/);
   let release;
   h.state.writeGate = new Promise(resolve => { release = resolve; });
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByProps({ role: "alert" }).length, 0, "unrelated mutation clears the error");
   assert.doesNotMatch(range(), /Items/, "range validity must not depend on error text");
   await flush(() => release());
   assert.doesNotMatch(range(), /Items/);
   h.state.failPage = () => false;
-  await flush(() => h.button("Retry").props.onClick());
+  await flush(() => h.button("Retry").props.onClick(clickEvent()));
   assert.deepEqual(cards(), ["page-100", "page-101", "page-102"]);
   assert.match(range(), /Items 101–103/);
   assert.equal(h.location.search, "?folder=f1&offset=100");
@@ -631,7 +633,8 @@ test("compact chrome removes slogans, keeps a mounted live region and bounded tw
   assert.equal(heading.findAllByType("h2").length, 1);
   assert.equal(heading.findAllByType("p").length, 0, "no duplicate eyebrow or slogan");
   assert.doesNotMatch(h.renderer.root.findByType("ul").props.className, /gap-/);
-  assert.equal(h.button("Archive").props["aria-label"], "Archive");
+  assert.equal(h.button("Archive"), undefined);
+  assert.ok(h.renderer.root.findByProps({ className: "archive-select" }));
 
   let card;
   await flush(() => { card = create(React.createElement(ItemCard, {
@@ -666,60 +669,60 @@ test("nonselected menu targets live folder, archive preserves route, and deleted
   const h = await fixture(t, "/?folder=f1&item=i1");
   await h.openMenu("f2");
   h.state.folders[1].archived_at = 1;
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.ok(h.button("Unarchive folder"), "menu uses refreshed target, not stale archive state");
-  await flush(() => h.button("Unarchive folder").props.onClick());
+  await flush(() => h.button("Unarchive folder").props.onClick(clickEvent()));
   assert.equal(h.location.search, "?folder=f1&item=i1");
   const write = h.state.calls.findLast((c) => c.method === "PATCH");
   assert.equal(write.url, "/api/folders/f2");
   assert.deepEqual(JSON.parse(write.body), { archived: false });
   await h.openMenu("f2");
   h.state.folders = h.state.folders.filter(f => f.id !== "f2");
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByProps({ role: "menu" }).length, 0);
 });
 
 test("target-owned rename survives unrelated filter deletion, freezes name and invalidates on target archive", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
   await h.openMenu("f2");
-  await flush(() => h.button("Rename").props.onClick());
+  await flush(() => h.button("Rename").props.onClick(clickEvent()));
   const form = h.renderer.root.findByType(FolderForm);
   await typeFolderDraft(h, "Draft for Other");
   h.state.folders = h.state.folders.filter(f => f.id !== "f1");
   h.state.folders[0].name = "Remote rename";
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.location.search, "");
   assert.equal(h.renderer.root.findByType(FolderForm), form);
   assert.equal(form.findByType("input").props.defaultValue, "Other");
-  await flush(() => h.button("Cancel").props.onClick());
+  await flush(() => h.button("Cancel").props.onClick(clickEvent()));
   assert.equal(h.state.prompts, 1);
   assert.equal(h.renderer.root.findByType(FolderForm), form);
   h.state.folders[0].archived_at = 1;
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
-  await flush(() => h.button("Archive").props.onClick());
+  await flush(() => h.renderer.root.findByType(FolderSidebar).props.onArchive(true));
   assert.equal(h.state.prompts, 1, "invalidated rename releases only its own dirty flag");
 });
 
 test("context archive rejects dirty item discard and rename Cancel/Escape/backdrop are busy guarded", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
-  await flush(() => h.button("Edit item").props.onClick());
+  await flush(() => h.button("Edit item").props.onClick(clickEvent()));
   await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
   await h.openMenu("f2");
-  await flush(() => h.button("Archive folder").props.onClick());
+  await flush(() => h.button("Archive folder").props.onClick(clickEvent()));
   assert.equal(h.state.prompts, 1);
   assert.equal(h.state.calls.filter(c => c.method === "PATCH").length, 0);
   assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 1);
   h.state.confirm = true;
-  await flush(() => h.button("Rename").props.onClick());
-  const modal = h.renderer.root.findByType("dialog");
+  await flush(() => h.button("Rename").props.onClick(clickEvent()));
+  const modal = h.renderer.root.findByProps({ role: "dialog" });
   assert.equal(modal.props["aria-labelledby"], "rename-folder-title");
   let release;
   h.state.writeGate = new Promise(r => { release = r; });
   await flush(() => h.renderer.root.findByType(FolderForm).props.onSave("New Other"));
-  assert.equal(h.renderer.root.findByType("dialog").props["aria-busy"], true);
+  assert.equal(h.renderer.root.findByProps({ role: "dialog" }).props["aria-busy"], true);
   assert.equal(h.renderer.root.findByType(FolderForm).findByType("input").props.disabled, true);
-  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  await flush(() => h.renderer.root.findByType(Dialog.Root).props.onOpenChange(false, { cancel() {} }));
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 1);
   await flush(() => release());
   assert.equal(h.renderer.root.findAllByType(FolderForm).length, 0);
@@ -729,18 +732,18 @@ test("context archive rejects dirty item discard and rename Cancel/Escape/backdr
 
 test("viewing/invalidating a target feed leaves unrelated item draft and dirty ownership untouched", async (t) => {
   const h = await fixture(t);
-  await flush(() => h.button("New item").props.onClick());
+  await flush(() => h.button("New item").props.onClick(clickEvent()));
   await flush(() => h.renderer.root.findByType(ItemEditor).props.onDirty(true));
   const form = h.renderer.root.findByType(ItemEditor);
   await h.openMenu("f2");
-  await flush(() => h.button("Atom feed").props.onClick());
+  await flush(() => h.button("Atom feed").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findByType(FolderFeedDialog).props.id, "f2");
   assert.equal(h.state.prompts, 0);
   h.state.folders = h.state.folders.filter(f => f.id !== "f2");
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assert.equal(h.renderer.root.findAllByType(FolderFeedDialog).length, 0);
   assert.equal(h.renderer.root.findByType(ItemEditor), form);
-  await flush(() => h.button("All items").props.onClick());
+  await flush(() => h.button("All items").props.onClick(clickEvent()));
   assert.equal(h.state.prompts, 1);
   assert.equal(h.location.search, "?folder=f1");
 });
@@ -750,7 +753,7 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   const h = await fixture(t, "/?folder=f1&item=i1");
   for (const component of [AppHeader, FolderSidebar, ItemCollection, ItemToolbar, ReaderPane])
     assert.equal(h.renderer.root.findAllByType(component).length, 1);
-  await flush(() => h.button("Edit item").props.onClick());
+  await flush(() => h.button("Edit item").props.onClick(clickEvent()));
   const pane = h.renderer.root.findByType(ReaderPane);
   const editor = pane.findByType(ItemEditor), form = editor.findByType("form");
   const title = form.findByType("input"), content = form.findByType("textarea");
@@ -772,9 +775,9 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   await flush(() => form.props.onChange({ currentTarget: { fields } }));
   h.state.items[1].content = "Concurrent phone body";
   h.state.folders = h.state.folders.filter((f) => f.id !== "f2");
-  await flush(() => h.button("Refresh").props.onClick());
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   assertIdentity();
-  await flush(() => h.button("Grid layout").props.onClick());
+  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assertIdentity();
   h.state.failWrite = true;
   await flush(() => form.props.onSubmit({ preventDefault() {}, currentTarget: { fields } }));
@@ -790,7 +793,7 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   await flush(() => h.listeners.get("popstate")());
   assert.ok(h.location.search.includes("item=i1"));
   assertIdentity();
-  await flush(() => h.button("All items").props.onClick());
+  await flush(() => h.button("All items").props.onClick(clickEvent()));
   assertIdentity();
   assert.equal(h.state.prompts, 2);
 });
@@ -802,16 +805,16 @@ test("App-owned new modal retains form/input across unrelated and selected-folde
   const sidebar = h.renderer.root.findByType(FolderSidebar);
   assert.equal(sidebar.findAllByType(FolderForm).length, 0, "no inline duplicate");
   const form = h.renderer.root.findByType(FolderForm), input = form.findByType("input");
-  assert.equal(h.renderer.root.findByType("dialog").props["aria-labelledby"], "new-folder-title");
+  assert.equal(h.renderer.root.findByProps({ role: "dialog" }).props["aria-labelledby"], "new-folder-title");
   for (const id of ["f2", "f1"]) {
     h.state.folders = h.state.folders.filter((f) => f.id !== id);
     // Handler-level refresh models timer/focus refresh, not an inert background click.
-    await flush(() => h.button("Refresh").props.onClick());
+    await flush(() => h.button("Refresh").props.onClick(clickEvent()));
     assert.equal(h.renderer.root.findByType(FolderForm), form);
     assert.equal(form.findByType("input"), input);
   }
   assert.equal(h.location.search, "");
-  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  await flush(() => h.renderer.root.findByType(Dialog.Root).props.onOpenChange(false, { cancel() {} }));
   assert.equal(h.state.prompts, 1);
   assert.equal(form.findByType("input"), input);
 });
@@ -827,17 +830,17 @@ test("new modal preserves failed draft, blocks duplicate/busy dismiss and select
   const save = form.props.onSave;
   await flush(() => { save("Retried folder"); save("Retried folder"); });
   assert.equal(h.state.calls.filter(c => c.method === "POST").length, 1);
-  await flush(() => h.renderer.root.findByType("dialog").props.onCancel({ preventDefault() {} }));
+  await flush(() => h.renderer.root.findByType(Dialog.Root).props.onOpenChange(false, { cancel() {} }));
   await flush(() => form.props.onCancel());
   assert.equal(h.state.prompts, 0);
-  assert.equal(h.renderer.root.findByType("dialog").props["aria-busy"], true);
+  assert.equal(h.renderer.root.findByProps({ role: "dialog" }).props["aria-busy"], true);
   await flush(() => release());
   assert.equal(h.renderer.root.findByType(FolderForm), form);
-  assert.match(textOf(h.renderer.root.findByType("dialog")), /Synthetic write failed/);
+  assert.match(textOf(h.renderer.root.findByProps({ role: "dialog" })), /Synthetic write failed/);
   assert.equal(h.renderer.root.findAllByProps({ role: "alert" }).length, 1);
   h.state.failWrite = false;
   await flush(() => form.props.onSave("Retried folder"));
-  assert.equal(h.renderer.root.findAllByType("dialog").length, 0);
+  assert.equal(h.renderer.root.findAllByProps({ role: "dialog" }).length, 0);
   assert.equal(h.location.search, "?folder=new");
   assert.equal(h.state.calls.filter(c => c.method === "POST").length, 2);
 });

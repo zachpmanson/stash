@@ -11,6 +11,7 @@ export function FolderNavigation({
   onSelect,
   onMenu,
   busy = false,
+  menuId,
 }: {
   folders: WebFolder[];
   selected: string;
@@ -18,6 +19,7 @@ export function FolderNavigation({
   onSelect: (id: string) => void;
   onMenu: (id: string, trigger: HTMLElement, point?: { x: number; y: number }) => void;
   busy?: boolean;
+  menuId?: string;
 }) {
   const group = (isArchived: boolean) =>
     folders
@@ -40,7 +42,7 @@ export function FolderNavigation({
             <span className="truncate">{f.name}</span>
             {f.archived_at !== null && <span className="sr-only"> (archived)</span>}
           </Button>
-          <IconButton className="folder-menu-toggle" aria-label={`Actions for ${f.name}`} aria-haspopup="menu"
+          <IconButton className="folder-menu-toggle" aria-label={`Actions for ${f.name}`} aria-haspopup="menu" aria-expanded={menuId === f.id} aria-controls={menuId === f.id ? "folder-actions-menu" : undefined}
             disabled={busy} onClick={(e) => onMenu(f.id, e.currentTarget)}>
             <Icon name="more" />
           </IconButton>

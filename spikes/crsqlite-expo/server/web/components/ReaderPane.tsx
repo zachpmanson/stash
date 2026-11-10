@@ -1,4 +1,7 @@
 import React from "react";
+import { Checkbox } from "@base-ui/react/checkbox";
+import { Collapsible } from "@base-ui/react/collapsible";
+import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import type { WebFolder, WebItem } from "../../src/contracts.js";
 import { ItemEditor, ItemReader } from "../items.js";
 import { Icon } from "./Icon.js";
@@ -94,23 +97,25 @@ export function ReaderPane({
           />
           {!detail.mediaUnavailable && (
             <>
-              <details className="organise">
-                <summary>
+              <Collapsible.Root className="organise">
+                <Collapsible.Trigger className="organise-trigger">
+                  <IconChevronRight size={14} aria-hidden="true" />
                   <span className="sr-only">Folder membership: </span>
                   Organise ·{" "}
                   {membershipCount === 0
                     ? "No folders"
                     : `${membershipCount} ${membershipCount === 1 ? "folder" : "folders"}`}
-                </summary>
+                </Collapsible.Trigger>
+                <Collapsible.Panel keepMounted>
                 <fieldset disabled={busy}>
                   <legend className="sr-only">Folder membership</legend>
                   {folders.map((f) => (
                     <label className="check" key={f.id}>
-                      <input
-                        type="checkbox"
+                      <Checkbox.Root className="membership-checkbox" disabled={busy}
                         checked={detail.folderIds.includes(f.id)}
-                        onChange={(e) => onMembership(f.id, e.target.checked)}
-                      />
+                        onCheckedChange={(checked) => onMembership(f.id, checked)}>
+                        <Checkbox.Indicator><IconCheck size={14} aria-hidden="true" /></Checkbox.Indicator>
+                      </Checkbox.Root>
                       {f.name}
                       {f.archived_at !== null ? " (archived)" : ""}
                     </label>
@@ -119,7 +124,8 @@ export function ReaderPane({
                     <p>Create a folder to organize this item.</p>
                   )}
                 </fieldset>
-              </details>
+                </Collapsible.Panel>
+              </Collapsible.Root>
             </>
           )}
         </div>

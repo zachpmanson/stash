@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect } from "react";
+import { Dialog } from "@base-ui/react/dialog";
 
-/** Native inert background plus an explicit in-page keyboard focus loop. */
+/** Base UI owns modality, outside/Escape dismissal and the keyboard focus trap. */
 export function CompactDialog({ title, id, busy = false, returnFocus, onCancel, children }: {
   title: string;
   id: string;
@@ -9,11 +10,16 @@ export function CompactDialog({ title, id, busy = false, returnFocus, onCancel, 
   onCancel: () => void;
   children: React.ReactNode;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    dialog.current?.showModal();
+    // Keep the old native-dialog guarantee even for programmatic focus attempts.
+    // Base UI owns the focus loop and aria-hidden; the portal is outside #root.
+    const background = document.getElementById?.("root");
+    const previousInert = background?.inert ?? false;
+    if (background) background.inert = true;
     return () => {
-      // Restore after the closing commit: create may also hide the mobile drawer.
+      if (background) background.inert = previousInert;
+      // Creation may also hide the mobile drawer. Resolve a visible target after
+      // the closing commit, rather than restoring focus to its hidden trigger.
       window.setTimeout?.(() => {
         const visible = (node: HTMLElement | null): node is HTMLElement =>
           !!node?.isConnected && node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
@@ -22,23 +28,20 @@ export function CompactDialog({ title, id, busy = false, returnFocus, onCancel, 
       }, 0);
     };
   }, []);
-  return <dialog ref={dialog} className="folder-dialog" aria-labelledby={id} aria-busy={busy} tabIndex={-1}
-    onKeyDown={(e) => {
-      e.stopPropagation();
-      if (e.key !== "Tab") return;
-      const controls = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href], [tabindex='0']")];
-      const first = controls[0], last = controls.at(-1);
-      if (!first) { e.preventDefault(); e.currentTarget.focus(); }
-      else if (e.shiftKey && (document.activeElement === first || document.activeElement === e.currentTarget)) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && (document.activeElement === last || document.activeElement === e.currentTarget)) { e.preventDefault(); first.focus(); }
-    }}
-    onCancel={(e) => { e.preventDefault(); onCancel(); }}
-    onClick={(e) => {
-      if (e.target !== e.currentTarget) return;
-      const box = e.currentTarget.getBoundingClientRect();
-      if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) onCancel();
-    }}>
-    <header className="dialog-header"><h2 id={id}>{title}</h2></header>
-    <div className="dialog-body">{children}</div>
-  </dialog>;
+  return <Dialog.Root open onOpenChange={(open, details) => {
+    if (!open) {
+      details.cancel(); // App retains ownership of busy/discard guards and unmounting.
+      if (!busy) onCancel();
+    }
+  }}>
+    <Dialog.Portal>
+      <Dialog.Backdrop className="dialog-backdrop" />
+      <Dialog.Popup className="folder-dialog" aria-labelledby={id} aria-busy={busy} aria-modal="true"
+        initialFocus={() => document.querySelector<HTMLElement>(".folder-dialog [autofocus], .folder-dialog input, .folder-dialog button")}
+        finalFocus={false} onKeyDown={(e) => e.stopPropagation()}>
+        <header className="dialog-header"><Dialog.Title render={<h2 />} id={id}>{title}</Dialog.Title></header>
+        <div className="dialog-body">{children}</div>
+      </Dialog.Popup>
+    </Dialog.Portal>
+  </Dialog.Root>;
 }

@@ -69,8 +69,6 @@ export function App() {
   const [menuTarget, setMenuTarget] = useState<FolderMenuTarget | null>(null);
   const menuFolder = folders.find((f) => f.id === menuTarget?.id);
   function closeMenu() {
-    if (menuTarget?.trigger.isConnected)
-      menuTarget.trigger.focus({ preventScroll: true });
     setMenuTarget(null);
   }
   function closeRename() {
@@ -400,9 +398,6 @@ export function App() {
         busy={busy}
         loading={loading}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onToggleArchive={() =>
-          navigate({ archived: !archived, selected: "", offset: 0 })
-        }
         onRefresh={() => void refresh()}
         onNew={startNew}
       />
@@ -454,6 +449,7 @@ export function App() {
           />
         )}
         <FolderSidebar
+          menuId={menuTarget?.id}
           sidebarOpen={sidebarOpen}
           folders={folders}
           selected={folderId}
@@ -475,6 +471,7 @@ export function App() {
           }}
           onSelect={(id) => navigate({ folderId: id, offset: 0, selected: "" })}
           onNew={(trigger) => openFolderForm("new", trigger)}
+          onArchive={(archived) => navigate({ archived, selected: "", offset: 0 })}
         />
         <ItemCollection
           folderName={activeFolder?.name}

@@ -151,9 +151,10 @@
     grid-template-columns: var(--sidebar-width) clamp(320px, 28vw, 384px) minmax(0, 1fr);
   }
   .sidebar,
-  .collection,
+  .collection-scroll,
   .reader {
     overflow: auto;
+    scrollbar-gutter: stable;
     overscroll-behavior: contain;
     min-width: 0;
     scrollbar-color: #4a4860 transparent;
@@ -166,15 +167,24 @@
     flex-direction: column;
   }
   .sidebar-heading { display: none; }
+  .sidebar > nav, .sidebar > .new-folder { flex-shrink: 0; }
+  .sidebar-footer { margin-top: auto; padding-top: 12px; flex-shrink: 0; }
+  .archive-select { width: 100%; justify-content: space-between; margin-top: 4px; padding: 8px; background: var(--color-bg); }
   .folder-row { display: flex; min-width: 0; gap: 2px; }
   .folder-row .folder-link { min-width: 0; flex: 1; }
   .folder-menu-toggle { width: 28px; padding-inline: 4px; flex-shrink: 0; border-color: transparent; background: transparent; color: var(--color-muted); }
-  .folder-menu { position: fixed; z-index: 40; width: min(200px, calc(100vw - 16px)); padding: 4px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: 0 8px 24px #0008; }
+  .folder-menu-positioner { z-index: 40; }
+  .folder-menu { width: min(200px, calc(100vw - 16px)); padding: 4px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: 0 8px 24px #0008; }
   .folder-menu button { width: 100%; justify-content: flex-start; border-color: transparent; }
   .folder-dialog {
     --dialog-section-gap: 12px;
     --dialog-action-gap: 8px;
-    margin: auto;
+    position: fixed;
+    z-index: 50;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
     width: min(360px, calc(100vw - 24px));
     max-height: calc(100dvh - 24px);
     overflow: auto;
@@ -184,7 +194,13 @@
     background: var(--color-surface);
     color: var(--color-ink);
   }
-  .folder-dialog::backdrop { background: #0009; }
+  .dialog-backdrop { position: fixed; inset: 0; z-index: 49; background: #0009; }
+  .tooltip-positioner { z-index: 60; }
+  .control-tooltip { padding: 4px 8px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-raised); color: var(--color-ink); font-size: 12px; }
+  .membership-checkbox { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; border: 1px solid var(--color-muted); border-radius: 3px; background: var(--color-bg); color: white; cursor: pointer; }
+  .membership-checkbox[data-checked] { background: #6b58df; border-color: #a496ff; }
+  .membership-checkbox[data-disabled] { opacity: .5; cursor: not-allowed; }
+  .folder-menu button[data-highlighted] { background: var(--color-raised); border-color: var(--color-accent); }
   .folder-dialog .dialog-header { margin: 0 0 var(--dialog-section-gap); }
   .folder-dialog h2 { font-size: 16px; font-weight: 600; line-height: 1.3; margin: 0; }
   .folder-dialog .dialog-body,
@@ -225,9 +241,19 @@
     border-style: dashed;
   }
   .collection {
-    @apply px-3 pb-12;
-    overflow-anchor: none;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
     border-right: 1px solid var(--color-line);
+  }
+  .collection-scroll {
+    flex: 1;
+    min-height: 0;
+    padding: 0 var(--space-pane) 48px;
+    overflow-anchor: none;
+    scroll-padding-top: 6px;
   }
   .collection-heading {
     display: flex;
@@ -235,12 +261,11 @@
     gap: var(--space-compact);
     min-height: var(--size-chrome);
     padding-block: var(--space-compact);
-    position: sticky;
-    top: 0;
+    flex-shrink: 0;
     z-index: 1;
     background: var(--color-bg);
     border-bottom: 1px solid var(--color-line);
-    margin-bottom: 6px;
+    margin: 0 var(--space-pane) 6px;
   }
   .collection-heading h2 {
     margin: 0;
@@ -439,10 +464,21 @@
     border-top: 1px solid var(--color-line);
     padding-top: 12px;
   }
-  .organise summary {
+  .organise-trigger {
     @apply text-sm text-muted;
-    cursor: pointer;
+    justify-content: flex-start;
+    border-color: transparent;
+    background: transparent;
+    padding: 0;
   }
+  .organise-trigger[data-panel-open] > svg { transform: rotate(90deg); }
+  .type-select { width: 100%; justify-content: space-between; margin: 4px 0 12px; padding: 8px; background: var(--color-bg); }
+  .type-select-positioner { z-index: 45; }
+  .type-select-popup { min-width: var(--anchor-width); padding: 4px; border: 1px solid var(--color-line); border-radius: var(--radius-control); background: var(--color-surface); box-shadow: 0 8px 24px #0008; }
+  .type-select-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 8px; border-radius: var(--radius-control); font-size: 14px; cursor: pointer; }
+  .type-select-item[data-highlighted] { background: var(--color-raised); outline: 1px solid var(--color-accent); }
+  .form-field > .field-help { margin: -6px 0 12px; }
+  .field-error { color: #fca5a5; font-size: 12px; margin-bottom: 12px; }
   .back-button,
   .sidebar-toggle,
   .sidebar-shade {
@@ -481,9 +517,6 @@
     white-space: nowrap;
     flex-shrink: 0;
   }
-  .app-header .primary svg {
-    display: none;
-  }
   .workspace {
     display: block;
     position: relative;
@@ -491,7 +524,6 @@
   .collection {
     height: 100%;
     border: 0;
-    padding-inline: var(--space-pane);
   }
   .sidebar-toggle { display: inline-flex; }
   .sidebar-heading { display: flex; justify-content: flex-end; }
@@ -558,11 +590,11 @@
   .check {
     min-height: var(--size-touch);
   }
-  .organise summary {
+  .organise-trigger {
     min-height: var(--size-touch);
     padding-block: var(--space-pane);
   }
-  .collection,
+  .collection-scroll,
   .reader-open .reader {
     padding-bottom: 80px;
     scroll-padding-bottom: 80px;
@@ -575,3 +607,8 @@
 .image-drop-zone { border: 1px dashed currentColor; padding: 1rem; border-radius: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* Older engines without stable gutters still reserve the scrollbar track. */
+@supports not (scrollbar-gutter: stable) {
+  .sidebar, .collection-scroll, .reader { overflow-y: scroll; }
+}
