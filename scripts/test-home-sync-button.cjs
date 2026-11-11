@@ -18,6 +18,8 @@ async function harness(t, { initial = { phase: 'stopped' }, saved = { busy: fals
   let status = initial, login = saved, renderer;
   const listeners = new Set(), loginListeners = new Set(), nav = [];
   const subscriptions = { status: 0, login: 0, statusCleanups: 0, loginCleanups: 0 };
+  const animation = { starts: 0, stops: 0, timings: [], resets: [], interpolations: [] };
+  const linear = value => value;
   const modules = new Map();
   const setHandler = () => {}, refresh = async () => {};
   const mocks = {
@@ -25,6 +27,16 @@ async function harness(t, { initial = { phase: 'stopped' }, saved = { busy: fals
     'react-native': {
       ...Object.fromEntries(['View', 'Text', 'TextInput', 'Pressable', 'FlatList', 'Modal', 'KeyboardAvoidingView'].map(name => [name, name])),
       Platform: { OS: platform }, StyleSheet: { create: styles => styles },
+      Easing: { linear },
+      Animated: {
+        View: 'Animated.View',
+        Value: class {
+          setValue(value) { animation.resets.push(value); }
+          interpolate(config) { animation.interpolations.push(config); return 'rotation'; }
+        },
+        timing: (value, config) => { animation.timings.push(config); return {}; },
+        loop: () => ({ start: () => animation.starts++, stop: () => animation.stops++ }),
+      },
     },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
     'expo-router': { useRouter: () => ({ push: route => nav.push(route) }), useFocusEffect: callback => React.useEffect(callback, [callback]) },
@@ -82,7 +94,7 @@ async function harness(t, { initial = { phase: 'stopped' }, saved = { busy: fals
     return { label: button.props.accessibilityLabel, color: style.backgroundColor, icon: icon.props.name };
   };
   return {
-    nav, subscriptions, buttons, indicator,
+    nav, subscriptions, buttons, indicator, animation, linear,
     publish: async next => { status = next; await act(async () => { for (const listener of listeners) listener(next); }); },
     saved: async next => { login = next; await act(async () => { for (const listener of loginListeners) listener(next); }); },
     press: async () => { await act(async () => { buttons()[0].props.onPress(); }); },
@@ -118,6 +130,38 @@ for (const [name, status, state] of [
   const h = await harness(t, { initial: status });
   assert.deepEqual(h.indicator(), expected[state]);
   await h.press(); assert.deepEqual(h.nav, ['/settings/sync']);
+});
+
+test('sync icon spins continuously through metadata and image sync, stops on completion and restarts on retry', async t => {
+  const h = await harness(t);
+  assert.equal(h.animation.starts, 0);
+  await h.publish(active('connecting'));
+  assert.equal(h.animation.starts, 1);
+  const timing = h.animation.timings[0];
+  assert.equal(timing.toValue, 1);
+  assert.equal(timing.duration, 1000);
+  assert.equal(timing.easing, h.linear);
+  assert.equal(timing.useNativeDriver, true);
+  assert.equal(timing.isInteraction, false);
+  const interpolation = h.animation.interpolations.at(-1);
+  assert.deepEqual(Array.from(interpolation.inputRange), [0, 1]);
+  assert.deepEqual(Array.from(interpolation.outputRange), ['0deg', '-360deg'], 'spin must follow the sync glyph arrows');
+  await h.publish(active('syncing'));
+  await h.publish(active('synced', { media: { pending: 2, errors: 0 } }));
+  assert.equal(h.animation.starts, 1, 'status updates must not restart the loop');
+  assert.equal(h.animation.stops, 0);
+  await h.press(); assert.deepEqual(h.nav, ['/settings/sync']);
+  await h.publish(active());
+  assert.equal(h.animation.stops, 1);
+  assert.deepEqual(h.animation.resets, [0]);
+  await h.publish(active('syncing'));
+  assert.equal(h.animation.starts, 2);
+  await h.publish(active('error'));
+  assert.equal(h.animation.stops, 2);
+  await h.publish(active('syncing'));
+  await h.unmount();
+  assert.equal(h.animation.stops, 3, 'unmount must stop the native animation');
+  assert.deepEqual(h.animation.resets, [0, 0, 0]);
 });
 
 test('saved credentials alone are not convergence; offline retry/auth/signout update the actual home button', async t => {

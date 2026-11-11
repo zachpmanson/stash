@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ProgressBar } from "react-native-paper";
 import Screen from "../components/Screen";
 import { Colors, Radius, Spacing, Typography } from "../theme";
 import { useSettingsStore } from "../state/settingsState";
@@ -12,6 +13,7 @@ import type { SavedLoginState } from "../db/savedSyncLogin";
 import { withAppDb, isRestorePendingOwned } from "../db/database";
 import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
 import { retryStashImages } from "../db/mediaQueue";
+import { syncStatusIndicator } from "../utils/syncStatusIndicator";
 
 export default function SyncSettingsScreen() {
   const [recoveryPending, setRecoveryPending] = useState(false);
@@ -99,6 +101,12 @@ export default function SyncSettingsScreen() {
   const teardownPending = signingOut || status?.disconnecting;
   const restartRequired = signOutError || status?.restartRequired;
   const hideControls = teardownPending || restartRequired;
+  const syncing = syncStatusIndicator(status, savedLogin).icon === "sync";
+  const media = status?.phase === "synced" && !status.authenticationRequired ? status.media : undefined;
+  const imageProgress = media && media.total > 0 ? media.completed / media.total : undefined;
+  const imageProgressLabel = media && imageProgress !== undefined
+    ? `Images synced: ${media.completed} of ${media.total} (${Math.floor(media.completed * 100 / media.total)}%)`
+    : "Sync in progress";
 
   return (
     <Screen options={{ title: "Sync" }}>
@@ -118,6 +126,16 @@ export default function SyncSettingsScreen() {
               <Text style={styles.note}>{savedLogin.account.serverUrl}</Text>
             </>}
             <Text style={styles.note}>{restartRequired ? "Sign out could not finish. Restart the app before reconnecting." : teardownPending ? "Signing out…" : status.message ?? `Status: ${status.phase}`}</Text>
+            {!hideControls && (syncing || imageProgress !== undefined) && <>
+              <ProgressBar
+                indeterminate={imageProgress === undefined}
+                progress={imageProgress}
+                color={media?.errors ? Colors.warning : Colors.info}
+                style={styles.progress}
+                accessibilityLabel={imageProgressLabel}
+              />
+              {imageProgress !== undefined && <Text style={styles.progressLabel}>{imageProgressLabel}</Text>}
+            </>}
             {status.media && !hideControls && <>
               <Text style={styles.note}>Images: {status.media.pending} pending; {status.media.errors} waiting/retrying or failed. JPEG, PNG and still WebP up to 20 MiB. Other originals remain local.</Text>
               {status.media.message && <Text style={styles.note}>{status.media.message}</Text>}
@@ -165,6 +183,8 @@ const styles = StyleSheet.create({
   container: { padding: Spacing.md },
   panel: { gap: Spacing.sm, backgroundColor: Colors.surface2, borderRadius: Radius.md, padding: Spacing.md },
   heading: { ...Typography.body, fontWeight: "600" },
+  progress: { height: 4, borderRadius: Radius.full, backgroundColor: Colors.surface3 },
+  progressLabel: { ...Typography.caption },
   note: { ...Typography.caption, color: Colors.textMuted },
   input: { ...Typography.body, color: Colors.text, backgroundColor: Colors.bg, borderRadius: Radius.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
   button: { alignItems: "center", backgroundColor: Colors.surface, borderRadius: Radius.sm, paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md },

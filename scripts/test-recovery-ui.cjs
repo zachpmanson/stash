@@ -31,6 +31,7 @@ function harness({ dev = false, optIn = false, platform = 'android', effects = f
     'expo-router': { useLocalSearchParams: () => ({ id: 'id', folderName: 'Folder', folderIcon: 'F' }), useRouter: () => ({ back: () => navigation.push('back'), push: route => navigation.push(route) }), useFocusEffect() {} },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0, top: 0 }) },
     '@expo/vector-icons': { MaterialIcons: 'MaterialIcons' },
+    'react-native-paper': { ProgressBar: 'ProgressBar' },
     'unicode-segmenter/grapheme': { countGraphemes: value => value.length },
     'src/utils/nativeShareIntent': { isShareLaunch: () => false }, 'src/utils/randomId': { randomId: () => 'id' },
     'src/state/modalState': modal, '../state/modalState': modal,
@@ -62,6 +63,7 @@ function harness({ dev = false, optIn = false, platform = 'android', effects = f
       if (spec === './syncIdentity') return load('src/db/syncIdentity.ts');
       if (spec === '../utils/uiAction') return load('src/utils/uiAction.ts');
       if (spec === '../utils/syncBuildGate') return load('src/utils/syncBuildGate.ts');
+      if (spec === '../utils/syncStatusIndicator') return load('src/utils/syncStatusIndicator.ts');
       throw Error(`Unexpected import ${spec} in ${file}`);
     } }, { filename: file });
     return module.exports;
@@ -217,6 +219,69 @@ function syncUi(initial = {phase:'stopped'}) {
   return { h, render, publish, PreparationRequired, status:()=>status, attempts: () => attempts,
     setConnect(fn) { connect = fn; }, setDisconnect(fn) { disconnect = fn; } };
 }
+
+test('actual Sync progress bar follows connecting, metadata and image sync without inventing a percentage', () => {
+  const account = { username: 'stored-user', serverUrl: 'https://sync.example/' };
+  const u = syncUi();
+  for (const [status, visible] of [
+    [{ phase: 'connecting' }, true],
+    [{ phase: 'syncing', account }, true],
+    [{ phase: 'synced', account }, true],
+    [{ phase: 'synced', account, media: { pending: 2, errors: 0 } }, true],
+    [{ phase: 'synced', account, media: { pending: 0, errors: 0 } }, false],
+    [{ phase: 'error', account }, false],
+    [{ phase: 'synced', account, media: { pending: 2, errors: 1 } }, false],
+    [{ phase: 'stopped' }, false],
+    [{ phase: 'syncing', account, disconnecting: true }, false],
+    [{ phase: 'syncing', account, restartRequired: true }, false],
+    [{ phase: 'syncing', account, authenticationRequired: true }, false],
+  ]) {
+    u.publish(status);
+    const bars = nodes(u.render()).filter(n => n.type === 'ProgressBar');
+    assert.equal(bars.length, visible ? 1 : 0, JSON.stringify(status));
+    if (visible) {
+      assert.equal(bars[0].props.indeterminate, true);
+      assert.equal(bars[0].props.progress, undefined);
+      assert.equal(bars[0].props.color, '#60a5fa');
+      assert.equal(bars[0].props.accessibilityLabel, 'Sync in progress');
+    }
+  }
+});
+
+test('actual Sync image progress uses verified completed/total counts through errors and completion', () => {
+  const u = syncUi();
+  const account = { username: 'stored-user', serverUrl: 'https://sync.example/' };
+  for (const [completed, errors, expectedPercent] of [[0, 0, 0], [1, 0, 33], [2, 1, 66], [3, 0, 100]]) {
+    u.publish({ phase: 'synced', account, media: { total: 3, completed, pending: 3 - completed, errors } });
+    const tree = u.render();
+    const bars = nodes(tree).filter(n => n.type === 'ProgressBar');
+    assert.equal(bars.length, 1);
+    assert.equal(bars[0].props.indeterminate, false);
+    assert.equal(bars[0].props.progress, completed / 3);
+    assert.equal(bars[0].props.color, errors ? '#fbbf24' : '#60a5fa');
+    const label = `Images synced: ${completed} of 3 (${expectedPercent}%)`;
+    assert.equal(bars[0].props.accessibilityLabel, label);
+    assert.ok(words(tree).includes(label));
+  }
+  u.publish({ phase: 'synced', account, media: { total: 100, completed: 29, pending: 71, errors: 0 } });
+  assert.match(words(u.render()), /29 of 100 \(29%\)/, 'exact percentages must not lose a point to floating-point rounding');
+  u.publish({ phase: 'synced', account, media: { total: 1000, completed: 999, pending: 1, errors: 0 } });
+  assert.match(words(u.render()), /999 of 1000 \(99%\)/, 'unfinished work must not round up to 100%');
+  u.publish({ phase: 'synced', account, media: { total: 0, completed: 0, pending: 0, errors: 0 } });
+  assert.equal(nodes(u.render()).filter(n => n.type === 'ProgressBar').length, 0);
+  for (const extra of [{ disconnecting: true }, { restartRequired: true }, { authenticationRequired: true }, { phase: 'error' }]) {
+    u.publish({ phase: 'synced', account, media: { total: 3, completed: 1, pending: 2, errors: 0 }, ...extra });
+    assert.equal(nodes(u.render()).filter(n => n.type === 'ProgressBar').length, 0);
+  }
+});
+
+test('actual Sync progress bar includes saved-login reconnect and hides on unsupported platforms', () => {
+  for (const platform of ['android', 'ios', 'web']) {
+    const h = harness({ platform });
+    const tree = h.render(syncFile, [false, false, '', '', '', { phase: 'stopped' }, false, null, { busy: true }]);
+    assert.equal(nodes(tree).filter(n => n.type === 'ProgressBar').length, platform === 'android' ? 1 : 0);
+  }
+});
 
 test('actual Sync page signs in, clears password, and retains subscribed account through sync/error and reopening', async () => {
   const u = syncUi(), {h} = u;
