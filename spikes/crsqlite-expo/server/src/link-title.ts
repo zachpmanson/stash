@@ -144,23 +144,32 @@ export function createLinkTitleResolver(deps: Dependencies = {}) {
                 resolve({ redirect: res.headers.location }); stop(); return;
               }
               if (res.statusCode !== 200 || !/^text\/html(?:\s*;|$)/i.test(res.headers["content-type"] ?? "") ||
-                  (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity") ||
-                  Number(res.headers["content-length"] ?? 0) > (deps.maxBytes ?? MAX_BYTES)) {
+                  (res.headers["content-encoding"] && res.headers["content-encoding"] !== "identity")) {
                 reject(new Error("Unsupported page")); stop(); return;
               }
               const chunks: Buffer[] = [];
+              const limit = deps.maxBytes ?? MAX_BYTES;
               let bytes = 0;
-              res.on("data", (chunk: Buffer) => {
-                bytes += chunk.length;
-                if (bytes > (deps.maxBytes ?? MAX_BYTES)) { reject(new Error("Page too large")); stop(); }
-                else chunks.push(chunk);
-              });
-              res.on("end", () => {
+              let finished = false;
+              const finish = () => {
+                if (finished) return;
+                finished = true;
                 try {
                   const charset = /charset\s*=\s*["']?([^\s;"']+)/i.exec(res.headers["content-type"] ?? "")?.[1] ?? "utf-8";
-                  resolve({ html: new TextDecoder(charset).decode(Buffer.concat(chunks)) });
+                  resolve({ html: new TextDecoder(charset).decode(Buffer.concat(chunks, bytes)) });
                 } catch (error) { reject(error); }
+              };
+              // Titles live in a bounded prefix, not the full document. A large
+              // Content-Length is fine: retain at most the budget, then close
+              // the socket without waiting for the rest of a possibly huge body.
+              res.on("data", (chunk: Buffer) => {
+                if (finished) return;
+                const prefix = chunk.subarray(0, limit - bytes);
+                chunks.push(prefix);
+                bytes += prefix.length;
+                if (bytes === limit) { finish(); stop(); }
               });
+              res.on("end", finish);
             });
             req.on("error", reject);
             req.end();

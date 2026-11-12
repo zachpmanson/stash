@@ -132,8 +132,14 @@ test("real Node HTTP socket invokes the pinned lookup while preserving the origi
   const received = [];
   const server = createServer((req, res) => {
     received.push({ host: req.headers.host, url: req.url, authorization: req.headers.authorization, cookie: req.headers.cookie });
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<title>Real socket &amp; title</title>');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8',
+      ...(req.url.includes('declared') ? { 'Content-Length': '884583' } : {}),
+    });
+    if (req.url.startsWith('/large')) {
+      // Never finish the response: resolution must stop at the prefix budget,
+      // with either a declared large body or chunked transfer encoding.
+      res.write('<title>Real large page</title>' + ' '.repeat(256 * 1024));
+    } else res.end('<title>Real socket &amp; title</title>');
   }).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -169,6 +175,9 @@ test("real Node HTTP socket invokes the pinned lookup while preserving the origi
   assert.equal(lookups.length, 1);
   assert.equal(lookups[0].host, 'public-fixture.invalid');
   assert.deepEqual(received, [{ host: 'public-fixture.invalid', url: '/page?x=1', authorization: undefined, cookie: undefined }]);
+  for (const suffix of ['declared', 'chunked']) {
+    assert.equal(await resolve(`http://public-fixture.invalid/large?${suffix}`), 'Real large page');
+  }
 });
 
 test("invalid hosts, credentials, ports, schemes and mixed/private DNS never create a socket", async () => {
@@ -205,8 +214,29 @@ test("every redirect is re-resolved and checked, bounded and closed before follo
   assert.equal(loop.calls.length, 4);
 });
 
-test("lookup failures, missing titles, non-HTML, encodings and oversized bodies fall back without blocking Save", async () => {
-  for (const page of [undefined, { html: "<body>no title</body>" }, { status: 403 }, { headers: { "content-type": "application/json" } }, { headers: { "content-encoding": "gzip" } }, { headers: { "content-length": "300000" } }, { chunks: ["a".repeat(200000), "b".repeat(200000)] }]) {
+test("large pages retain early titles regardless of Content-Length and close at the byte budget", async () => {
+  const prefix = '<html><head><title>Page &amp; title</title><meta property="og:title" content="Preferred title">';
+  for (const headers of [{ "content-length": "884583" }, {}]) {
+    const h = fixture([{ headers, chunks: [prefix, " ".repeat(300000), '<meta property="og:title" content="Too late">'] }]);
+    assert.equal(await h.resolve("https://example.com/"), "Preferred title");
+    assert.ok(h.calls[0].req.destroyed);
+  }
+  // A single oversized chunk is sliced before buffering/parsing too.
+  const single = fixture([{ html: prefix + " ".repeat(300000) }]);
+  assert.equal(await single.resolve("https://example.com/"), "Preferred title");
+});
+
+test("only the bounded prefix supplies titles; split multibyte text still decodes correctly", async () => {
+  const late = fixture([{ chunks: [" ".repeat(64), "<title>Too late</title>"] }], { maxBytes: 64 });
+  assert.equal(await late.resolve("https://example.com/"), "https://example.com/");
+  assert.ok(late.calls[0].req.destroyed);
+  const html = Buffer.from('<title>Café 😀</title>');
+  const split = fixture([{ chunks: [html.subarray(0, 11), html.subarray(11, 15), html.subarray(15)] }]);
+  assert.equal(await split.resolve("https://example.com/"), "Café 😀");
+});
+
+test("lookup failures, missing titles, non-HTML and encodings fall back without blocking Save", async () => {
+  for (const page of [undefined, { html: "<body>no title</body>" }, { status: 403 }, { headers: { "content-type": "application/json" } }, { headers: { "content-encoding": "gzip" } }, { chunks: ["a".repeat(200000), "b".repeat(200000)] }]) {
     const h = fixture([page]);
     assert.equal(await h.resolve("https://example.com/"), "https://example.com/");
   }
