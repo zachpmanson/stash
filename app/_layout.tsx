@@ -13,6 +13,7 @@ import { bootstrapSavedStashLogin } from "../src/db/syncLogin";
 import { subscribeStashSyncProjection } from "../src/db/syncClient";
 import { useFolderStore } from "../src/state/folderState";
 import { initializeSettingsFromDatabase } from "../src/state/settingsState";
+import { recordAppEvent } from "../src/utils/appLogs";
 
 const SHARE_LAUNCH = isShareLaunch();
 
@@ -47,7 +48,13 @@ function RootLayout() {
   const { resolvedSharedPayloads } = useIncomingShare();
   const handledSigRef = useRef<string | null>(null);
 
-  useEffect(() => { void initializeSettingsFromDatabase().catch(console.error); }, []);
+  useEffect(() => {
+    recordAppEvent("app.started");
+    void initializeSettingsFromDatabase().catch((error) => {
+      recordAppEvent("settings.load_failed");
+      console.error(error);
+    });
+  }, []);
   useEffect(() => { void bootstrapSavedStashLogin(); }, []);
 
   useEffect(() => subscribeStashSyncProjection(() => {

@@ -74,6 +74,7 @@ function syncHarness() {
     'expo-sqlite': h.sqlite, './database': h.api,
     './syncIdentity': load('src/db/syncIdentity.ts', {}),
     './restoreMerge': { assertRecoveryConfigurationOwned: async () => {} },
+    '../utils/appLogs': { recordAppEvent() {} },
     './mediaQueue': { runStashMediaCycle: async (...args) => h.options.mediaCycle ? h.options.mediaCycle(...args) : ({ status: { pending: 0, errors: 0 }, projected: false }) },
     '../state/settingsState': { useSettingsStore: { getState: () => ({ setAuRecipe() {} }) } },
     './syncReplica': {

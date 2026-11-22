@@ -40,6 +40,7 @@ function harness({ dev = false, optIn = false, platform = 'android', effects = f
     '../db/database': {}, '../db/syncReplica': {}, '../db/syncClient': {}, '../db/syncLogin': {}, '../db/syncReplicaSmoke': {},
     '../db/mediaQueue': { retryStashImages: async () => {} },
     '../utils/backup': {}, '../utils/randomId': { randomId: () => 'id' },
+    '../utils/appLogs': { recordAppEvent() {} }, '../utils/appLogExport': {},
     '../state/settingsState': { useSettingsStore: selector => selector({ auRecipe: false }) },
     '../state/voiceState': { useVoiceStore: selector => selector({ voices: [] }) },
     '../state/folderState': { useFolderStore: () => ({ refresh: async () => {} }) },
@@ -188,6 +189,23 @@ for (const build of builds) test(`actual Settings row and direct Sync page obey 
   assert.equal(!!nodes(page).find(n => n.type === 'Pressable' && words(n) === 'Connect and sync'),build.allowed);
   const scroll = nodes(page).find(n => n.type === 'ScrollView');
   assert.ok(scroll.props.contentContainerStyle); assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+});
+
+test('Export logs is an app-wide native Settings action even during read-only recovery', async () => {
+  const h = harness({ platform: 'android' });
+  let calls = 0;
+  h.mocks['../utils/appLogExport'].exportAppLogs = async () => {
+    calls++;
+    if (calls === 2) throw Error('private local path');
+  };
+  const tree = h.render(settingsFile, [null, true, false]);
+  await button(tree, 'Export logs').props.onPress();
+  assert.equal(calls, 1);
+  assert.equal(h.current(), null);
+  await button(tree, 'Export logs').props.onPress();
+  assert.equal(h.current().title, 'Could not export logs');
+  assert.doesNotMatch(h.current().message, /private local path/);
+  assert.doesNotMatch(words(harness({ platform: 'web' }).render(settingsFile)), /Export logs/);
 });
 
 // Most legacy recovery tests deliberately do not run effects. These Sync tests explicitly

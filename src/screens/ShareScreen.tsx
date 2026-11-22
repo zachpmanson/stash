@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { showModal } from "src/state/modalState";
 import { processAndSaveShare } from "src/utils/shareHandler";
+import { recordAppEvent } from "src/utils/appLogs";
 import { Colors, Radius, Spacing, Typography } from "src/theme";
 import Debug from "src/components/Debug";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
@@ -98,6 +99,7 @@ export default function ShareReceived() {
       for (const payload of resolvedSharedPayloads) {
         await processAndSaveShare(payload, [...selectedIds], { captureLocation });
       }
+      recordAppEvent("item.share_saved");
       refresh();
       clearSharedPayloads();
       clearNativeShareIntent();
@@ -107,6 +109,7 @@ export default function ShareReceived() {
         router.back();
       }
     } catch (e) {
+      recordAppEvent("item.share_failed");
       setSaving(false);
       showModal({ title: "Error", message: `Failed to save item. ${e}` });
     }
@@ -117,12 +120,14 @@ export default function ShareReceived() {
     setSavingAndListening(true);
     try {
       const item = await processAndSaveShare(resolvedSharedPayloads[0], ["inbox"]);
+      recordAppEvent("item.share_saved");
       refresh();
       clearSharedPayloads();
       clearNativeShareIntent();
       if (t) finishShareTask();
       router.replace(`/listen/${item.id}`);
     } catch (e) {
+      recordAppEvent("item.share_failed");
       setSavingAndListening(false);
       showModal({ title: "Error", message: `Failed to save item. ${e}` });
     }

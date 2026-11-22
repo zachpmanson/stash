@@ -1,6 +1,7 @@
 import type * as SQLite from "expo-sqlite";
 import { withAppDb, assertAppDbWritableOwned, getAppDbGeneration, assertAppDbGenerationOwned } from "./database";
 import { localImageExists, uploadLocalImage, downloadPrivateImage, MediaTransferError, type ImageDescriptor } from "./mediaFiles";
+import { recordAppEvent } from "../utils/appLogs";
 export type MediaQueueStatus = { pending: number; errors: number; message?: string };
 type Job = { item_id: string; direction: "upload" | "download"; source_uri: string | null; attempts: number };
 const TABLE = "stash_media_queue_v1";
@@ -97,6 +98,8 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
         terminal ? `Image unsupported or conflicting (HTTP ${code}); original retained` : "Image transfer failed; retry scheduled";
       await owned(db => db.runAsync(`UPDATE ${TABLE} SET state=?,attempts=attempts+1,next_retry=?,message=? WHERE account=? AND item_id=?`,
         terminal ? "error" : "retry", terminal ? null : Date.now() + Math.min(300_000, 2000 * 2 ** Math.min(job.attempts, 8)), message, account, job.item_id));
+      // Waiting for metadata or the other replica's upload is normal.
+      if (code !== 404) recordAppEvent(`image.${job.direction}_failed`, code);
     } finally { clearTimeout(timeout); signal.removeEventListener("abort", abort); }
   }
   const status = await owned(async db => {
