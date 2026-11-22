@@ -6,19 +6,21 @@ const logPath = h => new h.File(h.Paths.cache, 'stash-app-events-v1.json');
 
 test('app log survives restart, keeps the newest 200 events, and rejects private fields', async t => {
   const h = await createNativeHarness(); t.after(() => h.cleanup());
-  const { recordAppEvent } = h.load('src/utils/appLogs.ts');
+  const { recordAppEvent, recordImageFailure } = h.load('src/utils/appLogs.ts');
   h.options.now = 1000;
   recordAppEvent('backup.created');
   for (let i = 0; i < 199; i++) recordAppEvent('sync.connecting');
   recordAppEvent('https://secret.example/');
-  recordAppEvent('image.upload_failed', 415);
-  recordAppEvent('image.download_failed', 'secret filename');
+  recordImageFailure('image.upload_failed', 'upload-response', false, 415);
+  recordImageFailure('image.download_failed', 'secret filename', false);
+  recordImageFailure('image.download_failed', '__proto__', false);
+  recordImageFailure('image.download_failed', 'local-write', false, 'secret token');
   assert.ok(logPath(h).size < 24 * 1024);
   await h.restart();
   const output = h.load('src/utils/appLogs.ts').formatAppLog();
   assert.equal(output.trimEnd().split('\n').length, 200);
-  assert.match(output, /1970-01-01T00:00:01\.000Z  image\.upload_failed  HTTP 415/);
-  assert.match(output, /image\.download_failed\n$/);
+  assert.match(output, /1970-01-01T00:00:01\.000Z  image\.upload_failed  stage=upload-response  reason=http-error  HTTP 415/);
+  assert.match(output, /image\.download_failed  stage=local-write  reason=file-write-failed\n$/);
   assert.doesNotMatch(output, /backup\.created|secret/);
 });
 
@@ -26,12 +28,22 @@ test('invalid persisted entries are never exported and cache write failures do n
   const h = await createNativeHarness(); t.after(() => h.cleanup());
   const file = logPath(h); file.create();
   file.write(JSON.stringify([[500, 'app.started'], [600, 'secret'], [700, 'sync.error', 'secret'],
+    [750, 'image.upload_failed', 'upload-response', 'secret'],
+    [760, 'image.upload_failed', 'local-read', 'file-read-failed', 'secret'],
+    [770, 'image.download_failed', 'secret', 'timeout'],
     [800, 'image.upload_failed', 800], [900, 'sync.synced', 200, 'secret'], [9e15, 'backup.failed']]));
   const { recordAppEvent, formatAppLog } = h.load('src/utils/appLogs.ts');
   h.options.writeFailure = () => true;
   assert.doesNotThrow(() => recordAppEvent('restore.completed'));
   assert.match(formatAppLog(), /app\.started\n.*restore\.completed\n$/);
-  assert.doesNotMatch(formatAppLog(), /secret|sync\.|backup\.|HTTP/);
+  assert.doesNotMatch(formatAppLog(), /secret|sync\.|backup\.|HTTP|image\./);
+});
+
+test('legacy image events remain readable after upgrade', async t => {
+  const h = await createNativeHarness(); t.after(() => h.cleanup());
+  const file = logPath(h); file.create();
+  file.write(JSON.stringify([[500, 'image.upload_failed', 503], [600, 'image.download_failed']]));
+  assert.match(h.load('src/utils/appLogs.ts').formatAppLog(), /image\.upload_failed  HTTP 503\n.*image\.download_failed\n$/);
 });
 
 test('export shares only a plain-text snapshot and permits retry if native sharing fails', async t => {
