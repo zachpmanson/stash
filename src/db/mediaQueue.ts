@@ -69,9 +69,8 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
       const descriptor = await response.json() as ImageDescriptor & { state: string };
       let downloaded: { uri: string; sha: string } | null = null;
       if (job.direction === "upload") {
-        // Always verify the local bytes on retries, even when the server already
-        // has a manifest, so a conflicting image cannot be silently accepted.
-        await uploadLocalImage(job.source_uri!, new URL("original", endpoint).toString(), authorization, controller.signal, reportStage);
+        await uploadLocalImage(job.source_uri!, new URL("original", endpoint).toString(), authorization, controller.signal,
+          reportStage, descriptor.state === "available" ? descriptor : undefined);
       } else {
         if (descriptor.state !== "available") throw new MediaTransferError("Image bytes pending on the server", 404);
         const uri = await downloadPrivateImage(new URL("original", endpoint).toString(), descriptor, authorization, controller.signal, reportStage);

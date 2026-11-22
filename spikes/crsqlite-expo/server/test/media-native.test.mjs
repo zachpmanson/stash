@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
+import path from "node:path";
 import sharp from "sharp";
 import WebSocket from "ws";
 import { encode, decode, tags } from "@vlcn.io/ws-common";
@@ -11,7 +12,7 @@ import { launch, waitFor } from "./web-helpers.mjs";
 const { createNativeHarness } = createRequire(import.meta.url)("../../../../scripts/restore-test-harness.cjs");
 
 test("disposable real CR-SQLite peers: Android originals backfill into web thumbnails, browser-created images verify/download/project on another Android replica", { timeout: 45000 }, async t => {
-  const { base, port, json } = await launch(t);
+  const { base, port, json, tmp } = await launch(t);
   const authorization = "Basic c3ludGhldGljOnRlc3Q=";
   async function peer() {
     const h = await createNativeHarness(); t.after(() => h.cleanup());
@@ -64,8 +65,25 @@ test("disposable real CR-SQLite peers: Android originals backfill into web thumb
   let transfer = await phone.queue.runStashMediaCycle(new URL(base), "synthetic", authorization, new AbortController().signal);
   assert.equal(transfer.status.pending, 0);
   const web = await json("/items/phone-photo"); assert.equal(web.image.state, "available");
+  const requests = [];
+  const request = phone.h.options.nativeFetch;
+  phone.h.options.nativeFetch = (url, options) => {
+    requests.push(options.method);
+    return request(url, options);
+  };
+  const reconnect = () => phone.queue.runStashMediaCycle(new URL(base), "synthetic", authorization, new AbortController().signal, true);
+  transfer = await reconnect();
+  assert.equal(transfer.status.pending, 0);
+  assert.deepEqual(requests.splice(0), ["HEAD"], "do not re-upload the matching original on reconnect");
   const thumb = await fetch(base + web.image.thumbnailUrl, { headers: { "X-Auth-User": "web-test-owner" } });
   assert.equal((await sharp(Buffer.from(await thumb.arrayBuffer())).metadata()).format, "jpeg");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const original = path.join(tmp, "media", "sha256", digest.slice(0, 2), digest);
+  await unlink(original); // A metadata-only restore can leave a manifest without its original.
+  transfer = await reconnect();
+  assert.equal(transfer.status.pending, 0);
+  assert.deepEqual(requests.splice(0), ["HEAD", "PUT"], "a matching manifest alone must not suppress backfill");
+  assert.deepEqual(await readFile(original), bytes);
   await other.receive("phone-photo"); await other.project();
   assert.equal(await other.h.load("src/db/items.ts").getItemById("phone-photo"), null, "metadata alone is not byte completion");
   transfer = await other.queue.runStashMediaCycle(new URL(base), "synthetic", authorization, new AbortController().signal);
@@ -80,4 +98,14 @@ test("disposable real CR-SQLite peers: Android originals backfill into web thumb
   const projected = await phone.h.load("src/db/items.ts").getItemById(browserId);
   assert.equal(projected.id, browserId); assert.deepEqual(await readFile(phone.h.localPath(projected.uri)), browserBytes);
   assert.equal(await phone.app.withAppDb(async db => (await db.getFirstAsync("SELECT media_id FROM sync_items WHERE id=?", browserId)).media_id), browserId);
+  requests.length = 0;
+  file.write(browserBytes);
+  await reconnect();
+  transfer = await phone.queue.runStashMediaCycle(new URL(base), "synthetic", authorization, new AbortController().signal);
+  assert.equal(transfer.status.pending, 1);
+  assert.equal(transfer.status.errors, 1);
+  assert.match(transfer.status.message, /conflicting.*409/);
+  assert.deepEqual(requests, ["HEAD"], "the other image is verified but the conflicting original is not sent");
+  assert.deepEqual(await readFile(original), bytes);
+  assert.deepEqual(await readFile(phone.h.localPath(file.uri)), browserBytes);
 });
