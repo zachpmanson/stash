@@ -1,7 +1,7 @@
 import type * as SQLite from "expo-sqlite";
 import { withAppDb, assertAppDbWritableOwned, getAppDbGeneration, assertAppDbGenerationOwned } from "./database";
-import { localImageExists, uploadLocalImage, downloadPrivateImage, MediaTransferError, type ImageDescriptor } from "./mediaFiles";
-import { recordAppEvent } from "../utils/appLogs";
+import { localImageExists, uploadLocalImage, downloadPrivateImage, MediaHttpError, MediaTransferError, type ImageDescriptor } from "./mediaFiles";
+import { recordImageFailure, type ImageTransferStage } from "../utils/appLogs";
 export type MediaQueueStatus = { pending: number; errors: number; message?: string };
 type Job = { item_id: string; direction: "upload" | "download"; source_uri: string | null; attempts: number };
 const TABLE = "stash_media_queue_v1";
@@ -58,23 +58,27 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
     signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
     const timeout = setTimeout(abort, 60_000);
     const endpoint = new URL(`api/media/items/${encodeURIComponent(job.item_id)}/`, base);
+    let stage: ImageTransferStage = "status-request";
+    const reportStage = (next: ImageTransferStage) => { stage = next; };
     try {
       // A 404 is expected when metadata/bytes are still in transit. HTTP auth
       // stays separate from CR-SQLite; convergence alone never marks jobs done.
       const response = await fetch(new URL("status", endpoint), { headers: { Authorization: authorization, "X-Stash-Request": "1" }, signal: controller.signal, redirect: "error" });
-      if (!response.ok) throw new MediaTransferError(`Image status HTTP ${response.status}`, response.status);
+      if (!response.ok) throw new MediaHttpError(`Image status HTTP ${response.status}`, response.status);
+      reportStage("status-response");
       const descriptor = await response.json() as ImageDescriptor & { state: string };
       let downloaded: { uri: string; sha: string } | null = null;
       if (job.direction === "upload") {
         // Always verify the local bytes on retries, even when the server already
         // has a manifest, so a conflicting image cannot be silently accepted.
-        await uploadLocalImage(job.source_uri!, new URL("original", endpoint).toString(), authorization, controller.signal);
+        await uploadLocalImage(job.source_uri!, new URL("original", endpoint).toString(), authorization, controller.signal, reportStage);
       } else {
         if (descriptor.state !== "available") throw new MediaTransferError("Image bytes pending on the server", 404);
-        const uri = await downloadPrivateImage(new URL("original", endpoint).toString(), descriptor, authorization, controller.signal);
+        const uri = await downloadPrivateImage(new URL("original", endpoint).toString(), descriptor, authorization, controller.signal, reportStage);
         downloaded = { uri, sha: descriptor.sha256 };
       }
       if (controller.signal.aborted) throw new MediaTransferError("Image transfer cancelled");
+      reportStage("queue-update");
       await owned(async db => {
         // Check live replicated identity again after network/FS awaits. Never
         // create metadata or publish paths for an item deleted during transfer.
@@ -93,13 +97,15 @@ export async function runStashMediaCycle(base: URL, username: string, authorizat
     } catch (error) {
       if (signal.aborted) throw error;
       const code = error instanceof MediaTransferError ? error.status : 0;
+      const timedOut = controller.signal.aborted;
       const terminal = [409, 413, 415].includes(code);
       const message = code === 404 ? "Waiting for image metadata or bytes" : code === 401 || code === 403 ? "Image authentication rejected; reconnect" :
         terminal ? `Image unsupported or conflicting (HTTP ${code}); original retained` : "Image transfer failed; retry scheduled";
       await owned(db => db.runAsync(`UPDATE ${TABLE} SET state=?,attempts=attempts+1,next_retry=?,message=? WHERE account=? AND item_id=?`,
         terminal ? "error" : "retry", terminal ? null : Date.now() + Math.min(300_000, 2000 * 2 ** Math.min(job.attempts, 8)), message, account, job.item_id));
       // Waiting for metadata or the other replica's upload is normal.
-      if (code !== 404) recordAppEvent(`image.${job.direction}_failed`, code);
+      if (code !== 404) recordImageFailure(`image.${job.direction}_failed`, stage, timedOut,
+        error instanceof MediaHttpError ? code : undefined);
     } finally { clearTimeout(timeout); signal.removeEventListener("abort", abort); }
   }
   const status = await owned(async db => {

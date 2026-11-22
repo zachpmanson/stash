@@ -41,6 +41,7 @@ test('actual durable queue verifies downloads before local promotion/projection,
     h.options.nativeFetch = async (_url, options) => { assert.equal(options.headers.Authorization, authorization); return response(Buffer.alloc(bytes.length)); };
     let result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
     assert.equal(result.status.pending, 1); assert.equal(result.projected, false);
+    assert.match(h.load('src/utils/appLogs.ts').formatAppLog(), /image\.download_failed  stage=verify  reason=verification-failed\n/);
     assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT COUNT(*) AS n FROM stash_media_local_v1')).n), 0);
     assert.deepEqual(new h.Directory(h.Paths.document, 'stash').list(), [], 'failed download leaves no promoted/partial original');
     await h.restart();
@@ -104,6 +105,7 @@ test('actual upload backfills existing identity, persists unsupported errors tru
     };
     let result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
     assert.equal(result.status.errors, 1); assert.match(result.status.message, /unsupported.*original retained/);
+    assert.match(h.load('src/utils/appLogs.ts').formatAppLog(), /image\.upload_failed  stage=upload-response  reason=http-error  HTTP 415\n/);
     await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
     assert.equal(uploads, 1, 'unsupported original is not retried in a tight loop');
     failure = 0; await queue.retryStashImages();
@@ -114,6 +116,41 @@ test('actual upload backfills existing identity, persists unsupported errors tru
     assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT media_id FROM sync_items WHERE id=?', 'phone-image')).media_id), 'phone-image');
     assert.deepEqual(file.bytesSync(), bytes);
   } finally { await h.cleanup(); }
+});
+
+test('image logs distinguish request failure and timeout from a local read error, without leaking context', async t => {
+  const h = await createNativeHarness(); t.after(() => h.cleanup());
+  const { queue } = await setup(h, 'private-image-id');
+  const directory = new h.Directory(h.Paths.document, 'stash'); directory.create();
+  const file = new h.File(directory, 'private-filename.png'); file.create(); file.write(bytes);
+  await h.load('src/db/items.ts').saveItem({ id: 'private-image-id', type: 'image', uri: file.uri, created_at: 1, folder_ids: [] }, []);
+  const { formatAppLog } = h.load('src/utils/appLogs.ts');
+  const cycle = () => queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
+
+  h.options.fetch = async () => new Response(null, { status: 404 });
+  await cycle();
+  assert.equal(formatAppLog(), 'No app events recorded.\n');
+
+  await queue.retryStashImages();
+  h.options.fetch = async () => Response.json({ state: 'pending' });
+  h.options.nativeFetch = async () => { throw Error(`transport details: ${base}${file.uri} ${authorization}`); };
+  await cycle();
+  assert.match(formatAppLog(), /stage=upload-request  reason=request-failed\n$/);
+
+  await queue.retryStashImages();
+  h.options.fastTimers = true;
+  h.options.fetch = async (_url, { signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(Error('private timeout context')), { once: true });
+  });
+  await cycle();
+  assert.match(formatAppLog(), /stage=status-request  reason=timeout\n$/);
+
+  await queue.retryStashImages();
+  h.options.fastTimers = false;
+  h.options.fetch = async () => { file.delete(); return Response.json({ state: 'pending' }); };
+  await cycle();
+  assert.match(formatAppLog(), /stage=local-read  reason=file-read-failed\n$/);
+  assert.doesNotMatch(formatAppLog(), /HTTP|private|synthetic\.example|Basic/);
 });
 
 test('disk failure, cancellation and delete-during-download never expose incomplete local paths or resurrect metadata', async () => {
@@ -155,6 +192,7 @@ test('cancelling active verified-download I/O drains the reader and retains a re
     const active=queue.runStashMediaCycle(base,'synthetic',authorization,controller.signal);
     const rejected=assert.rejects(active,/cancelled/);await ready;controller.abort();await rejected;
     assert.equal(cancelled,true);
+    assert.equal(h.load('src/utils/appLogs.ts').formatAppLog(), 'No app events recorded.\n');
     assert.deepEqual(new h.Directory(h.Paths.document,'stash').list(),[]);
     assert.equal(await app.withAppDb(async db=>(await db.getFirstAsync('SELECT COUNT(*) AS n FROM stash_media_local_v1')).n),0);
     assert.equal(await app.withAppDb(async db=>(await db.getFirstAsync('SELECT state FROM stash_media_queue_v1')).state),'queued');
