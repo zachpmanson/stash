@@ -120,6 +120,7 @@ export default function SyncSettingsScreen() {
             <Text style={styles.note}>{restartRequired ? "Sign out could not finish. Restart the app before reconnecting." : teardownPending ? "Signing out…" : status.message ?? `Status: ${status.phase}`}</Text>
             {status.media && !hideControls && <>
               <Text style={styles.note}>Images: {status.media.pending} pending; {status.media.errors} waiting/retrying or failed. JPEG, PNG and still WebP up to 20 MiB. Other originals remain local.</Text>
+              {status.media.checking > 0 && <Text style={styles.note}>Checking {status.media.checking} previously synced images.</Text>}
               {status.media.message && <Text style={styles.note}>{status.media.message}</Text>}
               {status.media.pending > 0 && status.account && !recoveryPending && <Action label="Retry image transfers" onPress={() => { void retryStashImages().catch(e => showModal({ title: "Image retry failed", message: e instanceof Error ? e.message : String(e) })); }} />}
             </>}

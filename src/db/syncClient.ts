@@ -142,8 +142,8 @@ function publishStatus(status: StashSyncStatus): void {
   if (next.phase !== previous.phase) recordAppEvent(`sync.${next.phase}`);
   if (next.authenticationRequired && !previous.authenticationRequired) recordAppEvent("sync.authentication_required");
   if (next.restartRequired && !previous.restartRequired) recordAppEvent("sync.restart_required");
-  if (next.media?.pending === 0 && next.media.errors === 0 &&
-      (previous.media?.pending !== 0 || previous.media.errors !== 0)) recordAppEvent("sync.images_complete");
+  if (next.media?.pending === 0 && next.media.checking === 0 && next.media.errors === 0 &&
+      (previous.media?.pending !== 0 || previous.media.checking !== 0 || previous.media.errors !== 0)) recordAppEvent("sync.images_complete");
   for (const listener of statusListeners) {
     // An earlier observer may synchronously stop/cancel and publish newer state.
     if (currentStatus !== next) break;
@@ -691,7 +691,8 @@ export async function connectStashSync(
               if (!running) break;
               if (media.projected) projectedSignature = ""; // recheck full metadata barrier before projecting verified paths
               notifySessionStatus({ phase: "synced", projectedAt: lastProjectedAt, media: media.status,
-                message: media.status.pending ? `Metadata synced; ${media.status.pending} image transfer(s) pending${media.status.errors ? `, ${media.status.errors} waiting/retrying or failed` : ""}.` : "Metadata and supported image transfers are complete." });
+                message: media.status.pending ? `Metadata synced; ${media.status.pending} image transfer(s) pending${media.status.errors ? `, ${media.status.errors} waiting/retrying or failed` : ""}.` :
+                  media.status.checking ? "Metadata synced; checking previously synced images." : "Metadata and supported image transfers are complete." });
             }
           } catch (error) {
             if (!running) break;

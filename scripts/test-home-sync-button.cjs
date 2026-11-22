@@ -95,6 +95,7 @@ const expected = {
   signedOut: { label: 'Sync settings: Not logged in', color: '#8080a0', icon: 'cloud-off' },
   notSynced: { label: 'Sync settings: Not synced', color: '#fbbf24', icon: 'sync-problem' },
   syncing: { label: 'Sync settings: Syncing', color: '#60a5fa', icon: 'sync' },
+  checking: { label: 'Sync settings: Checking previously synced images', color: '#8080a0', icon: 'cloud-queue' },
   synced: { label: 'Sync settings: Fully synced', color: '#4ade80', icon: 'cloud-done' },
 };
 for (const [name, status, state] of [
@@ -105,7 +106,8 @@ for (const [name, status, state] of [
   ['established account offline', active('error'), 'notSynced'],
   ['stopped established account', active('stopped'), 'notSynced'],
   ['metadata complete but image scan unconfirmed', active('synced', { media: undefined }), 'syncing'],
-  ['image queue pending', active('synced', { media: { pending: 2, errors: 0 } }), 'syncing'],
+  ['completed copies being checked', active('synced', { media: { pending: 0, checking: 47, errors: 0 } }), 'checking'],
+  ['image queue pending alongside checks', active('synced', { media: { pending: 2, checking: 47, errors: 0 } }), 'syncing'],
   ['image retry/failure', active('synced', { media: { pending: 2, errors: 1 } }), 'notSynced'],
   ['image error even with zero pending', active('synced', { media: { pending: 0, errors: 1 } }), 'notSynced'],
   ['metadata and supported images complete', active(), 'synced'],

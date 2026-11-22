@@ -156,6 +156,47 @@ test('actual upload backfills existing identity, persists unsupported errors tru
   } finally { await h.cleanup(); }
 });
 
+test('reopening with 47 completed originals checks them separately and transfers new images first', async t => {
+  const h = await createNativeHarness(); t.after(() => h.cleanup());
+  let { app } = await setup(h, 'new-image');
+  const directory = new h.Directory(h.Paths.document, 'stash'); directory.create();
+  const file = new h.File(directory, 'synthetic.png'); file.create(); file.write(bytes);
+  const ids = Array.from({ length: 47 }, (_, i) => `existing-${String(i).padStart(2, '0')}`);
+  const items = h.load('src/db/items.ts');
+  for (const id of [...ids, 'new-image']) {
+    await items.saveItem({ id, type: 'image', uri: file.uri, created_at: 1, folder_ids: [] }, []);
+  }
+  const account = JSON.stringify([base.toString(), 'synthetic']);
+  await app.withAppDb(async db => {
+    await db.execAsync(`CREATE TABLE stash_media_queue_v1 (account TEXT NOT NULL, item_id TEXT NOT NULL,
+      direction TEXT NOT NULL, source_uri TEXT, state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry INTEGER, message TEXT, PRIMARY KEY(account,item_id))`);
+    for (const id of ids) await db.runAsync(`INSERT INTO stash_media_queue_v1(account,item_id,direction,source_uri,state)
+      VALUES (?,?,'upload',?,'complete')`, account, id, file.uri);
+  });
+  await h.restart();
+  app = h.load('src/db/database.ts');
+  const queue = h.load('src/db/mediaQueue.ts');
+  h.options.fetch = async url => Response.json(url.pathname.includes('/new-image/') ? { state: 'pending' } : descriptor);
+  const originals = [];
+  h.options.nativeFetch = async (url, { method }) => {
+    originals.push([new URL(url).pathname.split('/').at(-2), method]);
+    return new Response(null, { headers: { 'X-Stash-Content-SHA256': sha, 'Content-Length': String(bytes.length) } });
+  };
+  const cycle = reconnect => queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, reconnect);
+  let result = await cycle(true);
+  assert.deepEqual({ ...result.status }, { pending: 0, checking: 47, errors: 0 });
+  assert.deepEqual(originals, [['new-image', 'PUT']]);
+  await queue.retryStashImages(); // The retry button does not turn rechecks into transfers.
+  for (let left = 46; left >= 0; left--) {
+    result = await cycle(false);
+    assert.deepEqual({ ...result.status }, { pending: 0, checking: left, errors: 0 });
+  }
+  await cycle(false);
+  assert.deepEqual(originals.slice(1), ids.map(id => [id, 'HEAD']));
+  assert.equal(await app.withAppDb(async db => (await db.getFirstAsync("SELECT COUNT(*) AS n FROM stash_media_queue_v1 WHERE state='complete'")).n), 48);
+});
+
 test('image logs distinguish request failure and timeout from a local read error, without leaking context', async t => {
   const h = await createNativeHarness(); t.after(() => h.cleanup());
   const { queue } = await setup(h, 'private-image-id');
