@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Linking, ScrollView, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Linking, Platform, ScrollView, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import Screen from "../components/Screen";
@@ -10,6 +10,8 @@ import { useFolderStore } from "../state/folderState";
 import { changeAuRecipeSetting, useSettingsStore } from "../state/settingsState";
 import { showModal } from "../state/modalState";
 import { createBackup, pickBackupFile, restoreBackup, shareBackup } from "../utils/backup";
+import { recordAppEvent } from "../utils/appLogs";
+import { exportAppLogs } from "../utils/appLogExport";
 import { subscribeStashSyncStatus } from "../db/syncClient";
 import { withAppDb, isRestorePendingOwned } from "../db/database";
 import { STASH_SYNC_DEV_TOOLS } from "../utils/syncBuildGate";
@@ -41,13 +43,23 @@ export default function SettingsScreen() {
     void changeAuRecipeSetting(enabled).catch((error) => showModal({ title: "Setting not changed", message: String(error) }));
   };
 
+  const handleExportLogs = async () => {
+    try {
+      await exportAppLogs();
+    } catch {
+      showModal({ title: "Could not export logs", message: "Try again or check that sharing is available on this device." });
+    }
+  };
+
   const handleBackup = async () => {
     if (busy) return;
     setBusy(true);
     try {
       const zipPath = await createBackup();
+      recordAppEvent("backup.created");
       await shareBackup(zipPath);
     } catch (e) {
+      recordAppEvent("backup.failed");
       showModal({ title: "Backup failed", message: `${e}` });
     } finally {
       setBusy(false);
@@ -72,6 +84,7 @@ export default function SettingsScreen() {
             onPress: async () => {
               try {
                 const manifest = await restoreBackup(fileUri);
+                recordAppEvent("restore.completed");
                 setRecoveryPending(manifest.recoveryPending);
                 await useFolderStore.getState().refresh();
                 showModal({
@@ -81,6 +94,7 @@ export default function SettingsScreen() {
                     : `Restored ${manifest.itemCount} items across ${manifest.folderCount} folders locally.`,
                 });
               } catch (e) {
+                recordAppEvent("restore.failed");
                 showModal({ title: "Restore failed", message: `${e}` });
               } finally {
                 setBusy(false);
@@ -91,6 +105,7 @@ export default function SettingsScreen() {
       });
       confirmationOwnsBusy = true;
     } catch (e) {
+      recordAppEvent("restore.failed");
       showModal({ title: "Restore error", message: `${e}` });
     } finally {
       if (!confirmationOwnsBusy) setBusy(false);
@@ -136,6 +151,9 @@ export default function SettingsScreen() {
           onValueChange={handleAuRecipeChange}
         />
         {STASH_SYNC_DEV_TOOLS && <Row icon="sync" label="Sync" onPress={() => router.push("/settings/sync")} />}
+        {(Platform.OS === "android" || Platform.OS === "ios") && (
+          <Row icon="description" label="Export logs" onPress={handleExportLogs} />
+        )}
         <Row icon="code" label="GitHub" value="zachpmanson/stash" onPress={() => Linking.openURL(GITHUB_URL)} />
       </ScrollView>
     </Screen>

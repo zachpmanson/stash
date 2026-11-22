@@ -170,6 +170,7 @@ test('actual root startup effect restores saved login without opening Settings a
     'expo-sharing':{useIncomingShare:()=>({resolvedSharedPayloads:[]})},
     '../src/theme':{Colors:{}},'../src/components/SnackbarHost':{},'../src/components/ModalHost':{},
     '../src/utils/nativeShareIntent':{isShareLaunch:()=>false},
+    '../src/utils/appLogs':{recordAppEvent() {} },
     '../src/state/folderState':{},'../src/state/settingsState':{initializeSettingsFromDatabase:async()=>{}},
   });
   h.mocks['src/db/syncClient.ts'].subscribeStashSyncProjection=()=>()=>{};

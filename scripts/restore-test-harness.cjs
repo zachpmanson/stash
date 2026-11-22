@@ -36,7 +36,8 @@ exports.createNativeHarness = async ({ actualSettings = false } = {}) => {
       fs.writeFileSync(localPath(this.uri), bytes);
     }
     bytesSync() { if (options.noBytes) throw Error("JS media buffering forbidden"); return fs.readFileSync(localPath(this.uri)); }
-    async text() { return fs.readFileSync(localPath(this.uri), 'utf8'); }
+    textSync() { return fs.readFileSync(localPath(this.uri), 'utf8'); }
+    async text() { return this.textSync(); }
     copy(dest) {
       if (options.copyFailure?.(dest.uri)) throw Error("injected copy failure");
       events.push(`copy:${dest.uri}`);
@@ -90,7 +91,8 @@ exports.createNativeHarness = async ({ actualSettings = false } = {}) => {
     } },
     'expo-file-system': { File, Directory, Paths },
     'expo-file-system/legacy': { copyAsync: async ({ from, to }) => fs.copyFileSync(localPath(from), localPath(to)) },
-    'expo-sharing': {},
+    'expo-sharing': { isAvailableAsync: async () => options.sharingAvailable ?? true, shareAsync: (...args) => options.shareAsync(...args) },
+    '../../app.json': require('../app.json'),
     'react-native-zip-archive': { zip: async (from, to) => { fs.cpSync(localPath(from), localPath(to), { recursive: true }); return to; }, unzip: async (from, to) => fs.cpSync(localPath(from), localPath(to), { recursive: true }) },
     '@vlcn.io/ws-common': { cryb64 }, '@vlcn.io/ws-client': { createSyncedDB: (...args) => options.createSyncedDB(...args), defaultConfig: { transportProvider() {} } },
     'src/state/settingsState.ts': { useSettingsStore: { getState: () => ({ setAuRecipe: value => { recipe = value; } }) } },

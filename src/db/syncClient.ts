@@ -24,6 +24,7 @@ import {
 import { assertRecoveryConfigurationOwned } from "./restoreMerge";
 import { useSettingsStore } from "../state/settingsState";
 import { runStashMediaCycle, type MediaQueueStatus } from "./mediaQueue";
+import { recordAppEvent } from "../utils/appLogs";
 
 const DATABASE_ROOM = "stash-backend";
 const CHANGE_COLUMNS = '"table", "pk", "cid", "val", "col_version", "db_version", NULL, "cl", "seq"';
@@ -136,7 +137,13 @@ function withTeardownStatus(status: StashSyncStatus): StashSyncStatus {
 
 function publishStatus(status: StashSyncStatus): void {
   const next = withTeardownStatus(status);
+  const previous = currentStatus;
   currentStatus = next;
+  if (next.phase !== previous.phase) recordAppEvent(`sync.${next.phase}`);
+  if (next.authenticationRequired && !previous.authenticationRequired) recordAppEvent("sync.authentication_required");
+  if (next.restartRequired && !previous.restartRequired) recordAppEvent("sync.restart_required");
+  if (next.media?.pending === 0 && next.media.errors === 0 &&
+      (previous.media?.pending !== 0 || previous.media.errors !== 0)) recordAppEvent("sync.images_complete");
   for (const listener of statusListeners) {
     // An earlier observer may synchronously stop/cancel and publish newer state.
     if (currentStatus !== next) break;
