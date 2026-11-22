@@ -89,7 +89,7 @@ test('persisted retry deadlines automatically resume after restart without a man
 test('actual upload backfills existing identity, persists unsupported errors truthfully, and reconnect retries remain idempotent', async () => {
   const h = await createNativeHarness();
   try {
-    const { app, queue } = await setup(h, 'phone-image');
+    let { app, queue } = await setup(h, 'phone-image');
     const directory = new h.Directory(h.Paths.document, 'stash'); directory.create();
     const file = new h.File(directory, 'synthetic.png'); file.create(); file.write(bytes);
     await h.load('src/db/items.ts').saveItem({ id: 'phone-image', type: 'image', uri: file.uri, created_at: 1, folder_ids: [] }, []);
@@ -111,8 +111,46 @@ test('actual upload backfills existing identity, persists unsupported errors tru
     failure = 0; await queue.retryStashImages();
     result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
     assert.equal(result.status.pending, 0);
-    await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, true);
-    assert.equal(uploads, 3, 'new session safely rechecks completed local originals after backend restore');
+    await h.restart();
+    app = h.load('src/db/database.ts'); queue = h.load('src/db/mediaQueue.ts');
+    h.options.fetch = async () => Response.json(descriptor);
+    const put = h.options.nativeFetch;
+    const methods = [];
+    h.options.nativeFetch = async (url, options) => {
+      methods.push(options.method);
+      if (options.method === 'HEAD') return new Response(null, { headers: {
+        'X-Stash-Content-SHA256': sha, 'Content-Length': String(bytes.length),
+      } });
+      return put(url, options);
+    };
+    result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, true);
+    assert.deepEqual(methods.splice(0), ['HEAD'], 'persisted completed job gets verified, not re-uploaded');
+    assert.equal(result.status.pending, 0);
+    assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT state FROM stash_media_queue_v1')).state), 'complete');
+    h.options.fetch = async () => Response.json({ state: 'pending' });
+    result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, true);
+    assert.deepEqual(methods.splice(0), ['PUT'], 'a restored backend with no manifest gets the original');
+    assert.equal(result.status.pending, 0);
+    assert.equal(uploads, 3);
+    h.options.fetch = async () => Response.json(descriptor);
+    h.options.nativeFetch = async (_url, { method }) => {
+      methods.push(method);
+      return new Response(null, { status: 503 });
+    };
+    result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal, true);
+    assert.equal(result.status.errors, 1);
+    assert.deepEqual(methods.splice(0), ['HEAD'], 'generic verification failure must not trigger a PUT');
+    assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT state FROM stash_media_queue_v1')).state), 'retry');
+    await queue.retryStashImages();
+    h.options.nativeFetch = async (_url, { method }) => {
+      methods.push(method);
+      return new Response(null, { headers: { 'X-Stash-Content-SHA256': 'a'.repeat(64), 'Content-Length': String(bytes.length) } });
+    };
+    result = await queue.runStashMediaCycle(base, 'synthetic', authorization, new AbortController().signal);
+    assert.equal(result.status.errors, 1);
+    assert.match(result.status.message, /conflicting.*409/, 'an identity change between status and HEAD is a conflict');
+    assert.deepEqual(methods, ['HEAD']);
+    assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT state FROM stash_media_queue_v1')).state), 'error');
     assert.equal(await app.withAppDb(async db => (await db.getFirstAsync('SELECT media_id FROM sync_items WHERE id=?', 'phone-image')).media_id), 'phone-image');
     assert.deepEqual(file.bytesSync(), bytes);
   } finally { await h.cleanup(); }

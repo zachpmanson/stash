@@ -27,12 +27,37 @@ async function digestBytes(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 export async function imageDigest(file: File): Promise<string> { return digestBytes(await imageBytes(file)); }
-export async function uploadLocalImage(uri: string, url: string, authorization: string, signal: AbortSignal, reportStage: ReportStage): Promise<void> {
+export async function uploadLocalImage(uri: string, url: string, authorization: string, signal: AbortSignal, reportStage: ReportStage, remote?: ImageDescriptor): Promise<void> {
   reportStage("local-read");
   const bytes = await imageBytes(new File(uri));
   reportStage("local-hash");
   const sha = await digestBytes(bytes);
   if (signal.aborted) throw new MediaTransferError("Image transfer cancelled");
+  if (remote) {
+    reportStage("verify");
+    if (typeof remote.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(remote.sha256))
+      throw new MediaTransferError("Invalid remote original digest", 422);
+    if (remote.sha256 !== sha) throw new MediaTransferError("Remote original conflicts with local bytes", 409);
+    // Status describes the manifest, not the file. HEAD runs the server's
+    // original verification without transferring its bytes. A missing blob
+    // behind a retained manifest can still be backfilled with the same bytes.
+    reportStage("status-request");
+    const check = await nativeFetch(url, { method: "HEAD", redirect: "error", signal,
+      headers: { Authorization: authorization, "X-Stash-Request": "1" } });
+    if (check.ok) {
+      reportStage("verify");
+      const verifiedSha = check.headers.get("X-Stash-Content-SHA256");
+      if (!verifiedSha || !/^[a-f0-9]{64}$/.test(verifiedSha))
+        throw new MediaTransferError("Invalid verified original digest", 422);
+      if (verifiedSha !== sha) throw new MediaTransferError("Remote original conflicts with local bytes", 409);
+      if (Number(check.headers.get("Content-Length")) !== bytes.length)
+        throw new MediaTransferError("Remote original size mismatch", 422);
+      return;
+    }
+    if (check.status !== 404)
+      throw new MediaHttpError(`Image verification HTTP ${check.status}`, check.status);
+    if (signal.aborted) throw new MediaTransferError("Image transfer cancelled");
+  }
   reportStage("upload-request");
   const response = await nativeFetch(url, { method: "PUT", redirect: "error", signal,
     headers: { Authorization: authorization, "Content-Type": "application/octet-stream", "X-Stash-Request": "1", "X-Stash-Content-SHA256": sha },

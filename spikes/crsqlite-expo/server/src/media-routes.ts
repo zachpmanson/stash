@@ -92,10 +92,17 @@ export function installMediaRoutes(app: Hono, cache: ReturnType<typeof attachWeb
         if (!value) throw new MediaError(404, "Image bytes pending upload");
         return value;
       });
-      const file = await mediaFile(root, value, kind);
+      const file = await mediaFile(root, value, kind).catch((error: unknown) => {
+        // A missing original can be backfilled; transient/storage integrity
+        // failures must not look like missing data to the reconnect worker.
+        if (kind === "original" && c.req.method === "HEAD" && (error as NodeJS.ErrnoException).code === "ENOENT")
+          throw new MediaError(404, "Image original missing");
+        throw error;
+      });
       c.header("Content-Type", file.mime); c.header("Content-Length", String(file.size));
       c.header("X-Stash-Content-SHA256", file.digest);
       c.header("Content-Disposition", `inline; filename="image.${kind === "original" ? value.mime.split("/")[1] : "jpeg"}"`);
+      if (c.req.method === "HEAD") return c.body(null);
       return c.body(Readable.toWeb(createReadStream(file.filename)) as ReadableStream);
     });
   }
