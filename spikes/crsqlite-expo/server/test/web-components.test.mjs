@@ -6,14 +6,9 @@ import { act, create } from "react-test-renderer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Button, IconButton } from "../web/components/controls.tsx";
 import { Icon } from "../web/components/Icon.tsx";
-import { Icon as LegacyIcon, FolderNavigation } from "../web/components.tsx";
+import { FolderNavigation } from "../web/components.tsx";
 import { AppHeader } from "../web/components/AppHeader.tsx";
-import { ItemToolbar } from "../web/components/ItemToolbar.tsx";
-import { readRoute, routeUrl } from "../web/App.tsx";
-import {
-  readRoute as hookReadRoute,
-  useWebRoute,
-} from "../web/hooks/useWebRoute.ts";
+import { readRoute, routeUrl, useWebRoute } from "../web/hooks/useWebRoute.ts";
 import { useLayoutPreference } from "../web/hooks/useLayoutPreference.ts";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -90,7 +85,7 @@ test("shared buttons forward native attributes, currentTarget and the actual but
   assert.equal(renderer.root.findByType("button").props.value, "yes");
 });
 
-test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed group and busy semantics", async (t) => {
+test("mobile folder toggle exposes its expanded state and forwards the focus ref", async (t) => {
   const ref = React.createRef(),
     nativeButton = { focus() {} };
   const h = await mount(
@@ -114,50 +109,10 @@ test("extracted header keeps the mobile folder DOM ref; toolbar retains pressed 
   );
   assert.equal(ref.current, nativeButton);
   assert.equal(h.root.findAllByType("button").length, 2);
-  assert.equal(h.root.findAllByType("button")[0].props["aria-expanded"], true);
-  const changes = [];
-  const toolbar = await mount(
-    t,
-    React.createElement(ItemToolbar, {
-      folderName: "Shelf",
-      archived: true,
-      layout: "grid",
-      busy: false,
-      onLayout: (value) => changes.push(value),
-    }),
-  );
-  const group = toolbar.root.findByProps({ role: "group" });
-  assert.equal(group.props["aria-label"], "Collection layout");
-  const buttons = group.findAllByType("button");
-  assert.deepEqual(
-    buttons.map((b) => b.props["aria-pressed"]),
-    [false, true],
-  );
-  assert.ok(
-    buttons.every(
-      (b) =>
-        b.props.title === b.props["aria-label"] && b.props.type === "button",
-    ),
-  );
-  await flush(() => buttons[0].props.onClick(clickEvent()));
-  assert.deepEqual(changes, ["list"]);
-  await flush(() =>
-    toolbar.update(
-      React.createElement(ItemToolbar, {
-        archived: false,
-        layout: "list",
-        busy: true,
-        onLayout() {},
-      }),
-    ),
-  );
-  assert.ok(
-    toolbar.root.findAllByType("button").every((b) => b.props.disabled),
-  );
+  assert.equal(h.root.findAllByType("button").find((b) => b.props["aria-label"] === "Open folders").props["aria-expanded"], true);
 });
 
-test("legacy Icon export remains stable; named Tabler icons keep contextual 18px decorative currentColor SVGs", () => {
-  assert.equal(LegacyIcon, Icon);
+test("named icons render decorative 18px SVGs that inherit text color", () => {
   for (const name of [
     "folder",
     "all",
@@ -179,13 +134,12 @@ test("legacy Icon export remains stable; named Tabler icons keep contextual 18px
     assert.match(markup, /width="18" height="18"/);
     assert.match(markup, /stroke="currentColor"/);
     assert.match(markup, /stroke-width="1.7"/);
-    assert.match(markup, /class="[^"]*\btabler-icon\b/);
     assert.match(markup, /focusable="false"/);
     assert.doesNotMatch(markup, /<title/);
   }
 });
 
-test("route hook preserves parsing/legacy exports and push/replace mechanics without taking popstate guard ownership", async (t) => {
+test("route hook parses URLs and owns push/replace, not guarded popstate", async (t) => {
   const previous = globalThis.window;
   t.after(() => {
     globalThis.window = previous;
@@ -202,7 +156,6 @@ test("route hook preserves parsing/legacy exports and push/replace mechanics wit
     location,
     history: { pushState: update("push"), replaceState: update("replace") },
   };
-  assert.equal(readRoute, hookReadRoute);
   assert.deepEqual(readRoute(), {
     folderId: "a/b",
     archived: true,

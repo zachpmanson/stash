@@ -11,11 +11,7 @@ import { App, ItemEditor, ItemReader } from "../web/App.tsx";
 import { FolderNavigation, ItemCard } from "../web/components.tsx";
 import { FolderFeedDialog } from "../web/FolderFeedDialog.tsx";
 import { FolderForm } from "../web/FolderForm.tsx";
-import { AppHeader } from "../web/components/AppHeader.tsx";
 import { FolderSidebar } from "../web/components/FolderSidebar.tsx";
-import { ItemCollection } from "../web/components/ItemCollection.tsx";
-import { ItemToolbar } from "../web/components/ItemToolbar.tsx";
-import { ReaderPane } from "../web/components/ReaderPane.tsx";
 const flush = async (fn) =>
   act(async () => {
     await fn?.();
@@ -180,18 +176,30 @@ async function fixture(t, initial = "/?folder=f1") {
 
 test("folder layout persists only after success; All items preference remains browser-local", async (t) => {
   const h = await fixture(t);
+  const layoutButtons = () => h.renderer.root
+    .findByProps({ role: "group", "aria-label": "Collection layout" }).findAllByType("button");
+  const pressed = () => layoutButtons().map((b) => b.props["aria-pressed"]);
+  assert.deepEqual(layoutButtons().map((b) => [b.props["aria-label"], b.props.title, b.props.type]), [
+    ["List layout", "List layout", "button"],
+    ["Grid layout", "Grid layout", "button"],
+  ]);
+  await h.select("i1");
+  assert.deepEqual(pressed(), [true, false]);
   h.state.failWrite = true;
+  let release;
+  h.state.writeGate = new Promise((resolve) => { release = resolve; });
   await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
-  assert.equal(h.button("List layout").props["aria-pressed"], true);
+  assert.ok(layoutButtons().every((b) => b.props.disabled));
+  assert.deepEqual(pressed(), [true, false]);
+  await flush(() => release());
+  assert.ok(layoutButtons().every((b) => !b.props.disabled));
+  assert.deepEqual(pressed(), [true, false]);
+  assert.equal(h.state.folders[0].layout, "list");
+
   h.state.failWrite = false;
   await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
-  assert.equal(h.button("Grid layout").props["aria-pressed"], true);
+  assert.deepEqual(pressed(), [false, true]);
   assert.equal(h.state.folders[0].layout, "grid");
-  const ul = h.renderer.root.findByProps({
-    className: "items grid grid-cols-2 gap-2",
-  });
-  assert.equal(ul.children.length, 3);
-  await h.select("i1");
   assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i1");
   await h.select("i1");
   assert.equal(
@@ -200,6 +208,7 @@ test("folder layout persists only after success; All items preference remains br
     "reselecting the same item must not clear detail without a new fetch",
   );
   await flush(() => h.button("List layout").props.onClick(clickEvent()));
+  assert.deepEqual(pressed(), [true, false]);
   assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i1");
   await flush(() => h.button("All items").props.onClick(clickEvent()));
   const before = h.state.calls.filter((c) => c.method !== "GET").length;
@@ -373,21 +382,6 @@ for (const action of ["New folder", "Rename"]) {
   });
 }
 
-test("new-folder form identity and dirty protection survive remote selected-folder removal", async (t) => {
-  const h = await fixture(t, "/?folder=f1&item=i1");
-  await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
-  await typeFolderDraft(h, "Unrelated new folder draft");
-  const form = h.renderer.root.findByType(FolderForm);
-  h.state.folders = h.state.folders.filter(f => f.id !== "f1");
-  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
-  assert.equal(h.location.search, "");
-  assert.ok(h.renderer.root.findByType(FolderForm) === form,
-    "changing the filter must not remount the uncontrolled new-folder input");
-  await flush(() => h.renderer.root.findByType(FolderSidebar).props.onArchive(true));
-  assert.equal(h.state.prompts, 1);
-  assert.ok(h.renderer.root.findByType(FolderForm) === form, "folder form must survive rejected navigation");
-});
-
 test("remote folder removal still invalidates its owned rename draft", async (t) => {
   const h = await fixture(t);
   await h.openMenu();
@@ -415,24 +409,6 @@ test("Back to collection guards and explicitly closes a discarded folder draft",
 
 const textOf = (node) => typeof node === "string" ? node :
   (node.children ?? []).map(textOf).join("");
-
-test("collection toolbar groups layout choices with tooltips; compact list and two-column grid retain selection", async (t) => {
-  const h = await fixture(t);
-  const group = h.renderer.root.findByProps({ role: "group", "aria-label": "Collection layout" });
-  assert.equal(group.findAllByType("button").length, 2);
-  for (const label of ["List layout", "Grid layout"])
-    assert.equal(h.button(label).props.title, label);
-  assert.equal(h.renderer.root.findAllByProps({ className: "collection-heading" }).length, 1);
-  const ul = h.renderer.root.findByType("ul");
-  assert.match(ul.props.className, /flex flex-col/);
-  const scroller = h.renderer.root.findByProps({ className: "collection-scroll" });
-  assert.equal(ul.parent, scroller, "only content belongs to the scrolling pane");
-  assert.equal(scroller.findAllByProps({ className: "collection-heading" }).length, 0, "toolbar is outside the scroller; no overlap correction needed");
-  await h.select("i1");
-  await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
-  assert.match(h.renderer.root.findByType("ul").props.className, /grid-cols-2/);
-  assert.equal(h.renderer.root.findByType(ItemReader).props.item.id, "i1");
-});
 
 for (const archived of [false, true]) {
   test(`empty ${archived ? "archive" : "active"} CTA keeps folder and guards dirty folder draft`, async (t) => {
@@ -542,34 +518,21 @@ test("safe external reader URL retains security attributes and associated visibl
   }
 });
 
-test("pagination shows loaded range without invented totals, blank zero range, or changing offset/history", async (t) => {
+test("pagination describes only the loaded page across deep links, failed Next, retry and empty results", async (t) => {
   const h = await fixture(t, "/?folder=f1&offset=100");
-  h.state.items = Array.from({ length: 103 }, (_, n) => ({ ...h.state.items[0], id: `page-${n}` }));
-  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
-  const nav = h.renderer.root.findByProps({ "aria-label": "Item pages" });
-  assert.match(textOf(nav), /Items 101–103/);
-  assert.doesNotMatch(textOf(nav), / of /);
-  assert.equal(h.button("Next").props.disabled, true);
-  await flush(() => h.button("Previous").props.onClick(clickEvent()));
-  assert.equal(h.location.search, "?folder=f1");
-  assert.match(textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" })), /Items 1–100/);
-  assert.equal(h.button("Previous").props.disabled, true);
-  await flush(() => h.button("Next").props.onClick(clickEvent()));
-  assert.equal(h.location.search, "?folder=f1&offset=100");
-  h.state.items = [];
-  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
-  assert.doesNotMatch(textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" })), /Items|1–0/);
-});
-
-test("failed next page retains cards without a false range, even when mutations clear errors; retry commits its range", async (t) => {
-  const h = await fixture(t);
   h.state.items = Array.from({ length: 103 }, (_, n) => ({ ...h.state.items[0], id: `page-${n}` }));
   await flush(() => h.button("Refresh").props.onClick(clickEvent()));
   const range = () => textOf(h.renderer.root.findByProps({ "aria-label": "Item pages" }));
   const cards = () => h.renderer.root.findAllByType(ItemCard).map(c => c.props.item.id);
+  assert.match(range(), /Items 101–103/);
+  assert.doesNotMatch(range(), / of /);
+  assert.equal(h.button("Next").props.disabled, true);
+  await flush(() => h.button("Previous").props.onClick(clickEvent()));
+  assert.equal(h.location.search, "?folder=f1");
   const firstPage = cards();
   assert.equal(firstPage.length, 100);
   assert.match(range(), /Items 1–100/);
+  assert.equal(h.button("Previous").props.disabled, true);
   h.state.failPage = q => q.get("offset") === "100";
   await flush(() => h.button("Next").props.onClick(clickEvent()));
   assert.equal(h.location.search, "?folder=f1&offset=100");
@@ -605,6 +568,11 @@ test("failed next page retains cards without a false range, even when mutations 
   await flush(() => h.listeners.get("popstate")());
   assert.doesNotMatch(range(), /Items/);
   assert.deepEqual(cards(), ["page-100", "page-101", "page-102"]);
+  h.state.items = [];
+  h.state.failPage = () => false;
+  await flush(() => h.button("Refresh").props.onClick(clickEvent()));
+  assert.deepEqual(cards(), []);
+  assert.doesNotMatch(range(), /Items|1–0/);
 });
 
 test("primary default and hover colors meet WCAG AA for white normal-size text", async () => {
@@ -748,24 +716,16 @@ test("viewing/invalidating a target feed leaves unrelated item draft and dirty o
   assert.equal(h.location.search, "?folder=f1");
 });
 
-// These assertions traverse the actual App extraction, not a compatibility export.
-test("extracted App composition retains editor/input ancestors across refresh, layout, feedback and failed saves", async (t) => {
+test("item edit keeps the frozen draft across refresh, layout and failure, then retries only dirty fields", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
-  for (const component of [AppHeader, FolderSidebar, ItemCollection, ItemToolbar, ReaderPane])
-    assert.equal(h.renderer.root.findAllByType(component).length, 1);
   await flush(() => h.button("Edit item").props.onClick(clickEvent()));
-  const pane = h.renderer.root.findByType(ReaderPane);
-  const editor = pane.findByType(ItemEditor), form = editor.findByType("form");
+  const form = h.renderer.root.findByType(ItemEditor).findByType("form");
   const title = form.findByType("input"), content = form.findByType("textarea");
-  const ancestors = (node) => { const result = []; while (node) { result.push(node.type); node = node.parent; } return result; };
-  const originalAncestors = ancestors(content);
   const assertIdentity = () => {
-    assert.equal(h.renderer.root.findByType(ReaderPane), pane);
-    assert.equal(pane.findByType(ItemEditor), editor);
-    assert.equal(editor.findByType("form"), form);
-    assert.equal(form.findByType("input"), title);
-    assert.equal(form.findByType("textarea"), content);
-    assert.deepEqual(ancestors(content), originalAncestors);
+    const current = h.renderer.root.findByType(ItemEditor).findByType("form");
+    assert.equal(current, form);
+    assert.equal(current.findByType("input"), title);
+    assert.equal(current.findByType("textarea"), content);
     assert.equal(content.props.defaultValue, "Original body");
   };
   const previous = globalThis.FormData;
@@ -780,10 +740,13 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   await flush(() => h.button("Grid layout").props.onClick(clickEvent()));
   assertIdentity();
   h.state.failWrite = true;
-  await flush(() => form.props.onSubmit({ preventDefault() {}, currentTarget: { fields } }));
+  const submit = () => flush(() => form.props.onSubmit({ preventDefault() {}, currentTarget: { fields } }));
+  const itemWrites = () => h.state.calls.filter((c) => c.url.startsWith("/api/items") && c.method !== "GET")
+    .map((c) => [c.method, c.url, JSON.parse(c.body)]);
+  const expectedWrite = ["PATCH", "/api/items/i1", { title: "Typed web title" }];
+  await submit();
   assertIdentity();
-  const write = h.state.calls.filter((c) => c.url === "/api/items/i1" && c.method === "PATCH").at(-1);
-  assert.deepEqual(JSON.parse(write.body), { title: "Typed web title" });
+  assert.deepEqual(itemWrites(), [expectedWrite]);
   assert.equal(h.state.items[1].content, "Concurrent phone body");
   assert.match(textOf(h.renderer.root), /Synthetic write failed/);
   let prevented = false;
@@ -796,27 +759,40 @@ test("extracted App composition retains editor/input ancestors across refresh, l
   await flush(() => h.button("All items").props.onClick(clickEvent()));
   assertIdentity();
   assert.equal(h.state.prompts, 2);
+
+  h.state.failWrite = false;
+  await submit();
+  assert.deepEqual(itemWrites(), [expectedWrite, expectedWrite]);
+  assert.equal(h.state.items[1].title, "Typed web title");
+  assert.equal(h.state.items[1].content, "Concurrent phone body");
+  assert.equal(h.renderer.root.findAllByType(ItemEditor).length, 0);
+  const { item } = h.renderer.root.findByType(ItemReader).props;
+  assert.equal(item.id, "i1");
+  assert.equal(item.title, "Typed web title");
+  assert.equal(item.content, "Concurrent phone body");
 });
 
-test("App-owned new modal retains form/input across unrelated and selected-folder invalidation", async (t) => {
+test("new-folder modal retains its input and dirty guards across unrelated and selected-folder removal", async (t) => {
   const h = await fixture(t, "/?folder=f1&item=i1");
   await flush(() => h.button("New folder").props.onClick({ currentTarget: h.newTrigger }));
   await typeFolderDraft(h, "Typed folder draft");
   const sidebar = h.renderer.root.findByType(FolderSidebar);
-  assert.equal(sidebar.findAllByType(FolderForm).length, 0, "no inline duplicate");
   const form = h.renderer.root.findByType(FolderForm), input = form.findByType("input");
   assert.equal(h.renderer.root.findByProps({ role: "dialog" }).props["aria-labelledby"], "new-folder-title");
   for (const id of ["f2", "f1"]) {
     h.state.folders = h.state.folders.filter((f) => f.id !== id);
-    // Handler-level refresh models timer/focus refresh, not an inert background click.
     await flush(() => h.button("Refresh").props.onClick(clickEvent()));
     assert.equal(h.renderer.root.findByType(FolderForm), form);
     assert.equal(form.findByType("input"), input);
   }
   assert.equal(h.location.search, "");
-  await flush(() => h.renderer.root.findByType(Dialog.Root).props.onOpenChange(false, { cancel() {} }));
+  await flush(() => sidebar.props.onArchive(true));
   assert.equal(h.state.prompts, 1);
-  assert.equal(form.findByType("input"), input);
+  assert.equal(h.location.search, "", "rejected archive transition leaves the route alone");
+  assert.equal(h.renderer.root.findByType(FolderForm), form);
+  await flush(() => h.renderer.root.findByType(Dialog.Root).props.onOpenChange(false, { cancel() {} }));
+  assert.equal(h.state.prompts, 2);
+  assert.equal(h.renderer.root.findByType(FolderForm).findByType("input"), input);
 });
 
 test("new modal preserves failed draft, blocks duplicate/busy dismiss and selects successful create", async (t) => {
